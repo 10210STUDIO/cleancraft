@@ -161,11 +161,15 @@ pub fn poll(app: &mut CleanApp) -> bool {
                 match (out.result, out.undo) {
                     (_, Some((n, errs))) => {
                         notice = Some(if errs.is_empty() {
-                            (format!("{n} items put back."), false)
+                            (
+                                format!("{} put back.", cleancraft_core::fsutil::items(n)),
+                                false,
+                            )
                         } else {
                             (
                                 format!(
-                                    "{n} items put back, {} could not be: {}",
+                                    "{} put back, {} could not be: {}",
+                                    cleancraft_core::fsutil::items(n),
                                     errs.len(),
                                     errs[0]
                                 ),
@@ -786,8 +790,8 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
         ui.set_width(640.0);
         ui.label(
             RichText::new(format!(
-                "Move {} items ({}) to {dest}?",
-                items.len(),
+                "Move {} ({}) to {dest}?",
+                cleancraft_core::fsutil::items(items.len()),
                 human_size(total)
             ))
             .font(font(18.0, Weight::Bold)),
@@ -846,8 +850,8 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
             .color(t.accent),
     );
     ui.label(format!(
-        "{} items moved. {} skipped.",
-        rep.moved.len(),
+        "{} moved. {} skipped.",
+        cleancraft_core::fsutil::items(rep.moved.len()),
         rep.skipped.len()
     ));
     if !rep.skipped.is_empty() {

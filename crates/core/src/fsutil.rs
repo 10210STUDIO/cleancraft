@@ -183,6 +183,11 @@ pub fn count(n: usize, one: &str, many: &str) -> String {
     }
 }
 
+/// "1 item", "3 items".
+pub fn items(n: usize) -> String {
+    count(n, "item", "items")
+}
+
 /// Decimal units like Finder: 1 KB = 1000 bytes. "Zero KB" for 0. Three significant digits;
 /// a value that rounds up to the next precision or unit is shown there ("1.00 MB", not
 /// "1000 KB"). For files and disks.

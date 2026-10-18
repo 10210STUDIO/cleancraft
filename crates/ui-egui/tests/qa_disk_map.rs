@@ -100,7 +100,7 @@ fn map_drill_select_remove_undo() {
     assert!(!projects.exists());
     click(&mut h, "Undo");
     assert!(projects.exists());
-    assert!(has_text(&h, "1 items put back."));
+    assert!(has_text(&h, "1 item put back."));
     let t = h.state().disk_map.tree().unwrap().clone();
     assert_eq!(t.find(&home).unwrap().size, tree_size(&home).0);
 }

@@ -159,8 +159,8 @@ pub fn run_cmd(env: &Env, cmd: Cmd) -> anyhow::Result<()> {
             }
             let rep = features::run_plan(env, &settings, &plan, &plan.digest(), &mut |_, _| {})?;
             println!(
-                "Moved {} items, {} freed.",
-                rep.moved.len(),
+                "Moved {}, {} freed.",
+                cleancraft_core::fsutil::items(rep.moved.len()),
                 human_size(rep.freed)
             );
             for (p, why) in &rep.skipped {
@@ -174,7 +174,7 @@ pub fn run_cmd(env: &Env, cmd: Cmd) -> anyhow::Result<()> {
                 println!("Put back.");
             } else {
                 let (n, errs) = executor::undo_plan(env, &id);
-                println!("{n} items put back.");
+                println!("{} put back.", cleancraft_core::fsutil::items(n));
                 for (id, e) in errs {
                     println!("{id}: {e}");
                 }

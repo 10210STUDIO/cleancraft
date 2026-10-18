@@ -18,7 +18,6 @@ fn one_cache() -> (FakeMac, std::path::PathBuf) {
 }
 
 #[test]
-#[ignore = "DAT-9: plan page says 'found in 1 items', 'Move 1 items', '1 items moved'"]
 fn one_item_is_singular_on_every_step() {
     let (mac, _) = one_cache();
     let mut h = harness(&mac);

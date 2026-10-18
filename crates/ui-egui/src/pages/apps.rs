@@ -881,12 +881,17 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, action: Action) {
         .and_then(|p| p.file_stem())
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let n = plan.selected_count();
+    let n = cleancraft_core::fsutil::items(plan.selected_count());
     let size = human_size(plan.selected_size());
+    let verb = if plan.selected_count() == 1 {
+        "moves"
+    } else {
+        "move"
+    };
     let headline = match action {
-        Action::Uninstall => format!("Uninstall {name}? {n} items ({size}) move to {dest}."),
-        Action::Reset => format!("Reset {name}? {n} items ({size}) move to {dest}. The app stays."),
-        Action::RemoveFiles => format!("Move {n} items ({size}) to {dest}?"),
+        Action::Uninstall => format!("Uninstall {name}? {n} ({size}) {verb} to {dest}."),
+        Action::Reset => format!("Reset {name}? {n} ({size}) {verb} to {dest}. The app stays."),
+        Action::RemoveFiles => format!("Move {n} ({size}) to {dest}?"),
     };
     let mut go = false;
     let mut close = false;
@@ -963,8 +968,8 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
             .color(t.accent),
     );
     ui.label(format!(
-        "{what}{} items moved. {} skipped.",
-        rep.moved.len(),
+        "{what}{} moved. {} skipped.",
+        cleancraft_core::fsutil::items(rep.moved.len()),
         rep.skipped.len()
     ));
     if !rep.skipped.is_empty() {
@@ -988,10 +993,11 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
             app.act();
             let (n, errs) = executor::undo_plan(&app.env, &rep.plan_id);
             if errs.is_empty() {
-                app.tell(format!("{n} items put back."));
+                app.tell(format!("{} put back.", cleancraft_core::fsutil::items(n)));
             } else {
                 app.warn(format!(
-                    "{n} items put back, {} could not be: {}",
+                    "{} put back, {} could not be: {}",
+                    cleancraft_core::fsutil::items(n),
                     errs.len(),
                     errs[0].1
                 ));

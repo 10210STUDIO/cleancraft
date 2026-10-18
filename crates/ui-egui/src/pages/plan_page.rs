@@ -267,7 +267,13 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                 .font(font(30.0, Weight::Bold))
                 .color(t.accent),
         );
-        ui.label(RichText::new(format!("found in {} items", plan.items.len())).color(t.text_dim));
+        ui.label(
+            RichText::new(format!(
+                "found in {}",
+                cleancraft_core::fsutil::items(plan.items.len())
+            ))
+            .color(t.text_dim),
+        );
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if kit::secondary(ui, &t, "Scan Again") {
                 app.act();
@@ -567,7 +573,11 @@ fn group_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, g: &str) {
                 human_size(freed)
             )
         }
-        _ => format!("{g}: {n} items, {} selected", human_size(freed)),
+        _ => format!(
+            "{g}: {}, {} selected",
+            cleancraft_core::fsutil::items(n),
+            human_size(freed)
+        ),
     };
     ui.horizontal(|ui| {
         ui.set_height(40.0);
@@ -706,8 +716,8 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         ui.set_width(640.0);
         ui.label(
             RichText::new(format!(
-                "Move {} items ({}) to {dest}?",
-                plan.selected_count(),
+                "Move {} ({}) to {dest}?",
+                cleancraft_core::fsutil::items(plan.selected_count()),
                 human_size(plan.selected_size())
             ))
             .font(font(18.0, Weight::Bold)),
@@ -773,8 +783,8 @@ fn done(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             .color(t.accent),
     );
     ui.label(format!(
-        "{} items moved. {} skipped.",
-        rep.moved.len(),
+        "{} moved. {} skipped.",
+        cleancraft_core::fsutil::items(rep.moved.len()),
         rep.skipped.len()
     ));
     if !rep.skipped.is_empty() {
@@ -798,10 +808,11 @@ fn done(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             app.act();
             let (n, errs) = executor::undo_plan(&app.env, &rep.plan_id);
             if errs.is_empty() {
-                app.tell(format!("{n} items put back."));
+                app.tell(format!("{} put back.", cleancraft_core::fsutil::items(n)));
             } else {
                 app.warn(format!(
-                    "{n} items put back, {} could not be: {}",
+                    "{} put back, {} could not be: {}",
+                    cleancraft_core::fsutil::items(n),
                     errs.len(),
                     errs[0].1
                 ));

@@ -108,8 +108,8 @@ pub fn run(env: &Env, cmd: AppsCmd, out: &mut dyn Write) -> anyhow::Result<()> {
             let rep = features::run_plan(env, &settings, &plan, &plan.digest(), &mut |_, _| {})?;
             writeln!(
                 out,
-                "Moved {} items, {} freed.",
-                rep.moved.len(),
+                "Moved {}, {} freed.",
+                cleancraft_core::fsutil::items(rep.moved.len()),
                 human_size(rep.freed)
             )?;
             for (p, why) in &rep.skipped {

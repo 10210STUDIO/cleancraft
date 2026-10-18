@@ -114,7 +114,7 @@ fn tune_up_suggestions_are_counted_and_match_the_tasks_page() {
     click(&mut h, "Quick Sweep");
     click(&mut h, "Scan Again");
     assert_eq!(tile_count(&h, FeatureId::Maintenance), Some(1));
-    assert!(has(&h, "1 suggestions"));
+    assert!(has(&h, "1 suggestion"));
 }
 
 #[test]
