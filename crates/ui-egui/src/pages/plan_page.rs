@@ -641,15 +641,20 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
                     p.items[id].locked = Some("on your ignore list".into());
                 }
             }
-            if ui
-                .small_button("Reveal")
-                .on_hover_text("Show in Finder")
-                .clicked()
+            // Only files and folders on disk can be shown in Finder (Wi-Fi networks and
+            // permissions are listed under a label, not a file).
+            if std::fs::symlink_metadata(&it.path).is_ok()
+                && ui
+                    .small_button("Reveal")
+                    .on_hover_text("Show in Finder")
+                    .clicked()
             {
                 app.act();
                 let path = it.path.to_string_lossy().into_owned();
-                if let Err(e) = app.env.sys.run("/usr/bin/open", &["-R", &path]) {
-                    app.warn(format!("Could not open Finder: {e}"));
+                match app.env.sys.run("/usr/bin/open", &["-R", &path]) {
+                    Ok(out) if out.ok() => {}
+                    Ok(out) => app.warn(format!("Could not open Finder: {}", out.stderr.trim())),
+                    Err(e) => app.warn(format!("Could not open Finder: {e}")),
                 }
             }
             ui.label(RichText::new(human_size(it.size)).font(font(13.0, Weight::SemiBold)));
