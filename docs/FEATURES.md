@@ -34,9 +34,9 @@ Every row is one user-facing capability. CleanCraft aims for feature parity with
 
 | ID | Feature | What it does | Paths / APIs | Risk | Test | Status |
 |---|---|---|---|---|---|---|
-| Q1 | One-button sweep | Runs System Junk, Trash Bins, Mail Downloads, Threat Check (quick), tune-up suggestions, app updates, duplicate downloads; one tile per module with size or count | the module scanners | Low/Med | | PLANNED |
-| Q2 | Tiles with Review and Run | Each tile opens that module's review, or runs it with its safe preselection after one confirmation listing everything | | Low/Med | | PLANNED |
-| Q3 | Skip a tile | Toggle per tile; skipped modules shown dimmed | Settings | Low | | PLANNED |
+| Q1 | One-button sweep | Runs System Junk, Trash Bins, Mail Downloads, Threat Check (quick), tune-up suggestions, app updates, duplicate downloads; one tile per module with size or count | the module scanners | Low/Med | `qa_sweep::tiles_show_each_module_plan`, `qa_sweep::registered_modules_only`, `sweep_run::tiles_match_each_plan`, `sweep_run::registered_sources_skip_missing_modules` | PARTIAL: tiles come from the registered modules among System Junk, Trash Bins, Mail Downloads, Threat Check (only System Junk is registered on this branch; the others are tested with stand-ins and appear by themselves once registered); tune-up suggestions and app updates need one `sweep::count_sources` line from their owners; duplicate downloads not included |
+| Q2 | Tiles with Review and Run | Each tile opens that module's review, or runs it with its safe preselection after one confirmation listing everything | | Low/Med | `qa_sweep::run_lists_everything_moves_exactly_that_and_undo_per_module`, `qa_sweep::review_opens_the_module_with_its_plan`, `qa_sweep::cancel_moves_nothing`, `qa_sweep::file_in_use_is_skipped_and_shown`, `sweep_run::changed_list_and_missing_module_are_refused_others_go_on` | WORKS (System Junk real, other modules by stand-ins; Trash Bins tile opens its page and is not part of Run) |
+| Q3 | Skip a tile | Toggle per tile; skipped modules shown dimmed | Settings | Low | `qa_sweep::include_toggle_skips_a_module_and_is_saved`, `sweep_run::skipped_module_is_not_run` | WORKS (saved as `Settings::sweep_skip`; skipped tiles still scanned, drawn at 45% opacity, left out of Run and the total) |
 
 ## 2. Cleanup
 
@@ -159,13 +159,13 @@ Each task shows what it does, the exact command, whether it needs the administra
 
 | ID | Feature | What | Paths / APIs | Risk | Test | Status |
 |---|---|---|---|---|---|---|
-| R1 | CPU | Load, top apps, uptime | `top -l 1`, `ps -axo pid,%cpu,comm`, `sysctl kern.boottime` | | | PLANNED |
-| R2 | Memory | Used, available, pressure, swap, top apps | `vm_stat`, `sysctl vm.swapusage`, `memory_pressure` | | | PLANNED |
-| R3 | Storage | Free space, Trash size, Free Up (opens Quick Sweep) | `df` | | | PLANNED |
-| R4 | Battery | Charge, state, health, cycles | `pmset -g batt`, `ioreg -rn AppleSmartBattery` | | | PLANNED |
-| R5 | Network | Upload and download speed | `netstat -ib` byte counters | | | PLANNED |
-| R6 | Menu bar presence | Status item with live CPU/RAM, opens monitor and app | tray icon | | | PLANNED |
-| R7 | Alerts | Low free space, heavy memory, large Trash | thresholds in Settings | | | PLANNED |
+| R1 | CPU | Load, top apps, uptime | `top -l 1`, `ps -axo pid,%cpu,comm`, `sysctl kern.boottime` | | `qa_monitor::cards_show_the_parsed_reading`, `monitor_parsers::top_cpu_uses_last_sample`, `monitor_parsers::ps_usage_and_top_lists`, `monitor_sampler::garbage_output_is_unknown` | MAC-CHECK: `top -l 2 -n 0 -s 1`, `ps -axco`, `sysctl` output formats are samples |
+| R2 | Memory | Used, available, pressure, swap, top apps | `vm_stat`, `sysctl vm.swapusage`, `memory_pressure` | | `qa_monitor::cards_show_the_parsed_reading`, `qa_monitor::free_up_ram_*`, `monitor_parsers::vm_stat_memory_like_activity_monitor`, `monitor_sampler::free_up_ram_*` | MAC-CHECK: `vm_stat` and `kern.memorystatus_vm_pressure_level` formats are samples; Free Up RAM runs `purge` through the admin dialog (tested on FakeSys) |
+| R3 | Storage | Free space, Trash size, Free Up (opens Quick Sweep) | `df` | | `qa_monitor::cards_show_the_parsed_reading`, `qa_monitor::trash_without_full_disk_access_says_so`, `qa_monitor::free_up_space_opens_quick_sweep` | MAC-CHECK: `df -Pk` free space excludes APFS purgeable space; Trash size needs Full Disk Access and says so |
+| R4 | Battery | Charge, state, health, cycles | `pmset -g batt`, `ioreg -rn AppleSmartBattery` | | `qa_monitor::cards_show_the_parsed_reading`, `qa_monitor::desktop_mac_shows_no_battery`, `monitor_parsers::pmset_states`, `monitor_parsers::battery_health_both_kinds` | MAC-CHECK: `pmset -g batt` and `ioreg -rn AppleSmartBattery` formats are samples |
+| R5 | Network | Upload and download speed | `netstat -ib` byte counters | | `qa_monitor::network_speed_after_two_readings`, `monitor_parsers::netstat_counters_and_rate` | MAC-CHECK: `netstat -ib` columns are a sample |
+| R6 | Menu bar presence | Status item with live CPU/RAM, opens monitor and app | tray icon | | `monitor_sampler::menu_bar_texts` | PARTIAL: the status item title ("CPU 12% RAM 61%") and menu lines are tested functions in core `monitor`; no status item is shown (needs `tray-icon`, which cannot be compiled for macOS here) |
+| R7 | Alerts | Low free space, heavy memory, large Trash | thresholds in Settings | | `qa_monitor::alerts_appear`, `monitor_sampler::alerts_at_thresholds` | PARTIAL: alerts show on the Live Monitor page; thresholds are constants in core `monitor` (10% or 10 GB free, memory pressure or 90% used, Trash over 5 GB), not Settings; no macOS notifications |
 
 ## 9. App shell
 

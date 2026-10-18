@@ -27,6 +27,8 @@ pub struct Settings {
     pub menu_bar: bool,
     /// Languages to keep when reporting language files (besides English and Base).
     pub keep_languages: Vec<String>,
+    /// Quick Sweep: modules the user turned off (shown dimmed, not run).
+    pub sweep_skip: Vec<crate::plan::FeatureId>,
 }
 
 impl Default for Settings {
@@ -40,6 +42,7 @@ impl Default for Settings {
             agents_may_clean: false,
             menu_bar: true,
             keep_languages: Vec::new(),
+            sweep_skip: Vec::new(),
         }
     }
 }

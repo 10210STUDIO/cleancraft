@@ -48,6 +48,13 @@ pub enum Cmd {
     },
     /// Full Disk Access status.
     Access,
+    /// Live reading: CPU, memory, disk, Trash, battery, network.
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Quick Sweep: scan every cleanup module (looks only) and save their plans.
+    Sweep,
     /// Run the MCP server on stdio (what AI agents launch).
     Serve,
 }
@@ -179,6 +186,13 @@ pub fn run_cmd(env: &Env, cmd: Cmd) -> anyhow::Result<()> {
         Cmd::Access => {
             println!("{:?}", permissions::full_disk_access(env));
         }
+        Cmd::Status { json } => {
+            println!(
+                "{}",
+                crate::cli_monitor::status(env, json, std::time::Duration::from_secs(1))?
+            );
+        }
+        Cmd::Sweep => println!("{}", crate::cli_monitor::sweep(env, &settings)?),
         Cmd::Serve => {
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(async {
