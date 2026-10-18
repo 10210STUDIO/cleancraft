@@ -21,12 +21,26 @@ impl FakeMac {
             .unwrap_or_else(|e| panic!("cannot create temp dir: {e}"));
         let env = Env::fake(dir.path());
         for d in [
-            "Documents", "Desktop", "Downloads", "Pictures", "Movies", "Music", "Library/Caches",
-            "Library/Logs", "Library/Preferences", "Library/Application Support", ".Trash",
+            "Documents",
+            "Desktop",
+            "Downloads",
+            "Pictures",
+            "Movies",
+            "Music",
+            "Library/Caches",
+            "Library/Logs",
+            "Library/Preferences",
+            "Library/Application Support",
+            ".Trash",
         ] {
             let _ = fs::create_dir_all(env.home_path(d));
         }
-        for d in ["/Applications", "/Library/Caches", "/Library/Logs", "/System/Library"] {
+        for d in [
+            "/Applications",
+            "/Library/Caches",
+            "/Library/Logs",
+            "/System/Library",
+        ] {
             let _ = fs::create_dir_all(env.sys_path(d));
         }
         FakeMac { dir, env }
@@ -43,7 +57,10 @@ impl FakeMac {
         m.home_file("Library/Logs/DiagnosticReports/Example-2026.ips", 60_000);
         m.sys_file("/Library/Caches/com.example.updater/pkg", 2_000_000);
         m.sys_file("/Library/Logs/Install.log", 300_000);
-        m.home_file("Library/Developer/Xcode/DerivedData/Demo-abc/Build/x.o", 5_000_000);
+        m.home_file(
+            "Library/Developer/Xcode/DerivedData/Demo-abc/Build/x.o",
+            5_000_000,
+        );
         m.home_file("Documents/report.pdf", 700_000);
         m.home_file("Desktop/notes.txt", 2_000);
         m
@@ -106,7 +123,9 @@ fn write_sized(p: &Path, size: usize) {
     }
     // Non-zero, varied bytes so files are really allocated and not all identical.
     let seed = p.to_string_lossy().len() as u8;
-    let data: Vec<u8> = (0..size).map(|i| (i as u8).wrapping_mul(31).wrapping_add(seed)).collect();
+    let data: Vec<u8> = (0..size)
+        .map(|i| (i as u8).wrapping_mul(31).wrapping_add(seed))
+        .collect();
     let _ = fs::write(p, data);
 }
 

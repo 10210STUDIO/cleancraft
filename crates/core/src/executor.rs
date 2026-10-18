@@ -18,7 +18,9 @@ use crate::fsutil::tree_size;
 use crate::plan::{FeatureId, Plan};
 use crate::policy::{self, Refusal};
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Method {
     /// The Trash of the item's volume (the user's ~/.Trash for the startup disk).
@@ -32,11 +34,22 @@ pub enum Method {
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum ActionKind {
     /// A file or folder moved; undo moves it back.
-    Moved { original: PathBuf, stored: PathBuf, method: Method },
+    Moved {
+        original: PathBuf,
+        stored: PathBuf,
+        method: Method,
+    },
     /// A system command ran (maintenance). There is nothing to put back.
-    Command { command: String, ok: bool, output: String },
+    Command {
+        command: String,
+        ok: bool,
+        output: String,
+    },
     /// A setting changed (a startup item disabled). Undo runs `undo_command`.
-    Toggled { what: String, undo_command: Option<String> },
+    Toggled {
+        what: String,
+        undo_command: Option<String>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -85,7 +98,9 @@ impl std::fmt::Display for SkipReason {
             SkipReason::AppRunning(a) => write!(f, "{a} is running"),
             SkipReason::PermissionDenied => write!(f, "permission denied"),
             SkipReason::DiskFull => write!(f, "the disk is full"),
-            SkipReason::InUseCheckFailed(e) => write!(f, "could not check whether it is in use ({e})"),
+            SkipReason::InUseCheckFailed(e) => {
+                write!(f, "could not check whether it is in use ({e})")
+            }
             SkipReason::Other(e) => write!(f, "{e}"),
         }
     }
@@ -111,8 +126,14 @@ pub enum ExecError {
 impl std::fmt::Display for ExecError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ExecError::DigestMismatch => write!(f, "the list changed after it was confirmed; review it again"),
-            ExecError::Journal(e) => write!(f, "could not write the action log, nothing was removed: {e}"),
+            ExecError::DigestMismatch => write!(
+                f,
+                "the list changed after it was confirmed; review it again"
+            ),
+            ExecError::Journal(e) => write!(
+                f,
+                "could not write the action log, nothing was removed: {e}"
+            ),
         }
     }
 }
@@ -153,7 +174,9 @@ pub fn execute(
         progress(n, total);
         let p = &item.path;
         if let Err(r) = policy::check(env, allow, p) {
-            report.skipped.push((p.clone(), SkipReason::Refused(r.to_string())));
+            report
+                .skipped
+                .push((p.clone(), SkipReason::Refused(r.to_string())));
             continue;
         }
         if fs::symlink_metadata(p).is_err() {
@@ -168,22 +191,32 @@ pub fn execute(
                 }
             }
             Err(e) => {
-                report.skipped.push((p.clone(), SkipReason::InUseCheckFailed(e.to_string())));
+                report
+                    .skipped
+                    .push((p.clone(), SkipReason::InUseCheckFailed(e.to_string())));
                 continue;
             }
         }
         if let Some(app) = running.iter().find(|a| {
             a.path.as_ref().is_some_and(|ap| {
-                let ap = if env.is_fake() { env.sys_path(&ap.to_string_lossy()) } else { ap.clone() };
+                let ap = if env.is_fake() {
+                    env.sys_path(&ap.to_string_lossy())
+                } else {
+                    ap.clone()
+                };
                 p.starts_with(&ap) || ap.starts_with(p)
             })
         }) {
-            report.skipped.push((p.clone(), SkipReason::AppRunning(app.name.clone())));
+            report
+                .skipped
+                .push((p.clone(), SkipReason::AppRunning(app.name.clone())));
             continue;
         }
         match env.fault_for(p) {
             Some(Fault::PermissionDenied) => {
-                report.skipped.push((p.clone(), SkipReason::PermissionDenied));
+                report
+                    .skipped
+                    .push((p.clone(), SkipReason::PermissionDenied));
                 continue;
             }
             Some(Fault::InUse) => {
@@ -215,7 +248,10 @@ pub fn execute(
                 if let Err(e) = append_journal(env, &rec) {
                     // No log line, no removal: put it back.
                     let _ = fs::rename(&stored, p);
-                    report.skipped.push((p.clone(), SkipReason::Other(format!("could not log the action: {e}"))));
+                    report.skipped.push((
+                        p.clone(),
+                        SkipReason::Other(format!("could not log the action: {e}")),
+                    ));
                     continue;
                 }
                 report.freed += size;
@@ -317,7 +353,13 @@ fn move_one(env: &Env, p: &Path, plan_id: &str, method: Method) -> io::Result<(P
 
 fn sanitize(s: &str) -> String {
     s.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -326,7 +368,10 @@ fn ensure_journal(env: &Env) -> io::Result<()> {
         return Err(io::Error::new(io::ErrorKind::StorageFull, "disk full"));
     }
     fs::create_dir_all(env.data_dir())?;
-    OpenOptions::new().create(true).append(true).open(journal_path(env))?;
+    OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(journal_path(env))?;
     Ok(())
 }
 
@@ -342,7 +387,11 @@ pub fn append_journal(env: &Env, rec: &ActionRecord) -> io::Result<()> {
 /// Every recorded action, oldest first. Damaged lines are skipped.
 pub fn history(env: &Env) -> Vec<ActionRecord> {
     fs::read_to_string(journal_path(env))
-        .map(|s| s.lines().filter_map(|l| serde_json::from_str(l).ok()).collect())
+        .map(|s| {
+            s.lines()
+                .filter_map(|l| serde_json::from_str(l).ok())
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -377,7 +426,11 @@ impl std::fmt::Display for UndoError {
             UndoError::AlreadyUndone => write!(f, "already put back"),
             UndoError::NotUndoable => write!(f, "this action cannot be undone"),
             UndoError::OriginalTaken(p) => write!(f, "something is already at {}", p.display()),
-            UndoError::StoredMissing(p) => write!(f, "the removed copy is gone from {} (was the Trash emptied?)", p.display()),
+            UndoError::StoredMissing(p) => write!(
+                f,
+                "the removed copy is gone from {} (was the Trash emptied?)",
+                p.display()
+            ),
             UndoError::Io(e) => write!(f, "{e}"),
         }
     }
@@ -393,7 +446,9 @@ pub fn undo(env: &Env, action_id: &str) -> Result<ActionRecord, UndoError> {
         return Err(UndoError::AlreadyUndone);
     }
     match recs[i].kind.clone() {
-        ActionKind::Moved { original, stored, .. } => {
+        ActionKind::Moved {
+            original, stored, ..
+        } => {
             if !env.contains(&original) || !env.contains(&stored) {
                 return Err(UndoError::Io("path outside the allowed root".into()));
             }
@@ -408,8 +463,14 @@ pub fn undo(env: &Env, action_id: &str) -> Result<ActionRecord, UndoError> {
             }
             fs::rename(&stored, &original).map_err(|e| UndoError::Io(e.to_string()))?;
         }
-        ActionKind::Toggled { undo_command: Some(cmd), .. } => {
-            let out = env.sys.run("/bin/sh", &["-c", &cmd]).map_err(|e| UndoError::Io(e.to_string()))?;
+        ActionKind::Toggled {
+            undo_command: Some(cmd),
+            ..
+        } => {
+            let out = env
+                .sys
+                .run("/bin/sh", &["-c", &cmd])
+                .map_err(|e| UndoError::Io(e.to_string()))?;
             if !out.ok() {
                 return Err(UndoError::Io(out.stderr));
             }

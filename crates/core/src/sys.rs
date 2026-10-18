@@ -80,7 +80,9 @@ impl Sys for RealSys {
     fn open_files(&self) -> io::Result<HashSet<PathBuf>> {
         // -F n: one "n<path>" line per open file; -w: no warnings. lsof exits 1 when some
         // processes cannot be inspected, which is normal without root, so the status is ignored.
-        let out = self.run("/usr/sbin/lsof", &["-F", "n", "-w"]).or_else(|_| self.run("lsof", &["-F", "n", "-w"]))?;
+        let out = self
+            .run("/usr/sbin/lsof", &["-F", "n", "-w"])
+            .or_else(|_| self.run("lsof", &["-F", "n", "-w"]))?;
         Ok(parse_lsof(&out.stdout))
     }
 
@@ -99,7 +101,11 @@ impl Sys for RealSys {
     }
 
     fn open_url(&self, url: &str) -> io::Result<()> {
-        let prog = if self.is_macos() { "/usr/bin/open" } else { "xdg-open" };
+        let prog = if self.is_macos() {
+            "/usr/bin/open"
+        } else {
+            "xdg-open"
+        };
         let out = self.run(prog, &[url])?;
         if out.ok() {
             Ok(())
@@ -262,7 +268,12 @@ impl Sys for FakeSys {
                 .or_else(|| s.answers.get(program))
                 .or_else(|| s.answers.get(&short))
                 .cloned()
-                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("fake: no answer for `{line}`")))
+                .ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::NotFound,
+                        format!("fake: no answer for `{line}`"),
+                    )
+                })
         })
     }
 
@@ -276,7 +287,10 @@ impl Sys for FakeSys {
                     stderr: "User canceled. (-128)".into(),
                 })
             } else {
-                Ok(s.answers.get(&format!("admin:{shell_command}")).cloned().unwrap_or_default())
+                Ok(s.answers
+                    .get(&format!("admin:{shell_command}"))
+                    .cloned()
+                    .unwrap_or_default())
             }
         })
     }
@@ -318,9 +332,13 @@ mod tests {
 
     #[test]
     fn ps_lines() {
-        let apps = parse_ps("  1 /sbin/launchd\n 512 /Applications/Safari.app/Contents/MacOS/Safari\n");
+        let apps =
+            parse_ps("  1 /sbin/launchd\n 512 /Applications/Safari.app/Contents/MacOS/Safari\n");
         assert_eq!(apps[1].name, "Safari");
-        assert_eq!(apps[1].path.as_deref(), Some(Path::new("/Applications/Safari.app")));
+        assert_eq!(
+            apps[1].path.as_deref(),
+            Some(Path::new("/Applications/Safari.app"))
+        );
     }
 
     #[test]

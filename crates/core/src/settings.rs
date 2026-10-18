@@ -59,7 +59,10 @@ impl Settings {
     pub fn save(&self, env: &Env) -> std::io::Result<()> {
         std::fs::create_dir_all(env.data_dir())?;
         let tmp = Self::path(env).with_extension("json.tmp");
-        std::fs::write(&tmp, serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?)?;
+        std::fs::write(
+            &tmp,
+            serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?,
+        )?;
         std::fs::rename(tmp, Self::path(env))
     }
 

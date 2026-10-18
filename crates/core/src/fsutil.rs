@@ -45,7 +45,9 @@ pub fn tree_size(p: &Path) -> (u64, u32) {
 
 /// Number of files (non-directories) in a tree.
 pub fn tree_file_count(p: &Path) -> u64 {
-    let Ok(md) = fs::symlink_metadata(p) else { return 0 };
+    let Ok(md) = fs::symlink_metadata(p) else {
+        return 0;
+    };
     if !md.is_dir() {
         return 1;
     }
@@ -65,7 +67,9 @@ pub fn children(p: &Path) -> Vec<PathBuf> {
 
 /// Every file under `p` (not following links), with metadata. `skip` prunes folders.
 pub fn walk_files(p: &Path, skip: &dyn Fn(&Path) -> bool, out: &mut Vec<(PathBuf, Metadata)>) {
-    let Ok(md) = fs::symlink_metadata(p) else { return };
+    let Ok(md) = fs::symlink_metadata(p) else {
+        return;
+    };
     if skip(p) {
         return;
     }

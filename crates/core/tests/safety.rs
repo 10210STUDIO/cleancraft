@@ -17,7 +17,15 @@ fn junk_plan(m: &FakeMac) -> Plan {
 
 fn run(m: &FakeMac, plan: &Plan) -> executor::Report {
     let allow = allow_roots(&m.env, FeatureId::SystemJunk);
-    execute(&m.env, plan, &allow, &plan.digest(), Method::Trash, &mut |_, _| {}).unwrap()
+    execute(
+        &m.env,
+        plan,
+        &allow,
+        &plan.digest(),
+        Method::Trash,
+        &mut |_, _| {},
+    )
+    .unwrap()
 }
 
 #[test]
@@ -25,7 +33,12 @@ fn scan_lists_exact_sizes_and_never_protected_places() {
     let m = FakeMac::sample();
     let plan = junk_plan(&m);
     for it in &plan.items {
-        assert_eq!(it.size, tree_size(&it.path).0, "size of {}", it.path.display());
+        assert_eq!(
+            it.size,
+            tree_size(&it.path).0,
+            "size of {}",
+            it.path.display()
+        );
         assert!(!it.reason.is_empty());
         let p = it.path.to_string_lossy();
         assert!(!p.contains("/Documents") && !p.contains("/Desktop"), "{p}");
@@ -33,7 +46,10 @@ fn scan_lists_exact_sizes_and_never_protected_places() {
     }
     let browser = m.env.home_path("Library/Caches/com.example.Browser");
     assert!(plan.items.iter().any(|i| i.path == browser));
-    assert_eq!(plan.total_size(), plan.items.iter().map(|i| tree_size(&i.path).0).sum::<u64>());
+    assert_eq!(
+        plan.total_size(),
+        plan.items.iter().map(|i| tree_size(&i.path).0).sum::<u64>()
+    );
 }
 
 #[test]
@@ -50,8 +66,14 @@ fn clean_moves_to_trash_and_undo_restores() {
         assert!(!p.exists(), "{} still there", p.display());
     }
     for rec in &report.moved {
-        let ActionKind::Moved { stored, .. } = &rec.kind else { panic!() };
-        assert!(stored.starts_with(m.env.user_trash()), "{}", stored.display());
+        let ActionKind::Moved { stored, .. } = &rec.kind else {
+            panic!()
+        };
+        assert!(
+            stored.starts_with(m.env.user_trash()),
+            "{}",
+            stored.display()
+        );
         assert!(stored.exists());
     }
     // The log has one line per move.
@@ -65,7 +87,10 @@ fn clean_moves_to_trash_and_undo_restores() {
     }
     assert!(history(&m.env).iter().all(|r| r.undone.is_some()));
     // Undo twice is refused.
-    assert_eq!(undo(&m.env, &report.moved[0].id), Err(UndoError::AlreadyUndone));
+    assert_eq!(
+        undo(&m.env, &report.moved[0].id),
+        Err(UndoError::AlreadyUndone)
+    );
 }
 
 #[test]
@@ -73,10 +98,20 @@ fn quarantine_method() {
     let m = FakeMac::sample();
     let plan = junk_plan(&m);
     let allow = allow_roots(&m.env, FeatureId::SystemJunk);
-    let r = execute(&m.env, &plan, &allow, &plan.digest(), Method::Quarantine, &mut |_, _| {}).unwrap();
+    let r = execute(
+        &m.env,
+        &plan,
+        &allow,
+        &plan.digest(),
+        Method::Quarantine,
+        &mut |_, _| {},
+    )
+    .unwrap();
     assert!(!r.moved.is_empty());
     for rec in &r.moved {
-        let ActionKind::Moved { stored, method, .. } = &rec.kind else { panic!() };
+        let ActionKind::Moved { stored, method, .. } = &rec.kind else {
+            panic!()
+        };
         assert_eq!(*method, Method::Quarantine);
         assert!(stored.starts_with(m.env.quarantine_dir()));
     }
@@ -89,9 +124,19 @@ fn changed_list_is_refused() {
     let digest = plan.digest();
     plan.set_selected(0, !plan.items[0].selected);
     let allow = allow_roots(&m.env, FeatureId::SystemJunk);
-    let r = execute(&m.env, &plan, &allow, &digest, Method::Trash, &mut |_, _| {});
+    let r = execute(
+        &m.env,
+        &plan,
+        &allow,
+        &digest,
+        Method::Trash,
+        &mut |_, _| {},
+    );
     assert!(matches!(r, Err(ExecError::DigestMismatch)));
-    assert!(plan.items.iter().all(|i| i.path.exists()), "nothing may move");
+    assert!(
+        plan.items.iter().all(|i| i.path.exists()),
+        "nothing may move"
+    );
 }
 
 #[test]
@@ -102,10 +147,21 @@ fn forged_items_outside_allow_list_are_refused() {
     let outside = m.home_file("Projects/code.rs", 1000);
     plan.push(doc.clone(), 1, "user_caches", "forged", Risk::Low, true);
     plan.push(outside.clone(), 1, "user_caches", "forged", Risk::Low, true);
-    plan.push(PathBuf::from("/etc/hosts"), 1, "user_caches", "forged", Risk::Low, true);
+    plan.push(
+        PathBuf::from("/etc/hosts"),
+        1,
+        "user_caches",
+        "forged",
+        Risk::Low,
+        true,
+    );
     let r = run(&m, &plan);
     assert!(doc.exists() && outside.exists());
-    let refused: Vec<_> = r.skipped.iter().filter(|(_, s)| matches!(s, SkipReason::Refused(_))).collect();
+    let refused: Vec<_> = r
+        .skipped
+        .iter()
+        .filter(|(_, s)| matches!(s, SkipReason::Refused(_)))
+        .collect();
     assert_eq!(refused.len(), 3, "{:?}", r.skipped);
 }
 
@@ -113,13 +169,19 @@ fn forged_items_outside_allow_list_are_refused() {
 fn open_files_and_running_apps_are_skipped() {
     let m = FakeMac::sample();
     let plan = junk_plan(&m);
-    let open = m.env.home_path("Library/Caches/com.example.Browser/Cache.db");
+    let open = m
+        .env
+        .home_path("Library/Caches/com.example.Browser/Cache.db");
     let sys = m.env.fake_sys().unwrap();
     sys.set_open(&open);
     let r = run(&m, &plan);
     let browser = m.env.home_path("Library/Caches/com.example.Browser");
     assert!(browser.exists());
-    assert!(r.skipped.iter().any(|(p, s)| *p == browser && *s == SkipReason::InUse));
+    assert!(
+        r.skipped
+            .iter()
+            .any(|(p, s)| *p == browser && *s == SkipReason::InUse)
+    );
     assert!(!r.moved.is_empty(), "other items still cleaned");
 
     // An app that is running cannot be moved.
@@ -128,11 +190,28 @@ fn open_files_and_running_apps_are_skipped() {
     let mut plan2 = Plan::new(FeatureId::Uninstaller);
     plan2.push(app.clone(), 1, "apps", "r", Risk::High, true);
     m2.env.fake_sys().unwrap().with(|s| {
-        s.running.push(RunningApp { pid: 9, name: "Editor".into(), bundle_id: None, path: Some(PathBuf::from("/Applications/Editor.app")) })
+        s.running.push(RunningApp {
+            pid: 9,
+            name: "Editor".into(),
+            bundle_id: None,
+            path: Some(PathBuf::from("/Applications/Editor.app")),
+        })
     });
     let allow = vec![m2.env.sys_path("/Applications")];
-    let r2 = execute(&m2.env, &plan2, &allow, &plan2.digest(), Method::Trash, &mut |_, _| {}).unwrap();
-    assert!(matches!(r2.skipped[0].1, SkipReason::AppRunning(_)), "{:?}", r2.skipped);
+    let r2 = execute(
+        &m2.env,
+        &plan2,
+        &allow,
+        &plan2.digest(),
+        Method::Trash,
+        &mut |_, _| {},
+    )
+    .unwrap();
+    assert!(
+        matches!(r2.skipped[0].1, SkipReason::AppRunning(_)),
+        "{:?}",
+        r2.skipped
+    );
     assert!(app.exists());
 }
 
@@ -145,7 +224,10 @@ fn permission_denied_and_disk_full_are_reported() {
     m.env.inject_fault(&browser, Fault::PermissionDenied);
     m.env.inject_fault(&editor, Fault::DiskFull);
     let r = run(&m, &plan);
-    assert!(r.skipped.contains(&(browser.clone(), SkipReason::PermissionDenied)));
+    assert!(
+        r.skipped
+            .contains(&(browser.clone(), SkipReason::PermissionDenied))
+    );
     assert!(r.skipped.contains(&(editor.clone(), SkipReason::DiskFull)));
     assert!(browser.exists() && editor.exists());
 }
@@ -154,9 +236,17 @@ fn permission_denied_and_disk_full_are_reported() {
 fn nothing_moves_when_the_log_cannot_be_written() {
     let m = FakeMac::sample();
     let plan = junk_plan(&m);
-    m.env.inject_fault(&executor::journal_path(&m.env), Fault::DiskFull);
+    m.env
+        .inject_fault(&executor::journal_path(&m.env), Fault::DiskFull);
     let allow = allow_roots(&m.env, FeatureId::SystemJunk);
-    let r = execute(&m.env, &plan, &allow, &plan.digest(), Method::Trash, &mut |_, _| {});
+    let r = execute(
+        &m.env,
+        &plan,
+        &allow,
+        &plan.digest(),
+        Method::Trash,
+        &mut |_, _| {},
+    );
     assert!(matches!(r, Err(ExecError::Journal(_))));
     assert!(plan.items.iter().all(|i| i.path.exists()));
 }
@@ -164,9 +254,14 @@ fn nothing_moves_when_the_log_cannot_be_written() {
 #[test]
 fn locked_system_folders_are_listed_not_selected() {
     let m = FakeMac::sample();
-    m.env.inject_fault(&m.env.sys_path("/Library/Caches"), Fault::PermissionDenied);
+    m.env
+        .inject_fault(&m.env.sys_path("/Library/Caches"), Fault::PermissionDenied);
     let plan = junk_plan(&m);
-    let sys_items: Vec<_> = plan.items.iter().filter(|i| i.category == "system_caches").collect();
+    let sys_items: Vec<_> = plan
+        .items
+        .iter()
+        .filter(|i| i.category == "system_caches")
+        .collect();
     assert!(!sys_items.is_empty());
     assert!(sys_items.iter().all(|i| i.locked.is_some() && !i.selected));
 }
@@ -177,9 +272,14 @@ fn undo_refuses_when_something_took_the_place() {
     let plan = junk_plan(&m);
     let r = run(&m, &plan);
     let rec = &r.moved[0];
-    let ActionKind::Moved { original, .. } = &rec.kind else { panic!() };
+    let ActionKind::Moved { original, .. } = &rec.kind else {
+        panic!()
+    };
     fs::create_dir_all(original).unwrap();
-    assert!(matches!(undo(&m.env, &rec.id), Err(UndoError::OriginalTaken(_))));
+    assert!(matches!(
+        undo(&m.env, &rec.id),
+        Err(UndoError::OriginalTaken(_))
+    ));
 }
 
 #[test]
@@ -196,15 +296,27 @@ fn trash_names_do_not_collide() {
             _ => None,
         })
         .collect();
-    assert!(stored.iter().any(|p| p.ends_with("com.example.Browser 2")), "{stored:?}");
-    assert!(m.env.user_trash().join("com.example.Browser").is_file(), "existing Trash item untouched");
+    assert!(
+        stored.iter().any(|p| p.ends_with("com.example.Browser 2")),
+        "{stored:?}"
+    );
+    assert!(
+        m.env.user_trash().join("com.example.Browser").is_file(),
+        "existing Trash item untouched"
+    );
 }
 
 #[test]
 fn ignore_list_is_honoured() {
     let m = FakeMac::sample();
     let mut s = Settings::default();
-    s.ignore.push(m.env.home_path("Library/Caches/com.example.Browser"));
+    s.ignore
+        .push(m.env.home_path("Library/Caches/com.example.Browser"));
     let plan = features::scan(&m.env, &s, FeatureId::SystemJunk).unwrap();
-    assert!(!plan.items.iter().any(|i| i.path.ends_with("com.example.Browser")));
+    assert!(
+        !plan
+            .items
+            .iter()
+            .any(|i| i.path.ends_with("com.example.Browser"))
+    );
 }

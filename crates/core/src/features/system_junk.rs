@@ -126,8 +126,18 @@ impl Feature for SystemJunk {
                     if size == 0 {
                         continue;
                     }
-                    let name = entry.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                    let id = plan.push(entry.clone(), size, area.category, format!("{}: {name}", area.title), area.risk, area.selected);
+                    let name = entry
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    let id = plan.push(
+                        entry.clone(),
+                        size,
+                        area.category,
+                        format!("{}: {name}", area.title),
+                        area.risk,
+                        area.selected,
+                    );
                     if !writable {
                         plan.lock(id, "Needs administrator rights");
                     }

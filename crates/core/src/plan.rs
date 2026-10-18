@@ -10,7 +10,19 @@ use sha2::{Digest, Sha256};
 use crate::fsutil::human_size;
 
 /// Every CleanCraft feature. The id strings are used by the CLI, MCP tools and settings.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum FeatureId {
     SmartCare,
@@ -95,7 +107,9 @@ impl FeatureId {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Risk {
     /// Rebuilt automatically by macOS or the app (caches, logs).
@@ -180,7 +194,15 @@ impl Plan {
     }
 
     /// Add an item; `selected` is ignored when `locked` is set.
-    pub fn push(&mut self, path: PathBuf, size: u64, category: &str, reason: impl Into<String>, risk: Risk, selected: bool) -> usize {
+    pub fn push(
+        &mut self,
+        path: PathBuf,
+        size: u64,
+        category: &str,
+        reason: impl Into<String>,
+        risk: Risk,
+        selected: bool,
+    ) -> usize {
         let id = self.items.len();
         self.items.push(Item {
             id,
@@ -213,13 +235,19 @@ impl Plan {
     }
 
     pub fn set_category_selected(&mut self, cat: &str, on: bool) {
-        for it in self.items.iter_mut().filter(|i| i.category == cat && i.locked.is_none()) {
+        for it in self
+            .items
+            .iter_mut()
+            .filter(|i| i.category == cat && i.locked.is_none())
+        {
             it.selected = on;
         }
     }
 
     pub fn selected(&self) -> impl Iterator<Item = &Item> {
-        self.items.iter().filter(|i| i.selected && i.locked.is_none())
+        self.items
+            .iter()
+            .filter(|i| i.selected && i.locked.is_none())
     }
 
     pub fn total_size(&self) -> u64 {
@@ -235,7 +263,11 @@ impl Plan {
     }
 
     pub fn category_size(&self, cat: &str) -> u64 {
-        self.items.iter().filter(|i| i.category == cat).map(|i| i.size).sum()
+        self.items
+            .iter()
+            .filter(|i| i.category == cat)
+            .map(|i| i.size)
+            .sum()
     }
 
     pub fn category_count(&self, cat: &str) -> usize {

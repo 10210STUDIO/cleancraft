@@ -99,7 +99,8 @@ impl Env {
 
     /// `~/rel`.
     pub fn home_path(&self, rel: &str) -> PathBuf {
-        self.home.join(rel.trim_start_matches("~/").trim_start_matches('/'))
+        self.home
+            .join(rel.trim_start_matches("~/").trim_start_matches('/'))
     }
 
     /// An absolute macOS path, mapped into the fake root in tests.
@@ -162,23 +163,27 @@ impl Env {
         #[cfg(unix)]
         {
             use std::os::unix::fs::MetadataExt;
-            let Ok(md) = std::fs::metadata(dir) else { return false };
-            let me = std::fs::metadata(&self.home).map(|m| m.uid()).unwrap_or(u32::MAX);
+            let Ok(md) = std::fs::metadata(dir) else {
+                return false;
+            };
+            let me = std::fs::metadata(&self.home)
+                .map(|m| m.uid())
+                .unwrap_or(u32::MAX);
             let mode = md.mode();
             (md.uid() == me && mode & 0o200 != 0) || mode & 0o002 != 0
         }
         #[cfg(not(unix))]
         {
-            std::fs::metadata(dir).map(|m| !m.permissions().readonly()).unwrap_or(false)
+            std::fs::metadata(dir)
+                .map(|m| !m.permissions().readonly())
+                .unwrap_or(false)
         }
     }
 
     /// A fault injected for `p` or one of its ancestors.
     pub fn fault_for(&self, p: &Path) -> Option<Fault> {
         let g = self.faults.lock().ok()?;
-        g.iter()
-            .find(|(k, _)| p.starts_with(k))
-            .map(|(_, f)| *f)
+        g.iter().find(|(k, _)| p.starts_with(k)).map(|(_, f)| *f)
     }
 }
 
@@ -201,8 +206,14 @@ mod tests {
     fn fake_maps_paths() {
         let d = tempfile::tempdir().unwrap();
         let e = Env::fake(d.path());
-        assert_eq!(e.sys_path("/Library/Caches"), d.path().join("Library/Caches"));
-        assert_eq!(e.home_path("~/Library"), d.path().join("Users/tester/Library"));
+        assert_eq!(
+            e.sys_path("/Library/Caches"),
+            d.path().join("Library/Caches")
+        );
+        assert_eq!(
+            e.home_path("~/Library"),
+            d.path().join("Users/tester/Library")
+        );
         assert_eq!(e.display(&e.sys_path("/Library")), "/Library");
         assert!(e.contains(&e.home_path("x")));
         assert!(!e.contains(Path::new("/etc/passwd")));

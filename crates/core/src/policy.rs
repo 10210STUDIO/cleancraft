@@ -31,9 +31,14 @@ impl fmt::Display for Refusal {
             Refusal::OutsideRoot => write!(f, "outside the scanned area"),
             Refusal::NotAbsolute => write!(f, "not an absolute path"),
             Refusal::NotInAllowList => write!(f, "not in a location this feature may clean"),
-            Refusal::IsAllowRoot => write!(f, "a top folder this feature cleans inside, never removed itself"),
+            Refusal::IsAllowRoot => write!(
+                f,
+                "a top folder this feature cleans inside, never removed itself"
+            ),
             Refusal::Protected(why) => write!(f, "protected: {why}"),
-            Refusal::SymlinkOnPath(p) => write!(f, "reached through a symbolic link ({})", p.display()),
+            Refusal::SymlinkOnPath(p) => {
+                write!(f, "reached through a symbolic link ({})", p.display())
+            }
         }
     }
 }
@@ -66,7 +71,10 @@ pub const PROTECTED_HOME: &[(&str, &str)] = &[
     ("Library/CloudStorage", "cloud storage folders"),
     ("Library/Application Support/CloudDocs", "iCloud Drive"),
     ("Library/Keychains", "keychains"),
-    ("Library/Application Support/CleanCraft", "CleanCraft's own data"),
+    (
+        "Library/Application Support/CleanCraft",
+        "CleanCraft's own data",
+    ),
     ("Library/Group Containers/group.com.apple.notes", "Notes"),
     ("Library/Messages", "Messages"),
 ];
@@ -85,7 +93,10 @@ pub fn protected_reason(env: &Env, p: &Path) -> Option<String> {
     }
     for c in p.components() {
         let s = c.as_os_str().to_string_lossy().to_lowercase();
-        if s.ends_with(".photoslibrary") || s.ends_with(".photolibrary") || s.ends_with(".aplibrary") {
+        if s.ends_with(".photoslibrary")
+            || s.ends_with(".photolibrary")
+            || s.ends_with(".aplibrary")
+        {
             return Some("a Photos library".into());
         }
     }
@@ -144,13 +155,31 @@ mod tests {
         let allow = vec![caches.clone()];
         assert_eq!(check(&env, &allow, &caches.join("com.x")), Ok(()));
         assert_eq!(check(&env, &allow, &caches), Err(Refusal::IsAllowRoot));
-        assert_eq!(check(&env, &allow, &env.home_path("Library/Logs/a")), Err(Refusal::NotInAllowList));
-        assert!(matches!(check(&env, &allow, &env.home_path("Documents/a")), Err(Refusal::Protected(_))));
-        assert!(matches!(check(&env, &allow, &env.sys_path("/System/Library/x")), Err(Refusal::Protected(_))));
-        assert_eq!(check(&env, &allow, Path::new("/etc/hosts")), Err(Refusal::OutsideRoot));
-        assert_eq!(check(&env, &allow, &caches.join("../Caches/com.x")), Err(Refusal::NotAbsolute));
+        assert_eq!(
+            check(&env, &allow, &env.home_path("Library/Logs/a")),
+            Err(Refusal::NotInAllowList)
+        );
+        assert!(matches!(
+            check(&env, &allow, &env.home_path("Documents/a")),
+            Err(Refusal::Protected(_))
+        ));
+        assert!(matches!(
+            check(&env, &allow, &env.sys_path("/System/Library/x")),
+            Err(Refusal::Protected(_))
+        ));
+        assert_eq!(
+            check(&env, &allow, Path::new("/etc/hosts")),
+            Err(Refusal::OutsideRoot)
+        );
+        assert_eq!(
+            check(&env, &allow, &caches.join("../Caches/com.x")),
+            Err(Refusal::NotAbsolute)
+        );
         let lib = env.home_path("Pictures/Photos Library.photoslibrary/x");
-        assert!(matches!(check(&env, &[env.home_path("Pictures")], &lib), Err(Refusal::Protected(_))));
+        assert!(matches!(
+            check(&env, &[env.home_path("Pictures")], &lib),
+            Err(Refusal::Protected(_))
+        ));
     }
 
     #[cfg(unix)]

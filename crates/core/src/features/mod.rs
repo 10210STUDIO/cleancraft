@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::env::Env;
+use crate::executor::{self, ExecError, Method, Report};
 use crate::plan::{FeatureId, Plan};
 use crate::policy;
 use crate::settings::Settings;
@@ -44,6 +45,45 @@ pub trait Feature: Send + Sync {
     fn allow_roots(&self, env: &Env) -> Vec<PathBuf>;
     /// Look, never change anything.
     fn scan(&self, ctx: &ScanCtx<'_>) -> anyhow::Result<Plan>;
+    /// Where this feature's items go, when it must not follow the user's setting
+    /// (threats always go to the quarantine).
+    fn method_override(&self) -> Option<Method> {
+        None
+    }
+    /// Work needed right before the confirmed items move, e.g. unloading a launch agent.
+    /// Runs only for the confirmed selection; must log what it does to the journal.
+    fn prepare(&self, _env: &Env, _plan: &Plan) -> anyhow::Result<()> {
+        Ok(())
+    }
+}
+
+/// Carry out a confirmed plan the one way every front end uses: the feature's allow-list,
+/// its method override, its preparation, then the executor.
+pub fn run_plan(
+    env: &Env,
+    settings: &Settings,
+    plan: &Plan,
+    confirmed_digest: &str,
+    progress: &mut dyn FnMut(usize, usize),
+) -> anyhow::Result<Report> {
+    let fid = plan
+        .feature
+        .ok_or_else(|| anyhow::anyhow!("the plan has no feature"))?;
+    let f = get(fid).ok_or_else(|| anyhow::anyhow!("{} has no cleanup", fid.title()))?;
+    if plan.digest() != confirmed_digest {
+        return Err(ExecError::DigestMismatch.into());
+    }
+    let allow = f.allow_roots(env);
+    let method = f.method_override().unwrap_or(settings.method);
+    f.prepare(env, plan)?;
+    Ok(executor::execute(
+        env,
+        plan,
+        &allow,
+        confirmed_digest,
+        method,
+        progress,
+    )?)
 }
 
 /// Every plan-based feature, in sidebar order.
