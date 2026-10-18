@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
 use std::io;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -402,6 +403,11 @@ pub struct RunResult {
 
 pub const CANCELLED_TEXT: &str = "Cancelled, nothing changed";
 
+/// Tune-up tasks may take long (Spotlight reindex, snapshots, scripts): their own time limit,
+/// longer than the default one of [`crate::sys::Sys::run`]. Administrator steps have
+/// [`crate::sys::ADMIN_TIMEOUT`].
+pub const TASK_TIMEOUT: Duration = Duration::from_secs(20 * 60);
+
 /// The administrator dialog was cancelled: `osascript` reports error -128.
 pub fn is_admin_cancel(out: &CmdOut) -> bool {
     !out.ok()
@@ -479,7 +485,7 @@ pub fn run(env: &Env, p: &Prepared) -> RunResult {
         let res = match step {
             Step::Run { program, args } => {
                 let a: Vec<&str> = args.iter().map(String::as_str).collect();
-                env.sys.run(program, &a)
+                env.sys.run_timeout(program, &a, TASK_TIMEOUT)
             }
             Step::Admin { shell } => env.sys.run_admin(shell),
         };
@@ -516,7 +522,11 @@ pub fn run(env: &Env, p: &Prepared) -> RunResult {
             }
             Err(e) => {
                 r.outcome = Outcome::Failed;
-                r.message = format!("Could not start `{}`: {e}", step.display());
+                r.message = if e.kind() == io::ErrorKind::TimedOut {
+                    format!("Failed: {e}")
+                } else {
+                    format!("Could not start `{}`: {e}", step.display())
+                };
                 output.push_str(&e.to_string());
                 break;
             }
