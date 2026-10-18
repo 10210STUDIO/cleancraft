@@ -6,6 +6,7 @@
 
 use cleancraft_core::executor::{self, Report};
 use cleancraft_core::features;
+use cleancraft_core::features::duplicates;
 use cleancraft_core::fsutil::human_size;
 use cleancraft_core::{FeatureId, Plan};
 use egui::{Align, Layout, RichText, Ui};
@@ -368,6 +369,7 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                                 if let Some(p) = app.plan_state(f).plan.as_mut() {
                                     p.set_category_selected(&c.id, on);
                                 }
+                                keep_a_copy(app, f);
                             }
                             let current =
                                 app.plan_state(f).category.as_deref() == Some(c.id.as_str());
@@ -430,6 +432,7 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                             p.set_selected(id, true);
                         }
                     }
+                    keep_a_copy(app, f);
                 }
                 super::extras::results_toolbar(app, ui, f);
                 if ui.button("Select None").clicked() {
@@ -442,20 +445,139 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                     }
                 }
             });
-            let ids = visible_items(app.plan_state(f));
+            let rows = rows(app.plan_state(f));
             kit::card(&t).show(ui, |ui| {
                 ui.set_min_size(egui::vec2(ui.available_width(), avail_h - 76.0));
                 egui::ScrollArea::vertical()
                     .id_salt("items")
                     .max_height(avail_h - 76.0)
-                    .show_rows(ui, 44.0, ids.len(), |ui, range| {
-                        for &id in &ids[range] {
-                            item_row(app, ui, f, &plan, id);
+                    .show_rows(ui, 44.0, rows.len(), |ui, range| {
+                        for row in &rows[range] {
+                            match row {
+                                Row::Item(id) => item_row(app, ui, f, &plan, *id),
+                                Row::Group(g) => group_row(app, ui, f, g),
+                            }
                         }
                     });
             });
         });
     }
+}
+
+/// A line of the item list: a set header (duplicates, look-alike pictures) or an item.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Row {
+    Group(String),
+    Item(usize),
+}
+
+/// The visible items, with a header above each set when items belong to sets. Sets keep the
+/// order of their first item in the sorted list; items without a set come last.
+pub fn rows(st: &PlanState) -> Vec<Row> {
+    let ids = visible_items(st);
+    let Some(plan) = &st.plan else {
+        return Vec::new();
+    };
+    if !ids.iter().any(|i| plan.items[*i].group.is_some()) {
+        return ids.into_iter().map(Row::Item).collect();
+    }
+    let mut order: Vec<String> = Vec::new();
+    let mut sets: std::collections::HashMap<String, Vec<usize>> = Default::default();
+    let mut loose = Vec::new();
+    for id in ids {
+        match &plan.items[id].group {
+            Some(g) => {
+                if !sets.contains_key(g) {
+                    order.push(g.clone());
+                }
+                sets.entry(g.clone()).or_default().push(id);
+            }
+            None => loose.push(id),
+        }
+    }
+    // Sets of copies always get a header; other groupings only when it groups something.
+    let copies = plan.feature.is_some_and(keeps_a_copy);
+    let mut out = Vec::new();
+    for g in order {
+        let ids = sets.remove(&g).unwrap_or_default();
+        if copies || ids.len() > 1 {
+            out.push(Row::Group(g.clone()));
+        }
+        out.extend(ids.into_iter().map(Row::Item));
+    }
+    out.extend(loose.into_iter().map(Row::Item));
+    out
+}
+
+/// Features whose sets are copies of one another: one item per set must always stay.
+/// Other features may use `group` only to show headers (e.g. one set per app).
+pub fn keeps_a_copy(f: FeatureId) -> bool {
+    matches!(f, FeatureId::Duplicates | FeatureId::SimilarPhotos)
+}
+
+/// After a bulk selection: every set keeps one copy (the suggested one).
+fn keep_a_copy(app: &mut CleanApp, f: FeatureId) {
+    if !keeps_a_copy(f) {
+        return;
+    }
+    let env = app.env.clone();
+    let fixed = app
+        .plan_state(f)
+        .plan
+        .as_mut()
+        .map(|p| duplicates::keep_one_per_group(&env, p))
+        .unwrap_or(0);
+    if fixed > 0 {
+        app.tell(format!(
+            "One file in each set stays unselected, so a copy is always kept ({fixed} sets)."
+        ));
+    }
+}
+
+fn group_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, g: &str) {
+    let t = app.t;
+    let Some(plan) = app.plan_state(f).plan.as_ref() else {
+        return;
+    };
+    let members: Vec<_> = plan
+        .items
+        .iter()
+        .filter(|i| i.group.as_deref() == Some(g))
+        .collect();
+    let n = members.len();
+    let kept = members
+        .iter()
+        .filter(|i| !(i.selected && i.locked.is_none()))
+        .count();
+    let freed: u64 = members
+        .iter()
+        .filter(|i| i.selected && i.locked.is_none())
+        .map(|i| i.size)
+        .sum();
+    let text = match f {
+        FeatureId::SimilarPhotos => {
+            format!(
+                "{n} similar pictures: {kept} kept, {} to remove",
+                human_size(freed)
+            )
+        }
+        FeatureId::Duplicates => {
+            format!(
+                "{n} identical files: {kept} kept, {} to remove",
+                human_size(freed)
+            )
+        }
+        _ => format!("{g}: {n} items, {} selected", human_size(freed)),
+    };
+    ui.horizontal(|ui| {
+        ui.set_height(40.0);
+        ui.add_space(2.0);
+        ui.label(
+            RichText::new(text)
+                .font(font(12.5, Weight::SemiBold))
+                .color(t.text_dim),
+        );
+    });
 }
 
 fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usize) {
@@ -478,7 +600,18 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
         let cb = ui.add_enabled(it.locked.is_none(), egui::Checkbox::new(&mut on, &name));
         if cb.changed() {
             app.act();
-            if let Some(p) = app.plan_state(f).plan.as_mut() {
+            let every_copy = on
+                && keeps_a_copy(f)
+                && app
+                    .plan_state(f)
+                    .plan
+                    .as_ref()
+                    .is_some_and(|p| duplicates::would_select_every_copy(p, id));
+            if every_copy {
+                app.warn(
+                    "Keep at least one file in each set. Deselect another copy first, then select this one.",
+                );
+            } else if let Some(p) = app.plan_state(f).plan.as_mut() {
                 p.set_selected(id, on);
             }
         }
