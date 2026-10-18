@@ -396,7 +396,8 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         // Items.
         ui.scope_builder(egui::UiBuilder::new().max_rect(right), |ui| {
             ui.set_clip_rect(right.intersect(ui.clip_rect()));
-            ui.horizontal(|ui| {
+            // Wraps when a module adds its own buttons, so nothing is pushed out of the window.
+            ui.horizontal_wrapped(|ui| {
                 let st = app.plan_state(f);
                 let r = ui.add(
                     egui::TextEdit::singleline(&mut st.search)
@@ -419,6 +420,10 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                     .show_ui(ui, |ui| {
                         ui.selectable_value(&mut sort, Sort::Size, "Sort by size");
                         ui.selectable_value(&mut sort, Sort::Name, "Sort by name");
+                    })
+                    .response
+                    .widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, "Sort")
                     });
                 if sort != app.plan_state(f).sort {
                     app.act();
@@ -446,11 +451,13 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                 }
             });
             let rows = rows(app.plan_state(f));
+            // What is left under the toolbar (one or two lines), minus the card's frame.
+            let list_h = (ui.available_height() - 46.0).max(60.0);
             kit::card(&t).show(ui, |ui| {
-                ui.set_min_size(egui::vec2(ui.available_width(), avail_h - 76.0));
+                ui.set_min_size(egui::vec2(ui.available_width(), list_h));
                 egui::ScrollArea::vertical()
                     .id_salt("items")
-                    .max_height(avail_h - 76.0)
+                    .max_height(list_h)
                     .show_rows(ui, 44.0, rows.len(), |ui, range| {
                         for row in &rows[range] {
                             match row {

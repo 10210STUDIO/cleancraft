@@ -25,12 +25,15 @@ mod common;
 
 use std::collections::{BTreeSet, VecDeque};
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::time::Instant;
+use std::path::{Path, PathBuf};
+use std::time::{Instant, SystemTime};
 
 use cleancraft_core::executor::{self, ActionKind, ActionRecord};
 use cleancraft_core::permissions::Access;
-use cleancraft_core::testkit::FakeMac;
+use cleancraft_core::sys::CmdOut;
+use cleancraft_core::testkit::{FakeMac, age};
 use cleancraft_core::testkit_apps::{AppSpec, FakeMacApps, appcast};
+use cleancraft_core::testkit_files::{ImageFormat, save_scene};
 use cleancraft_core::{FeatureId, Settings, features, testkit_cleanup, testkit_monitor};
 use cleancraft_core::{testkit_perf as tp, updater};
 use common::*;
@@ -171,11 +174,42 @@ fn mac_updates() -> FakeMac {
     mac
 }
 
+/// Large and old files, duplicate sets, look-alike pictures and a disk to map.
 fn mac_files() -> FakeMac {
     let m = FakeMac::sample();
-    m.home_file("Movies/big.mov", 60_000_000);
-    m.home_file("Downloads/a.zip", 300_000);
-    m.home_file("Downloads/copy of a.zip", 300_000);
+    Settings {
+        large_min_bytes: 2_000_000,
+        old_days: 30,
+        ..Default::default()
+    }
+    .save(&m.env)
+    .expect("save settings");
+    m.home_file("Downloads/big.zip", 2_500_000);
+    let old = m.home_file("Downloads/old.pdf", 1_200_000);
+    age(&old, 400);
+    m.home_file("Movies/clip.mov", 3_000_000);
+    let dup: Vec<u8> = (0..300_000u32)
+        .map(|i| (i.wrapping_mul(7919) >> 3) as u8)
+        .collect();
+    for p in ["Downloads/a.bin", "Music/old/a.bin", "Projects/a.bin"] {
+        m.write(&m.env.home_path(p), &dup);
+    }
+    let pics = m.env.home_path("Pictures");
+    save_scene(&pics.join("a.png"), 320, 240, 0, 0, 1, ImageFormat::Png);
+    save_scene(
+        &pics.join("a-bright.png"),
+        400,
+        300,
+        0,
+        5,
+        3,
+        ImageFormat::Png,
+    );
+    save_scene(&pics.join("other.png"), 320, 240, 1, 0, 5, ImageFormat::Png);
+    m.env.fake_sys().unwrap().answer(
+        "df",
+        "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk3s1 488245288 300000000 188245288 62% /\n",
+    );
     base_answers(&m);
     m
 }
@@ -397,11 +431,10 @@ fn controls(ns: &[N], with_sidebar: bool) -> Vec<(Key, N)> {
     out
 }
 
-/// What a state looks like for exploration: the set of its controls (role and label), check
-/// boxes left out so that ticking items does not count as a new state.
+/// What a state looks like for exploration: the set of its controls (role and label). Values
+/// and check marks are left out, so ticking an item or typing does not make a new state.
 fn signature(ctls: &[(Key, N)]) -> BTreeSet<(String, String)> {
     ctls.iter()
-        .filter(|(k, _)| k.role != "CheckBox")
         .map(|(k, _)| (k.role.clone(), k.label.clone()))
         .collect()
 }
@@ -465,8 +498,8 @@ fn bad_texts(ns: &[N]) -> Vec<String> {
 
 #[derive(Clone, Debug)]
 enum Step {
-    /// Click a control (text boxes: type into them).
-    Use(Key),
+    /// Click a control (text boxes: type into them); true: scroll it into view first.
+    Use(Key, bool),
 }
 
 fn inside_window(r: egui::Rect) -> bool {
@@ -475,11 +508,22 @@ fn inside_window(r: egui::Rect) -> bool {
 
 /// Find a control by key, scroll it into view, check it is inside the window, use it.
 fn use_control(h: &mut H, key: &Key, with_sidebar: bool) -> Result<(), String> {
-    let find = |h: &H| controls(&nodes(h), with_sidebar).into_iter().find(|(k, _)| k == key);
+    use_control_with(h, key, with_sidebar, true)
+}
+
+/// `scroll`: bring the control into view first, like a user scrolling a list to it. Without
+/// it the control is clicked where it is drawn (when that is inside the window); scrolling a
+/// long list changes which rows exist, so the test tries in place first.
+fn use_control_with(h: &mut H, key: &Key, with_sidebar: bool, scroll: bool) -> Result<(), String> {
+    let find = |h: &H| {
+        controls(&nodes(h), with_sidebar)
+            .into_iter()
+            .find(|(k, _)| k == key)
+    };
     let Some((_, n)) = find(h) else {
         return Err(format!("{} is gone", key.show()));
     };
-    if !n.rect.is_some_and(inside_window) {
+    if scroll || !n.rect.is_some_and(inside_window) {
         scroll_to(h, key, with_sidebar);
     }
     let Some((_, n)) = find(h) else {
@@ -520,14 +564,188 @@ fn with_node(h: &H, key: &Key, with_sidebar: bool, f: impl FnOnce(&egui_kittest:
     }
 }
 
+/// Click a sidebar row like a user.
+fn nav(h: &mut H, title: &str) -> Result<(), String> {
+    let key = Key {
+        role: "Button".into(),
+        label: title.into(),
+        nth: 0,
+    };
+    use_control(h, &key, true)
+}
+
 struct PageSpec {
     title: &'static str,
     mac: fn() -> FakeMac,
+    /// Run on every copy of the Mac: faults are not part of the copy.
+    post: fn(&FakeMac),
 }
 
-/// A fresh app on a fresh fake Mac, on the page, after `path`.
-fn build(p: &PageSpec, path: &[Step]) -> Result<(FakeMac, H), String> {
-    let mac = (p.mac)();
+fn no_post(_: &FakeMac) {}
+
+fn lock_system(m: &FakeMac) {
+    tp::lock_system_folders(m);
+}
+
+/// One file system entry of the template Mac, with its times taken once at creation.
+struct Entry {
+    rel: PathBuf,
+    kind: Kind,
+    accessed: SystemTime,
+    modified: SystemTime,
+    perms: std::fs::Permissions,
+}
+
+enum Kind {
+    Dir,
+    File,
+    Link(PathBuf),
+}
+
+/// A page's fake Mac, built once; each state starts from a fresh copy of it (building the Mac
+/// from scratch for every click would take most of the test's time).
+struct Template {
+    mac: FakeMac,
+    entries: Vec<Entry>,
+    post: fn(&FakeMac),
+}
+
+impl Template {
+    fn new(p: &PageSpec) -> Template {
+        let mac = (p.mac)();
+        let mut entries = Vec::new();
+        walk(mac.dir.path(), Path::new(""), &mut entries);
+        Template {
+            mac,
+            entries,
+            post: p.post,
+        }
+    }
+
+    /// A new fake Mac with the same files, times, tool answers and running apps.
+    fn copy(&self) -> FakeMac {
+        let m = FakeMac::new();
+        let from_root = self.mac.dir.path();
+        let to_root = m.dir.path();
+        let from = from_root.to_string_lossy().into_owned();
+        let to = to_root.to_string_lossy().into_owned();
+        let remap = |s: &str| s.replace(&from, &to);
+        for e in &self.entries {
+            let dst = to_root.join(&e.rel);
+            match &e.kind {
+                Kind::Dir => {
+                    let _ = std::fs::create_dir_all(&dst);
+                }
+                Kind::File => {
+                    let _ = std::fs::copy(from_root.join(&e.rel), &dst);
+                }
+                Kind::Link(target) => {
+                    let t = PathBuf::from(remap(&target.to_string_lossy()));
+                    let _ = std::os::unix::fs::symlink(t, &dst);
+                }
+            }
+        }
+        // Times last, deepest first, so creating children does not change a folder's time.
+        for e in self.entries.iter().rev() {
+            if matches!(e.kind, Kind::Link(_)) {
+                continue;
+            }
+            let dst = to_root.join(&e.rel);
+            let _ = std::fs::set_permissions(&dst, e.perms.clone());
+            let f = match e.kind {
+                Kind::Dir => std::fs::File::open(&dst),
+                _ => std::fs::File::options().write(true).open(&dst),
+            };
+            if let Ok(f) = f {
+                let _ = f.set_times(
+                    std::fs::FileTimes::new()
+                        .set_accessed(e.accessed)
+                        .set_modified(e.modified),
+                );
+            }
+        }
+        let src = self.mac.env.fake_sys().expect("fake sys");
+        let dst = m.env.fake_sys().expect("fake sys");
+        let (answers, open, running, free, cancelled, macos) = src.with(|s| {
+            (
+                s.answers.clone(),
+                s.open_files.clone(),
+                s.running.clone(),
+                s.free_space,
+                s.admin_cancelled,
+                s.macos,
+            )
+        });
+        dst.with(|d| {
+            d.answers = answers
+                .into_iter()
+                .map(|(k, v)| {
+                    (
+                        remap(&k),
+                        CmdOut {
+                            status: v.status,
+                            stdout: remap(&v.stdout),
+                            stderr: remap(&v.stderr),
+                        },
+                    )
+                })
+                .collect();
+            d.open_files = open
+                .into_iter()
+                .map(|p| PathBuf::from(remap(&p.to_string_lossy())))
+                .collect();
+            d.running = running
+                .into_iter()
+                .map(|mut a| {
+                    a.path = a.path.map(|p| PathBuf::from(remap(&p.to_string_lossy())));
+                    a
+                })
+                .collect();
+            d.free_space = free;
+            d.admin_cancelled = cancelled;
+            d.macos = macos;
+        });
+        (self.post)(&m);
+        m
+    }
+}
+
+fn walk(root: &Path, rel: &Path, out: &mut Vec<Entry>) {
+    let Ok(rd) = std::fs::read_dir(root.join(rel)) else {
+        return;
+    };
+    let mut names: Vec<_> = rd.flatten().map(|e| e.file_name()).collect();
+    names.sort();
+    for name in names {
+        let r = rel.join(&name);
+        let p = root.join(&r);
+        let Ok(md) = std::fs::symlink_metadata(&p) else {
+            continue;
+        };
+        let kind = if md.file_type().is_symlink() {
+            Kind::Link(std::fs::read_link(&p).unwrap_or_default())
+        } else if md.is_dir() {
+            Kind::Dir
+        } else {
+            Kind::File
+        };
+        let is_dir = matches!(kind, Kind::Dir);
+        out.push(Entry {
+            rel: r.clone(),
+            kind,
+            accessed: md.accessed().unwrap_or(SystemTime::UNIX_EPOCH),
+            modified: md.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+            perms: md.permissions(),
+        });
+        if is_dir {
+            walk(root, &r, out);
+        }
+    }
+}
+
+/// A fresh app on a fresh copy of the page's fake Mac, on the page, after `path`.
+fn build(p: &PageSpec, t: &Template, path: &[Step]) -> Result<(FakeMac, H), String> {
+    let mac = t.copy();
     let mut h = harness(&mac);
     // Page tests never show the Full Disk Access banner; the shell test covers it.
     h.state_mut().fda = Access::Granted;
@@ -537,16 +755,12 @@ fn build(p: &PageSpec, path: &[Step]) -> Result<(FakeMac, H), String> {
             let page = p.title.to_lowercase();
             h.state_mut().navigate(&page);
         }
-        t => {
-            h.get_by_label(t).scroll_to_me();
-            steps(&mut h);
-            click(&mut h, t);
-        }
+        t => nav(&mut h, t)?,
     }
     steps(&mut h);
     for s in path {
-        let Step::Use(k) = s;
-        use_control(&mut h, k, false)?;
+        let Step::Use(k, scroll) = s;
+        use_control_with(&mut h, k, false, *scroll)?;
     }
     Ok((mac, h))
 }
@@ -555,6 +769,8 @@ fn build(p: &PageSpec, path: &[Step]) -> Result<(FakeMac, H), String> {
 enum Outcome {
     Works(&'static str),
     Disabled,
+    /// A radio button that is already the chosen one: clicking it changes nothing, as on macOS.
+    AlreadyChosen,
     Inherited,
     Fail(String),
 }
@@ -571,7 +787,7 @@ struct Explored {
     failures: Vec<String>,
 }
 
-const MAX_STATES: usize = 24;
+const MAX_STATES: usize = 40;
 const MAX_DEPTH: usize = 6;
 
 fn path_name(path: &[Step]) -> String {
@@ -579,13 +795,14 @@ fn path_name(path: &[Step]) -> String {
         return "start".into();
     }
     path.iter()
-        .map(|Step::Use(k)| k.show())
+        .map(|Step::Use(k, _)| k.show())
         .collect::<Vec<_>>()
         .join(" > ")
 }
 
 /// Explore a page breadth first and use every control of every state.
 fn explore(p: &PageSpec) -> Explored {
+    let t = Template::new(p);
     let mut rows = Vec::new();
     let mut failures = Vec::new();
     let mut seen: BTreeSet<BTreeSet<(String, String)>> = BTreeSet::new();
@@ -596,15 +813,23 @@ fn explore(p: &PageSpec) -> Explored {
         if states >= MAX_STATES {
             break;
         }
-        let built = catch_unwind(AssertUnwindSafe(|| build(p, &path)));
+        let built = catch_unwind(AssertUnwindSafe(|| build(p, &t, &path)));
         let (_mac, h) = match built {
             Ok(Ok(x)) => x,
             Ok(Err(e)) => {
-                failures.push(format!("{}: {}: cannot rebuild: {e}", p.title, path_name(&path)));
+                failures.push(format!(
+                    "{}: {}: cannot rebuild: {e}",
+                    p.title,
+                    path_name(&path)
+                ));
                 continue;
             }
             Err(_) => {
-                failures.push(format!("{}: {}: panic while rebuilding", p.title, path_name(&path)));
+                failures.push(format!(
+                    "{}: {}: panic while rebuilding",
+                    p.title,
+                    path_name(&path)
+                ));
                 continue;
             }
         };
@@ -637,39 +862,61 @@ fn explore(p: &PageSpec) -> Explored {
                 });
                 continue;
             }
-            let res = catch_unwind(AssertUnwindSafe(|| {
-                let (_mac, mut h) = build(p, &path)?;
-                let before_n = nodes(&h);
-                let before = (h.state().action_count(), tree_text(&before_n));
-                use_control(&mut h, key, false)?;
-                let after_n = nodes(&h);
-                let acted = h.state().action_count() > before.0;
-                let changed = tree_text(&after_n) != before.1;
-                let sig = signature(&controls(&after_n, false));
-                Ok::<_, String>((acted, changed, sig, bad_texts(&after_n)))
-            }));
+            if n.role == Role::RadioButton && n.toggled == "True" {
+                rows.push(Row {
+                    state: state_name.clone(),
+                    key: key.clone(),
+                    outcome: Outcome::AlreadyChosen,
+                });
+                continue;
+            }
+            let attempt = |scroll: bool| {
+                catch_unwind(AssertUnwindSafe(|| {
+                    let (_mac, mut h) = build(p, &t, &path)?;
+                    let before_n = nodes(&h);
+                    let before = (h.state().action_count(), tree_text(&before_n));
+                    use_control_with(&mut h, key, false, scroll)?;
+                    let after_n = nodes(&h);
+                    let acted = h.state().action_count() > before.0;
+                    let changed = tree_text(&after_n) != before.1;
+                    let sig = signature(&controls(&after_n, false));
+                    Ok::<_, String>((acted, changed, sig, bad_texts(&after_n)))
+                }))
+            };
+            let mut scrolled = false;
+            let mut res = attempt(false);
+            if matches!(res, Ok(Ok((false, false, _, _)))) {
+                // Drawn but maybe clipped by its list: scroll to it and try again.
+                scrolled = true;
+                res = attempt(true);
+            }
             let outcome = match res {
                 Err(_) => Outcome::Fail("panic".into()),
                 Ok(Err(e)) => Outcome::Fail(e),
                 Ok(Ok((acted, changed, sig, bad))) => {
                     for b in bad {
-                        failures.push(format!(
-                            "{}: {state_name} > {}: {b}",
-                            p.title,
-                            key.show()
-                        ));
+                        failures.push(format!("{}: {state_name} > {}: {b}", p.title, key.show()));
                     }
                     if path.len() < MAX_DEPTH && !seen.contains(&sig) {
                         seen.insert(sig);
                         let mut next = path.clone();
-                        next.push(Step::Use(key.clone()));
+                        next.push(Step::Use(key.clone(), scrolled));
                         queue.push_back((next, keys.clone()));
                     }
                     match (acted, changed) {
+                        (true, true) if scrolled => {
+                            Outcome::Works("acted, screen changed, after scrolling to it")
+                        }
+                        (true, false) if scrolled => Outcome::Works("acted, after scrolling to it"),
+                        (false, true) if scrolled => {
+                            Outcome::Works("screen changed, after scrolling to it")
+                        }
                         (true, true) => Outcome::Works("acted, screen changed"),
                         (true, false) => Outcome::Works("acted"),
                         (false, true) => Outcome::Works("screen changed"),
-                        (false, false) => Outcome::Fail("nothing happened".into()),
+                        (false, false) => {
+                            Outcome::Fail(format!("nothing happened (at {:?})", n.rect))
+                        }
                     }
                 }
             };
@@ -719,6 +966,7 @@ fn print_table(title: &str, e: &Explored, secs: f32) {
         let res = match &r.outcome {
             Outcome::Works(w) => format!("ok ({w})"),
             Outcome::Disabled => "disabled".into(),
+            Outcome::AlreadyChosen => "already chosen".into(),
             Outcome::Inherited => "inherited".into(),
             Outcome::Fail(w) => format!("FAIL: {w}"),
         };
@@ -745,11 +993,15 @@ fn run_page(p: PageSpec) {
 
 macro_rules! page_test {
     ($name:ident, $title:expr, $mac:expr) => {
+        page_test!($name, $title, $mac, no_post);
+    };
+    ($name:ident, $title:expr, $mac:expr, $post:expr) => {
         #[test]
         fn $name() {
             run_page(PageSpec {
                 title: $title,
                 mac: $mac,
+                post: $post,
             });
         }
     };
@@ -759,18 +1011,16 @@ page_test!(quick_sweep, "Quick Sweep", mac_sweep);
 page_test!(system_junk, "System Junk", mac_junk);
 page_test!(mail_downloads, "Mail Downloads", mac_mail);
 page_test!(trash_bins, "Trash Bins", mac_trash);
-page_test!(threat_check, "Threat Check", mac_startup);
+page_test!(threat_check, "Threat Check", mac_startup, lock_system);
 page_test!(privacy_traces, "Privacy Traces", mac_privacy);
 page_test!(tune_up_tasks, "Tune-up Tasks", mac_tasks);
-page_test!(startup_items, "Startup Items", mac_startup);
+page_test!(startup_items, "Startup Items", mac_startup, lock_system);
 page_test!(app_remover, "App Remover", mac_remover);
 page_test!(app_updates, "App Updates", mac_updates);
 page_test!(live_monitor, "Live Monitor", mac_monitor);
 page_test!(history, "History", mac_history);
 page_test!(settings, "Settings", mac_settings);
 
-// Pages still being built by "files" (Large & Old, Duplicates, Similar Images, Disk Map):
-// run once main has them.
 page_test!(large_old_files, "Large & Old Files", mac_files);
 page_test!(duplicates, "Duplicates", mac_files);
 page_test!(similar_images, "Similar Images", mac_files);
@@ -846,7 +1096,11 @@ fn shell_controls_respond() {
         };
         let r = use_control(&mut h, &k, false);
         let ok = r.is_ok() && h.state().action_count() > before;
-        println!("| banner {} | {} |", k.show(), if ok { "ok" } else { "FAIL" });
+        println!(
+            "| banner {} | {} |",
+            k.show(),
+            if ok { "ok" } else { "FAIL" }
+        );
         if !ok {
             failures.push(format!("banner {label}: {r:?}"));
         }
@@ -889,12 +1143,102 @@ fn every_page_text_follows_the_rules() {
         .chain(["History", "Settings"])
         .collect();
     for t in titles {
-        h.get_by_label(t).scroll_to_me();
-        steps(&mut h);
-        click(&mut h, t);
+        nav(&mut h, t).unwrap();
         for b in bad_texts(&nodes(&h)) {
             bad.push(format!("{t}: {b}"));
         }
     }
     assert!(bad.is_empty(), "{}", bad.join("\n"));
+}
+
+#[test]
+#[ignore]
+fn timing() {
+    let pages: &[(&str, fn() -> FakeMac)] = &[
+        ("Quick Sweep", mac_sweep),
+        ("System Junk", mac_junk),
+        ("Mail Downloads", mac_mail),
+        ("Privacy Traces", mac_privacy),
+        ("Disk Map", mac_files),
+        ("Duplicates", mac_files),
+        ("History", mac_history),
+    ];
+    for (t, f) in pages {
+        let tpl = Template::new(&PageSpec {
+            title: t,
+            mac: *f,
+            post: no_post,
+        });
+        let t0 = Instant::now();
+        let m = tpl.copy();
+        let t1 = t0.elapsed();
+        let mut h = harness(&m);
+        let t2 = t0.elapsed();
+        nav(&mut h, t).unwrap();
+        let t3 = t0.elapsed();
+        steps(&mut h);
+        let t4 = t0.elapsed();
+        println!("{t}: mac {t1:?} harness {t2:?} nav {t3:?} 4 steps {t4:?}");
+    }
+}
+
+/// PAR-1 (fixed): Privacy Traces adds its own buttons to the results toolbar; the toolbar used
+/// to grow past the right edge of the window and push Select None and every row's Ignore and
+/// Reveal buttons out of reach. It now wraps.
+#[test]
+fn results_toolbar_and_rows_fit_the_window() {
+    let mac = mac_privacy();
+    let mut h = harness(&mac);
+    nav(&mut h, "Privacy Traces").unwrap();
+    click(&mut h, "Scan");
+    for label in [
+        "Select None",
+        "Select All",
+        "Wi-Fi Settings",
+        "Reset Permissions",
+    ] {
+        let r = h.get_by_label(label).rect();
+        assert!(inside_window(r), "{label} at {r:?}");
+    }
+    let mut rows = 0;
+    for n in nodes(&h) {
+        if n.role == Role::Button && (n.label == "Ignore" || n.label == "Reveal") {
+            let r = n.rect.unwrap();
+            assert!(r.max.x <= W, "{} at {r:?}", n.label);
+            rows += 1;
+        }
+    }
+    assert!(rows >= 4, "rows shown: {rows}");
+    // Every row's Ignore still works where it is.
+    let before = h.state().settings.ignore.len();
+    click(&mut h, "Select None");
+    common::click_nth(&mut h, "Ignore", 0);
+    assert_eq!(h.state().settings.ignore.len(), before + 1);
+}
+
+/// PAR-2 (fixed): the sort menus had no accessible name (VoiceOver read nothing).
+#[test]
+fn sort_menus_have_a_name() {
+    let mac = mac_junk();
+    let mut h = harness(&mac);
+    nav(&mut h, "System Junk").unwrap();
+    click(&mut h, "Scan");
+    let n = h.get_by_label("Sort");
+    assert_eq!(n.value().as_deref(), Some("Sort by size"));
+    click(&mut h, "Sort");
+    click(&mut h, "Sort by name");
+    assert_eq!(
+        h.state().plans[&FeatureId::SystemJunk].sort,
+        cleancraft_ui_egui::pages::plan_page::Sort::Name
+    );
+    let mac = mac_remover();
+    let mut h = harness(&mac);
+    nav(&mut h, "App Remover").unwrap();
+    assert_eq!(
+        h.get_by_label("Sort").value().as_deref(),
+        Some("Sort by size")
+    );
+    click(&mut h, "Sort");
+    click(&mut h, "Sort by name");
+    assert!(h.get_by_label("Sort").value().as_deref() == Some("Sort by name"));
 }
