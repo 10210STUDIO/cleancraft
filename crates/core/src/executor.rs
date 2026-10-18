@@ -495,12 +495,32 @@ fn free_name_except(dir: &Path, name: &str, is_dir: bool, taken: &HashSet<PathBu
         _ => (name, ""),
     };
     for n in 2.. {
-        let cand = dir.join(format!("{stem} {n}{ext}"));
+        let cand = dir.join(numbered(stem, ext, n));
         if free(&cand) {
             return cand;
         }
     }
     first
+}
+
+/// The longest file name macOS volumes take, in bytes.
+pub const NAME_MAX: usize = 255;
+
+/// "stem n.ext", shortened at the end of the stem (whole characters) to fit [`NAME_MAX`] the
+/// way Finder does with long names; a very long extension is shortened with the stem.
+fn numbered(stem: &str, ext: &str, n: u32) -> String {
+    let (stem, ext) = if ext.len() + 12 > NAME_MAX {
+        (format!("{stem}{ext}"), String::new())
+    } else {
+        (stem.to_string(), ext.to_string())
+    };
+    let tail = format!(" {n}{ext}");
+    let room = NAME_MAX.saturating_sub(tail.len());
+    let mut cut = stem.len().min(room);
+    while !stem.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    format!("{}{tail}", &stem[..cut])
 }
 
 fn move_one(env: &Env, p: &Path, plan_id: &str, method: Method) -> io::Result<(PathBuf, Method)> {

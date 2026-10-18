@@ -246,7 +246,6 @@ fn agent_is_not_stopped_when_its_file_is_not_moved() {
 /// "<name> 2" is too long, the rename fails with "File name too long" and the item is skipped.
 /// It should still go to the Trash (Finder shortens the name) or to the quarantine.
 #[test]
-#[ignore = "REL-9: 255-byte name already in the Trash: 'File name too long', item not moved"]
 fn longest_name_already_in_the_trash_still_moves() {
     let m = FakeMac::new();
     let name = "a".repeat(255);
