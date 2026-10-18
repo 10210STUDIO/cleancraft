@@ -188,13 +188,27 @@ impl Sys for RealSys {
     }
 }
 
+///
+/// `lsof -F n` prints the whole path, spaces and parentheses included ("Invoice (1).pdf").
+/// It may append one note in parentheses after the path, such as " (deleted)". A trailing
+/// " (...)" cannot be told apart from a name that ends that way, so both readings go in the
+/// set: an extra entry only makes CleanCraft more careful (a file looks open), never less.
 pub fn parse_lsof(stdout: &str) -> HashSet<PathBuf> {
-    stdout
+    let mut set = HashSet::new();
+    for p in stdout
         .lines()
         .filter_map(|l| l.strip_prefix('n'))
         .filter(|p| p.starts_with('/'))
-        .map(|p| PathBuf::from(p.split(" (").next().unwrap_or(p)))
-        .collect()
+    {
+        set.insert(PathBuf::from(p));
+        if p.ends_with(')')
+            && let Some(i) = p.rfind(" (")
+            && i > 0
+        {
+            set.insert(PathBuf::from(&p[..i]));
+        }
+    }
+    set
 }
 
 /// `ps -axo pid=,comm=` lines: "  123 /Applications/Safari.app/Contents/MacOS/Safari".
@@ -458,6 +472,9 @@ mod tests {
         let s = parse_lsof("p12\nn/Users/a/x.db\nn/dev/null\nnlocalhost:443\nn/tmp/a (deleted)\n");
         assert!(s.contains(Path::new("/Users/a/x.db")));
         assert!(s.contains(Path::new("/tmp/a")));
+        let s = parse_lsof("p1\nn/Users/a/Invoice (1).pdf\nn/Users/a/My (old) notes.txt\n");
+        assert!(s.contains(Path::new("/Users/a/Invoice (1).pdf")));
+        assert!(s.contains(Path::new("/Users/a/My (old) notes.txt")));
         assert!(!s.iter().any(|p| p.to_string_lossy().contains("localhost")));
     }
 
