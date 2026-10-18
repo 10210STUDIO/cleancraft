@@ -1556,7 +1556,10 @@ mod tests {
         assert!(!program_gone(&env, "/Volumes/Backup/tools/sync"));
         std::fs::create_dir_all(env.sys_path("/Volumes/Backup")).unwrap();
         assert!(program_gone(&env, "/Volumes/Backup/tools/sync"));
-        assert!(program_gone(&env, "/Applications/Gone.app/Contents/MacOS/Gone"));
+        assert!(program_gone(
+            &env,
+            "/Applications/Gone.app/Contents/MacOS/Gone"
+        ));
         assert!(!program_gone(&env, "relative/tool"));
     }
 
