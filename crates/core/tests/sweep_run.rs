@@ -3,108 +3,15 @@
 //! Trash tiles are never run, a failing module does not stop the others, and undo per module.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use cleancraft_core::env::Env;
 use cleancraft_core::executor::undo_plan;
 use cleancraft_core::features::{self, Feature, ScanCtx};
-use cleancraft_core::fsutil::{children, tree_size};
-use cleancraft_core::sweep::{self, CountSource, Sources, TileData};
+use cleancraft_core::fsutil::tree_size;
+use cleancraft_core::sweep::{self, Sources, TileData};
 use cleancraft_core::testkit::FakeMac;
+use cleancraft_core::testkit_monitor::*;
 use cleancraft_core::{FeatureId, Plan, Risk, Settings};
-
-/// A stand-in Mail module for tests, used until the real one is registered: proposes every
-/// entry of `~/Library/Mail Downloads`, the ones named `keep*` unselected.
-struct TestMail;
-
-impl Feature for TestMail {
-    fn id(&self) -> FeatureId {
-        FeatureId::MailAttachments
-    }
-    fn allow_roots(&self, env: &Env) -> Vec<PathBuf> {
-        vec![env.home_path("Library/Mail Downloads")]
-    }
-    fn scan(&self, ctx: &ScanCtx<'_>) -> anyhow::Result<Plan> {
-        let mut p = Plan::new(FeatureId::MailAttachments);
-        p.add_category("dl", "Mail downloads", "Copies of attachments.", Risk::Medium);
-        for c in children(&ctx.env.home_path("Library/Mail Downloads")) {
-            let keep = c.file_name().unwrap().to_string_lossy().starts_with("keep");
-            p.push(
-                c.clone(),
-                tree_size(&c).0,
-                "dl",
-                "attachment copy",
-                Risk::Medium,
-                !keep,
-            );
-        }
-        Ok(p)
-    }
-}
-
-struct Broken;
-
-impl Feature for Broken {
-    fn id(&self) -> FeatureId {
-        FeatureId::Malware
-    }
-    fn allow_roots(&self, _env: &Env) -> Vec<PathBuf> {
-        Vec::new()
-    }
-    fn scan(&self, _ctx: &ScanCtx<'_>) -> anyhow::Result<Plan> {
-        anyhow::bail!("rules could not be loaded")
-    }
-}
-
-/// Trash stand-in: proposes what is in ~/.Trash.
-struct TestTrash;
-
-impl Feature for TestTrash {
-    fn id(&self) -> FeatureId {
-        FeatureId::TrashBins
-    }
-    fn allow_roots(&self, env: &Env) -> Vec<PathBuf> {
-        vec![env.user_trash()]
-    }
-    fn scan(&self, ctx: &ScanCtx<'_>) -> anyhow::Result<Plan> {
-        let mut p = Plan::new(FeatureId::TrashBins);
-        p.add_category("t", "Trash", "In the Trash.", Risk::Low);
-        for c in children(&ctx.env.user_trash()) {
-            p.push(c.clone(), tree_size(&c).0, "t", "in the Trash", Risk::Low, true);
-        }
-        Ok(p)
-    }
-}
-
-fn three_updates(_: &Env, _: &Settings) -> anyhow::Result<usize> {
-    Ok(3)
-}
-
-fn sources() -> Sources {
-    Sources {
-        plans: vec![
-            Arc::from(features::get(FeatureId::SystemJunk).unwrap()),
-            Arc::new(TestTrash),
-            Arc::new(TestMail),
-            Arc::new(Broken),
-        ],
-        counts: vec![CountSource {
-            id: FeatureId::Updater,
-            noun: "updates",
-            count: three_updates,
-        }],
-    }
-}
-
-fn mac() -> FakeMac {
-    let m = FakeMac::sample();
-    m.home_file("Library/Mail Downloads/a/report.pdf", 400_000);
-    m.home_file("Library/Mail Downloads/b.zip", 250_000);
-    m.home_file("Library/Mail Downloads/keep-c.doc", 90_000);
-    m.home_file(".Trash/old.dmg", 800_000);
-    m
-}
 
 fn scan(m: &FakeMac, s: &Sources) -> sweep::SweepResult {
     sweep::scan(
@@ -125,7 +32,7 @@ fn registered_sources_skip_missing_modules() {
     }
     // System Junk is registered in every build.
     assert!(s.feature(FeatureId::SystemJunk).is_some());
-    let m = mac();
+    let m = sweep_mac();
     let r = scan(&m, &s);
     assert_eq!(
         r.tiles.iter().map(|t| t.id).collect::<Vec<_>>(),
@@ -136,8 +43,8 @@ fn registered_sources_skip_missing_modules() {
 
 #[test]
 fn tiles_match_each_plan() {
-    let m = mac();
-    let r = scan(&m, &sources());
+    let m = sweep_mac();
+    let r = scan(&m, &sweep_sources());
     assert_eq!(r.tiles.len(), 5);
     for t in &r.tiles {
         if let TileData::Plan(p) = &t.data {
@@ -182,8 +89,8 @@ fn tiles_match_each_plan() {
 
 #[test]
 fn run_moves_exactly_the_confirmed_files_and_undo_per_module() {
-    let m = mac();
-    let s = sources();
+    let m = sweep_mac();
+    let s = sweep_sources();
     let r = scan(&m, &s);
     let plans: Vec<Plan> = r.to_run(&[]).into_iter().cloned().collect();
     assert_eq!(plans.len(), 2);
@@ -230,8 +137,8 @@ fn run_moves_exactly_the_confirmed_files_and_undo_per_module() {
 
 #[test]
 fn skipped_module_is_not_run() {
-    let m = mac();
-    let r = scan(&m, &sources());
+    let m = sweep_mac();
+    let r = scan(&m, &sweep_sources());
     let plans = r.to_run(&[FeatureId::SystemJunk]);
     assert_eq!(plans.len(), 1);
     assert_eq!(plans[0].feature, Some(FeatureId::MailAttachments));
@@ -239,8 +146,8 @@ fn skipped_module_is_not_run() {
 
 #[test]
 fn changed_list_and_missing_module_are_refused_others_go_on() {
-    let m = mac();
-    let s = sources();
+    let m = sweep_mac();
+    let s = sweep_sources();
     let r = scan(&m, &s);
     let mut junk = r.tile(FeatureId::SystemJunk).unwrap().plan().unwrap().clone();
     let digest = junk.digest();
@@ -262,11 +169,11 @@ fn changed_list_and_missing_module_are_refused_others_go_on() {
 
 #[test]
 fn cancel_stops_between_modules() {
-    let m = mac();
+    let m = sweep_mac();
     let r = sweep::scan(
         &m.env,
         &Settings::default(),
-        &sources(),
+        &sweep_sources(),
         &AtomicBool::new(true),
         &|_| {},
     );
@@ -275,8 +182,8 @@ fn cancel_stops_between_modules() {
 
 #[test]
 fn describe_lines() {
-    let m = mac();
-    let r = scan(&m, &sources());
+    let m = sweep_mac();
+    let r = scan(&m, &sweep_sources());
     let lines: Vec<String> = r.tiles.iter().map(sweep::describe).collect();
     assert!(lines[1].ends_with("(cleaned from its own page)"));
     assert_eq!(lines[4], "App Updates: 3 updates");

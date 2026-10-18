@@ -3,7 +3,17 @@
 //! each is marked SAMPLE and must be compared with a real Mac (hand checks in
 //! docs/agents/reports/monitor.md).
 
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use crate::env::Env;
+use crate::features::{self, Feature, ScanCtx};
+use crate::fsutil::{children, tree_size};
+use crate::plan::{FeatureId, Plan, Risk};
+use crate::settings::Settings;
+use crate::sweep::{CountSource, Sources};
 use crate::sys::{CmdOut, FakeSys};
+use crate::testkit::FakeMac;
 
 // SAMPLE: `sysctl hw.memsize hw.ncpu kern.boottime vm.loadavg vm.swapusage
 // kern.memorystatus_vm_pressure_level` on an Apple silicon Mac.
@@ -144,3 +154,101 @@ pub fn break_tool(fake: &FakeSys, program: &str) {
         },
     );
 }
+
+// Quick Sweep stand-ins.
+
+/// A stand-in Mail module for Quick Sweep tests (the real one is another builder's):
+/// proposes every entry of `~/Library/Mail Downloads`, the ones named `keep*` unselected.
+pub struct TestMail;
+
+impl Feature for TestMail {
+    fn id(&self) -> FeatureId {
+        FeatureId::MailAttachments
+    }
+    fn allow_roots(&self, env: &Env) -> Vec<PathBuf> {
+        vec![env.home_path("Library/Mail Downloads")]
+    }
+    fn scan(&self, ctx: &ScanCtx<'_>) -> anyhow::Result<Plan> {
+        let mut p = Plan::new(FeatureId::MailAttachments);
+        p.add_category("dl", "Mail downloads", "Copies of attachments.", Risk::Medium);
+        for c in children(&ctx.env.home_path("Library/Mail Downloads")) {
+            let keep = c.file_name().unwrap().to_string_lossy().starts_with("keep");
+            p.push(
+                c.clone(),
+                tree_size(&c).0,
+                "dl",
+                "attachment copy",
+                Risk::Medium,
+                !keep,
+            );
+        }
+        Ok(p)
+    }
+}
+
+/// A module whose scan always fails.
+pub struct Broken;
+
+impl Feature for Broken {
+    fn id(&self) -> FeatureId {
+        FeatureId::Malware
+    }
+    fn allow_roots(&self, _env: &Env) -> Vec<PathBuf> {
+        Vec::new()
+    }
+    fn scan(&self, _ctx: &ScanCtx<'_>) -> anyhow::Result<Plan> {
+        anyhow::bail!("rules could not be loaded")
+    }
+}
+
+/// Trash stand-in: proposes what is in ~/.Trash.
+pub struct TestTrash;
+
+impl Feature for TestTrash {
+    fn id(&self) -> FeatureId {
+        FeatureId::TrashBins
+    }
+    fn allow_roots(&self, env: &Env) -> Vec<PathBuf> {
+        vec![env.user_trash()]
+    }
+    fn scan(&self, ctx: &ScanCtx<'_>) -> anyhow::Result<Plan> {
+        let mut p = Plan::new(FeatureId::TrashBins);
+        p.add_category("t", "Trash", "In the Trash.", Risk::Low);
+        for c in children(&ctx.env.user_trash()) {
+            p.push(c.clone(), tree_size(&c).0, "t", "in the Trash", Risk::Low, true);
+        }
+        Ok(p)
+    }
+}
+
+pub fn three_updates(_: &Env, _: &Settings) -> anyhow::Result<usize> {
+    Ok(3)
+}
+
+/// System Junk (real) plus the stand-ins above and an "updates" counter.
+pub fn sweep_sources() -> Sources {
+    Sources {
+        plans: vec![
+            Arc::from(features::get(FeatureId::SystemJunk).unwrap()),
+            Arc::new(TestTrash),
+            Arc::new(TestMail),
+            Arc::new(Broken),
+        ],
+        counts: vec![CountSource {
+            id: FeatureId::Updater,
+            noun: "updates",
+            count: three_updates,
+        }],
+    }
+}
+
+/// The sample Mac plus Mail downloads (two selected, `keep-c.doc` not) and a Trash file.
+pub fn sweep_mac() -> FakeMac {
+    let m = FakeMac::sample();
+    m.home_file("Library/Mail Downloads/a/report.pdf", 400_000);
+    m.home_file("Library/Mail Downloads/b.zip", 250_000);
+    m.home_file("Library/Mail Downloads/keep-c.doc", 90_000);
+    m.home_file(".Trash/old.dmg", 800_000);
+    m
+}
+
