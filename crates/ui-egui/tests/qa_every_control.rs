@@ -502,8 +502,37 @@ enum Step {
     Use(Key, bool),
 }
 
+thread_local! {
+    /// The window size this test thread uses: the default 1280 x 820, or the app's smallest
+    /// window (1060 x 680, `with_min_inner_size` in apps/cleancraft/src/main.rs).
+    static WINDOW: std::cell::Cell<(f32, f32)> = const { std::cell::Cell::new((W, HGT)) };
+}
+
+const MIN_WINDOW: (f32, f32) = (1060.0, 680.0);
+
 fn inside_window(r: egui::Rect) -> bool {
-    r.min.x >= -0.5 && r.min.y >= -0.5 && r.max.x <= W + 0.5 && r.max.y <= HGT + 0.5
+    let (w, hgt) = WINDOW.with(|c| c.get());
+    r.min.x >= -0.5 && r.min.y >= -0.5 && r.max.x <= w + 0.5 && r.max.y <= hgt + 0.5
+}
+
+/// The app on `mac` at this thread's window size.
+fn sized_harness(mac: &FakeMac) -> H {
+    let (w, hgt) = WINDOW.with(|c| c.get());
+    if (w, hgt) == (W, HGT) {
+        return harness(mac);
+    }
+    let app = cleancraft_ui_egui::CleanApp::new(mac.env.clone()).with_sync();
+    let mut h = egui_kittest::Harness::builder()
+        .with_size(egui::vec2(w, hgt))
+        .build_ui_state(
+            |ui, app: &mut cleancraft_ui_egui::CleanApp| {
+                app.logic(&ui.ctx().clone());
+                app.ui(ui);
+            },
+            app,
+        );
+    steps(&mut h);
+    h
 }
 
 /// Find a control by key, scroll it into view, check it is inside the window, use it.
@@ -526,6 +555,39 @@ fn use_control_with(h: &mut H, key: &Key, with_sidebar: bool, scroll: bool) -> R
     if scroll || !n.rect.is_some_and(inside_window) {
         scroll_to(h, key, with_sidebar);
     }
+    let key = &match find(h) {
+        Some(_) => key.clone(),
+        None => {
+            // A long list draws only the rows in view, so after scrolling the same control can
+            // have another position among equal labels: take the last one in view.
+            let same: Vec<Key> = controls(&nodes(h), with_sidebar)
+                .into_iter()
+                .filter(|(k, n)| {
+                    k.role == key.role && k.label == key.label && n.rect.is_some_and(inside_window)
+                })
+                .map(|(k, _)| k)
+                .collect();
+            match same.last() {
+                Some(k) => k.clone(),
+                None => {
+                    let shown: Vec<String> = controls(&nodes(h), with_sidebar)
+                        .iter()
+                        .map(|(k, n)| format!("{} {:?}", k.show(), n.rect))
+                        .collect();
+                    return Err(format!(
+                        "{} is gone after scrolling; shown: {}",
+                        key.show(),
+                        shown.join(", ")
+                    ));
+                }
+            }
+        }
+    };
+    let find = |h: &H| {
+        controls(&nodes(h), with_sidebar)
+            .into_iter()
+            .find(|(k, _)| k == key)
+    };
     let Some((_, n)) = find(h) else {
         return Err(format!("{} is gone after scrolling", key.show()));
     };
@@ -746,7 +808,7 @@ fn walk(root: &Path, rel: &Path, out: &mut Vec<Entry>) {
 /// A fresh app on a fresh copy of the page's fake Mac, on the page, after `path`.
 fn build(p: &PageSpec, t: &Template, path: &[Step]) -> Result<(FakeMac, H), String> {
     let mac = t.copy();
-    let mut h = harness(&mac);
+    let mut h = sized_harness(&mac);
     // Page tests never show the Full Disk Access banner; the shell test covers it.
     h.state_mut().fda = Access::Granted;
     steps(&mut h);
@@ -801,7 +863,7 @@ fn path_name(path: &[Step]) -> String {
 }
 
 /// Explore a page breadth first and use every control of every state.
-fn explore(p: &PageSpec) -> Explored {
+fn explore(p: &PageSpec, max_states: usize) -> Explored {
     let t = Template::new(p);
     let mut rows = Vec::new();
     let mut failures = Vec::new();
@@ -810,7 +872,7 @@ fn explore(p: &PageSpec) -> Explored {
     queue.push_back((Vec::new(), Vec::new()));
     let mut states = 0;
     while let Some((path, parent_keys)) = queue.pop_front() {
-        if states >= MAX_STATES {
+        if states >= max_states {
             break;
         }
         let built = catch_unwind(AssertUnwindSafe(|| build(p, &t, &path)));
@@ -932,7 +994,7 @@ fn explore(p: &PageSpec) -> Explored {
     }
     if !queue.is_empty() {
         println!(
-            "{}: stopped after {MAX_STATES} states, {} more not explored",
+            "{}: stopped after {max_states} states, {} more not explored",
             p.title,
             queue.len()
         );
@@ -979,7 +1041,7 @@ fn print_table(title: &str, e: &Explored, secs: f32) {
 
 fn run_page(p: PageSpec) {
     let t0 = Instant::now();
-    let e = explore(&p);
+    let e = explore(&p, MAX_STATES);
     print_table(p.title, &e, t0.elapsed().as_secs_f32());
     assert!(e.states > 0, "{}: no state could be built", p.title);
     assert!(
@@ -1025,6 +1087,129 @@ page_test!(large_old_files, "Large & Old Files", mac_files);
 page_test!(duplicates, "Duplicates", mac_files);
 page_test!(similar_images, "Similar Images", mac_files);
 page_test!(disk_map, "Disk Map", mac_files);
+
+/// The same walk at the app's smallest window (1060 x 680), fewer states per page: every
+/// control the first screens show must still be reachable and respond.
+#[test]
+fn every_page_at_the_smallest_window() {
+    WINDOW.with(|c| c.set(MIN_WINDOW));
+    let pages: Vec<PageSpec> = vec![
+        PageSpec {
+            title: "Quick Sweep",
+            mac: mac_sweep,
+            post: no_post,
+        },
+        PageSpec {
+            title: "System Junk",
+            mac: mac_junk,
+            post: no_post,
+        },
+        PageSpec {
+            title: "Mail Downloads",
+            mac: mac_mail,
+            post: no_post,
+        },
+        PageSpec {
+            title: "Trash Bins",
+            mac: mac_trash,
+            post: no_post,
+        },
+        PageSpec {
+            title: "Threat Check",
+            mac: mac_startup,
+            post: lock_system,
+        },
+        PageSpec {
+            title: "Privacy Traces",
+            mac: mac_privacy,
+            post: no_post,
+        },
+        PageSpec {
+            title: "Tune-up Tasks",
+            mac: mac_tasks,
+            post: no_post,
+        },
+        PageSpec {
+            title: "Startup Items",
+            mac: mac_startup,
+            post: lock_system,
+        },
+        PageSpec {
+            title: "App Remover",
+            mac: mac_remover,
+            post: no_post,
+        },
+        PageSpec {
+            title: "App Updates",
+            mac: mac_updates,
+            post: no_post,
+        },
+        PageSpec {
+            title: "Large & Old Files",
+            mac: mac_files,
+            post: no_post,
+        },
+        PageSpec {
+            title: "Duplicates",
+            mac: mac_files,
+            post: no_post,
+        },
+        PageSpec {
+            title: "Similar Images",
+            mac: mac_files,
+            post: no_post,
+        },
+        PageSpec {
+            title: "Disk Map",
+            mac: mac_files,
+            post: no_post,
+        },
+        PageSpec {
+            title: "Live Monitor",
+            mac: mac_monitor,
+            post: no_post,
+        },
+        PageSpec {
+            title: "History",
+            mac: mac_history,
+            post: no_post,
+        },
+        PageSpec {
+            title: "Settings",
+            mac: mac_settings,
+            post: no_post,
+        },
+    ];
+    let mut failures = Vec::new();
+    println!("\n== Smallest window 1060 x 680");
+    println!("| Page | States | Controls clicked | Failed |");
+    println!("|---|---|---|---|");
+    let only = std::env::var("QA_PAGE").ok();
+    for p in &pages {
+        if only.as_deref().is_some_and(|o| o != p.title) {
+            continue;
+        }
+        let e = explore(p, 6);
+        let clicked = e
+            .rows
+            .iter()
+            .filter(|r| matches!(r.outcome, Outcome::Works(_) | Outcome::Fail(_)))
+            .count();
+        println!(
+            "| {} | {} | {clicked} | {} |",
+            p.title,
+            e.states,
+            e.failures.len()
+        );
+        failures.extend(e.failures);
+    }
+    assert!(
+        failures.is_empty(),
+        "{} problems:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
 
 /// Every sidebar row is inside the window and opens its page; the Full Disk Access banner's
 /// buttons and the notice's Dismiss respond.
@@ -1241,4 +1426,24 @@ fn sort_menus_have_a_name() {
     click(&mut h, "Sort");
     click(&mut h, "Sort by name");
     assert!(h.get_by_label("Sort").value().as_deref() == Some("Sort by name"));
+}
+
+/// PAR-4 (fixed): egui reports a visible link's text as a plain label, so the Disk Map's
+/// folder names were not announced as links (VoiceOver) and the walk above could not see them.
+#[test]
+fn disk_map_folder_names_are_links_that_open_the_folder() {
+    let mac = mac_files();
+    let mut h = harness(&mac);
+    nav(&mut h, "Disk Map").unwrap();
+    click(&mut h, "Map Home Folder");
+    let before = h.state().disk_map.current.clone();
+    let n = h.get_by_role_and_label(Role::Link, "Downloads");
+    assert!(inside_window(n.rect()), "{:?}", n.rect());
+    n.click();
+    steps(&mut h);
+    assert_ne!(h.state().disk_map.current, before);
+    assert_eq!(
+        h.state().disk_map.current.as_deref(),
+        Some(mac.env.home_path("Downloads").as_path())
+    );
 }
