@@ -50,6 +50,8 @@ pub enum Cmd {
     Access,
     /// Run the MCP server on stdio (what AI agents launch).
     Serve,
+    #[command(flatten)]
+    Apps(crate::cli_apps::AppsCmd),
 }
 
 pub fn run(args: Vec<String>) -> i32 {
@@ -179,6 +181,7 @@ pub fn run_cmd(env: &Env, cmd: Cmd) -> anyhow::Result<()> {
         Cmd::Access => {
             println!("{:?}", permissions::full_disk_access(env));
         }
+        Cmd::Apps(c) => crate::cli_apps::run(env, c, &mut std::io::stdout())?,
         Cmd::Serve => {
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(async {

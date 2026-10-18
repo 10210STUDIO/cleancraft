@@ -6,6 +6,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::todo)]
 
 mod cli;
+mod cli_apps;
 
 use cleancraft_core::Env;
 use cleancraft_ui_egui::CleanApp;
