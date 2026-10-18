@@ -381,14 +381,16 @@ fn dom8_lsof_names_with_parenthesis_are_cut() {
 // DOM-9: two copies of the same app.
 
 #[test]
-#[ignore = "DOM-9: removing an old second copy of an app preselects the settings and data the remaining copy uses"]
 fn dom9_second_copy_of_an_app_takes_the_shared_data() {
     let m = FakeMac::new();
     let env = &m.env;
     m.app("Foo", "com.example.Foo", "2.0");
     let old = m.app("Foo 1.9", "com.example.Foo", "1.9");
     let prefs = m.home_file("Library/Preferences/com.example.Foo.plist", 4_000);
-    let data = m.home_file("Library/Application Support/com.example.Foo/db.sqlite", 90_000);
+    let data = m.home_file(
+        "Library/Application Support/com.example.Foo/db.sqlite",
+        90_000,
+    );
     let plan = uninstaller::uninstall_plan(env, &Settings::default(), &old, false).unwrap();
     let preselected: Vec<&PathBuf> = plan
         .selected()

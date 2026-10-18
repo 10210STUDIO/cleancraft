@@ -166,12 +166,25 @@ pub fn uninstall_plan(
         // password. (/Applications is shared with the admin group, so only the bundle counts.)
         plan.mark_admin(bundle);
     }
+    // Another copy of the same app (same bundle id) keeps using the files named after the id.
+    let twin = all
+        .iter()
+        .find(|a| a.path != app.path && a.bundle_id.eq_ignore_ascii_case(&app.bundle_id));
     for (path, label, conf) in find_leftovers(env, &app, &all) {
         if settings.is_ignored(&path) || policy::check(env, &allow, &path).is_err() {
             continue;
         }
         let size = tree_size(&path).0;
         let (cat, why, sel) = match conf {
+            Confidence::High if twin.is_some() => (
+                CAT_SHARED,
+                format!(
+                    "{label}: named after {}, which {} also uses",
+                    app.bundle_id,
+                    twin.map(|t| env.display(&t.path)).unwrap_or_default()
+                ),
+                false,
+            ),
             Confidence::High => (
                 CAT_HIGH,
                 format!("{label}: named after {}", app.bundle_id),
