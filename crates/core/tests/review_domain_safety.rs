@@ -409,7 +409,6 @@ fn dom9_second_copy_of_an_app_takes_the_shared_data() {
 // DOM-10, DOM-11: the ignore list.
 
 #[test]
-#[ignore = "DOM-10: an app on the ignore list is still offered by App Remover with its bundle preselected"]
 fn dom10_ignored_app_is_still_offered_for_removal() {
     let m = FakeMac::new();
     let env = &m.env;

@@ -211,6 +211,16 @@ pub fn uninstall_plan(
             plan.mark_admin(id);
         }
     }
+    if settings.is_ignored(&app.path) {
+        let why = format!(
+            "{} is on your ignore list (Settings), so CleanCraft does not remove it",
+            app.name
+        );
+        for i in 0..plan.items.len() {
+            plan.lock(i, why.clone());
+        }
+        plan.notes.push(why);
+    }
     if let Some(why) = app_lock(env, &app) {
         for i in 0..plan.items.len() {
             plan.lock(i, why.clone());

@@ -389,7 +389,9 @@ fn remover_page(app: &mut CleanApp, ui: &mut Ui) {
     }
 }
 
-fn visible_apps(st: &State) -> Vec<AppInfo> {
+/// The apps listed: in the chosen group and matching the search, never an app on the ignore
+/// list (Settings): CleanCraft does not offer to remove what the user asked it to leave alone.
+fn visible_apps(st: &State, settings: &cleancraft_core::Settings) -> Vec<AppInfo> {
     let now = now();
     let q = st.search.trim().to_lowercase();
     let mut v: Vec<AppInfo> = st
@@ -397,6 +399,7 @@ fn visible_apps(st: &State) -> Vec<AppInfo> {
         .iter()
         .flatten()
         .filter(|a| st.group.has(a, now))
+        .filter(|a| !settings.is_ignored(&a.path))
         .filter(|a| {
             q.is_empty()
                 || a.name.to_lowercase().contains(&q)
@@ -477,7 +480,7 @@ fn browse(app: &mut CleanApp, ui: &mut Ui) {
         if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
             app.act();
             if app.apps.group.category().is_none()
-                && let Some(first) = visible_apps(&app.apps).first()
+                && let Some(first) = visible_apps(&app.apps, &app.settings).first()
             {
                 let p = first.path.clone();
                 open_app(app, &p);
@@ -559,7 +562,7 @@ fn browse(app: &mut CleanApp, ui: &mut Ui) {
 
 fn apps_list(app: &mut CleanApp, ui: &mut Ui, h: f32) {
     let t = app.t;
-    let rows = visible_apps(&app.apps);
+    let rows = visible_apps(&app.apps, &app.settings);
     if rows.is_empty() {
         ui.label(RichText::new("No apps here.").color(t.text_dim));
         return;
@@ -817,6 +820,21 @@ fn detail(app: &mut CleanApp, ui: &mut Ui) {
                     if kit::secondary(ui, &t, "Check Again") {
                         app.act();
                         rebuild_detail(app, Some(&plan));
+                    }
+                    if !app.settings.is_ignored(&path) {
+                        let ig = ui.add(egui::Button::new("Ignore"));
+                        if ig
+                            .on_hover_text(
+                                "Never offer this app for removal (Settings > Ignore list)",
+                            )
+                            .clicked()
+                        {
+                            app.act();
+                            app.settings.ignore.push(path.clone());
+                            app.save_settings();
+                            app.apps.selected = None;
+                            app.apps.detail = None;
+                        }
                     }
                 });
             });
