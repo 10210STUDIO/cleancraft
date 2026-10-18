@@ -61,6 +61,7 @@ fn edit_saved_plan(env: &Env, plan: &Plan, edit: impl FnOnce(&mut Plan)) -> Stri
 
 /// The steps of the MCP tool `execute_plan` (crates/mcp/src/lib.rs) after its settings check,
 /// copied line for line: load the saved plan, compare the digest, apply `only_items`, run.
+/// (fix2, DOM-5: mcp/lib.rs now narrows with `features::narrow_selection`, replayed here.)
 fn mcp_execute_plan(
     env: &Env,
     plan_id: &str,
@@ -73,13 +74,10 @@ fn mcp_execute_plan(
         return Err("Refused: the digest does not match this plan.".into());
     }
     if let Some(only) = &only_items {
-        for i in 0..plan.items.len() {
-            plan.set_selected(i, only.contains(&i));
-        }
+        features::narrow_selection(&mut plan, only)?;
     }
     let digest = plan.digest();
-    features::run_plan(env, &settings, &plan, &digest, &mut |_, _| {})
-        .map_err(|e| format!("{e:#}"))
+    features::run_plan(env, &settings, &plan, &digest, &mut |_, _| {}).map_err(|e| format!("{e:#}"))
 }
 
 /// `cleancraft clean <id> --yes` (apps/cleancraft/src/cli.rs): load and run with its own digest.
@@ -273,7 +271,6 @@ fn dom4_duplicates_core_check_trusts_the_group_field() {
 // DOM-5: MCP `only_items` is applied after the digest check.
 
 #[test]
-#[ignore = "DOM-5: MCP execute_plan only_items selects items outside the confirmed list (saved passwords) and they move"]
 fn dom5_mcp_only_items_widens_the_confirmed_selection() {
     let m = privacy_mac();
     let env = &m.env;

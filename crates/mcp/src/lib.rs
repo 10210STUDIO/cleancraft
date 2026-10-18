@@ -54,7 +54,8 @@ pub struct ExecuteArgs {
     pub plan_id: String,
     /// The digest scan returned for this plan.
     pub digest: String,
-    /// Optional: only these item ids (from the plan). Default: the plan's own selection.
+    /// Optional: only these item ids, all from the plan's confirmed selection (the list the
+    /// digest stands for); anything else is refused. Default: the whole confirmed selection.
     pub only_items: Option<Vec<usize>>,
 }
 
@@ -164,10 +165,9 @@ impl CleanCraftMcp {
         if plan.digest() != a.digest {
             return Err("Refused: the digest does not match this plan. Scan again and show the user the new list.".into());
         }
+        // The digest above is the confirmed list; only_items may only leave items out of it.
         if let Some(only) = &a.only_items {
-            for i in 0..plan.items.len() {
-                plan.set_selected(i, only.contains(&i));
-            }
+            features::narrow_selection(&mut plan, only)?;
         }
         let digest = plan.digest();
         let rep = features::run_plan(&self.env, &settings, &plan, &digest, &mut |_, _| {})
