@@ -898,11 +898,7 @@ impl Scanner<'_, '_> {
             let Some(prog) = agent_program(&v) else {
                 continue;
             };
-            if !prog.starts_with('/') {
-                continue;
-            }
-            let target = self.env().sys_path(&prog);
-            if std::fs::symlink_metadata(&target).is_ok() {
+            if !program_gone(self.env(), &prog) {
                 continue;
             }
             let label = v
@@ -1261,6 +1257,25 @@ fn kept_name(n: &std::ffi::OsStr) -> bool {
             .any(|k| policy::same_name(n, std::ffi::OsStr::new(k)))
 }
 
+/// Is the program a launch agent starts really gone? An absolute path that does not exist,
+/// on a disk that is connected: a program on `/Volumes/<disk>/...` while that disk is not
+/// mounted is only unavailable, not gone.
+pub fn program_gone(env: &Env, prog: &str) -> bool {
+    if !prog.starts_with('/') {
+        return false;
+    }
+    let mut parts = Path::new(prog).components().skip(1);
+    if let (Some(first), Some(disk)) = (parts.next(), parts.next())
+        && first.as_os_str() == "Volumes"
+    {
+        let mount = env.sys_path("/Volumes").join(disk.as_os_str());
+        if std::fs::symlink_metadata(&mount).is_err() {
+            return false;
+        }
+    }
+    std::fs::symlink_metadata(env.sys_path(prog)).is_err()
+}
+
 /// See [`SystemJunk`]'s `validate`. `allow` is the feature's allow-list.
 pub fn validate_item(env: &Env, allow: &[PathBuf], p: &Path) -> Result<(), String> {
     // The deepest allow-list folder holding the item (the fence refuses items outside it).
@@ -1334,9 +1349,7 @@ pub fn validate_item(env: &Env, allow: &[PathBuf], p: &Path) -> Result<(), Strin
                 .ok()
                 .as_ref()
                 .and_then(agent_program)
-                .is_some_and(|prog| {
-                    prog.starts_with('/') && std::fs::symlink_metadata(env.sys_path(&prog)).is_err()
-                });
+                .is_some_and(|prog| program_gone(env, &prog));
         if !broken {
             return Err("only startup agents whose program is gone are removed".into());
         }
@@ -1535,6 +1548,17 @@ pub fn ollama_models(models: &Path) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn program_on_an_unplugged_disk_is_not_gone() {
+        let d = tempfile::tempdir().unwrap();
+        let env = Env::fake(d.path());
+        assert!(!program_gone(&env, "/Volumes/Backup/tools/sync"));
+        std::fs::create_dir_all(env.sys_path("/Volumes/Backup")).unwrap();
+        assert!(program_gone(&env, "/Volumes/Backup/tools/sync"));
+        assert!(program_gone(&env, "/Applications/Gone.app/Contents/MacOS/Gone"));
+        assert!(!program_gone(&env, "relative/tool"));
+    }
 
     #[test]
     fn languages() {

@@ -443,6 +443,32 @@ fn dom11_ignore_entry_in_other_case_is_not_honoured() {
 }
 
 // ----------------------------------------------------------------------------------------
+// DOM-12: "broken" startup items whose program is on a disk that is not connected.
+
+#[test]
+fn dom12_agent_on_unplugged_disk_is_not_broken() {
+    let m = FakeMac::new();
+    let env = &m.env;
+    let plist = env.home_path("Library/LaunchAgents/com.example.backup-sync.plist");
+    m.write(
+        &plist,
+        cleancraft_core::testkit_perf::launch_plist(
+            "com.example.backup-sync",
+            "/Volumes/Backup/tools/sync",
+            true,
+        )
+        .as_bytes(),
+    );
+    let plan = features::scan(env, &Settings::default(), FeatureId::SystemJunk).unwrap();
+    let it = plan.items.iter().find(|i| i.path == plist);
+    assert!(
+        it.is_none_or(|i| !i.selected),
+        "preselected as broken although /Volumes/Backup is only unplugged: {:?}",
+        it.map(|i| &i.reason)
+    );
+}
+
+// ----------------------------------------------------------------------------------------
 // Checked and found right.
 
 #[test]
