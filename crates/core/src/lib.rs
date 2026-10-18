@@ -17,6 +17,7 @@ pub mod settings;
 pub mod space;
 pub mod sys;
 pub mod testkit;
+pub mod testkit_files;
 
 pub use env::{Env, Fault};
 pub use executor::{ActionKind, ActionRecord, Method, Report, SkipReason};

@@ -498,7 +498,12 @@ pub fn rows(st: &PlanState) -> Vec<Row> {
     let mut out = Vec::new();
     for g in order {
         out.push(Row::Group(g.clone()));
-        out.extend(sets.remove(&g).unwrap_or_default().into_iter().map(Row::Item));
+        out.extend(
+            sets.remove(&g)
+                .unwrap_or_default()
+                .into_iter()
+                .map(Row::Item),
+        );
     }
     out.extend(loose.into_iter().map(Row::Item));
     out

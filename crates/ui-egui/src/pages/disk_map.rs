@@ -354,9 +354,7 @@ fn storage_bar(app: &mut CleanApp, ui: &mut Ui) {
         ui.horizontal(|ui| {
             ui.label(RichText::new(text).font(font(13.0, Weight::SemiBold)));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.label(
-                    RichText::new(format!("Selected: {}", human_size(sel))).color(t.warning),
-                );
+                ui.label(RichText::new(format!("Selected: {}", human_size(sel))).color(t.warning));
             });
         });
         if let (Some(u), Some(tot)) = (d.used, d.total)
@@ -446,10 +444,7 @@ fn open_folder(app: &mut CleanApp, p: PathBuf) {
 fn toggle(app: &mut CleanApp, p: &Path, on: bool) {
     app.act();
     if let Some(why) = lock_reason(&app.env, p) {
-        app.warn(format!(
-            "{} cannot be selected: {why}.",
-            app.env.display(p)
-        ));
+        app.warn(format!("{} cannot be selected: {why}.", app.env.display(p)));
         return;
     }
     if on {
@@ -469,7 +464,10 @@ fn map(app: &mut CleanApp, ui: &mut Ui) {
     // Navigation row.
     ui.horizontal(|ui| {
         let can_back = node.path != root;
-        if ui.add_enabled(can_back, egui::Button::new("Back")).clicked() {
+        if ui
+            .add_enabled(can_back, egui::Button::new("Back"))
+            .clicked()
+        {
             open_folder(app, node.path.parent().unwrap_or(&root).to_path_buf());
         }
         // Breadcrumbs from the mapped folder down to the current one.
@@ -734,10 +732,8 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                         ui.set_height(30.0);
                         let was = app.disk_map.selected.contains(&c.path);
                         let mut on = was;
-                        let cb = ui.add_enabled(
-                            locked.is_none(),
-                            egui::Checkbox::without_text(&mut on),
-                        );
+                        let cb =
+                            ui.add_enabled(locked.is_none(), egui::Checkbox::without_text(&mut on));
                         let label = format!("Select {}", c.name);
                         cb.widget_info(|| {
                             egui::WidgetInfo::selected(
@@ -770,7 +766,8 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                         }
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             ui.label(
-                                RichText::new(human_size(c.size)).font(font(13.0, Weight::SemiBold)),
+                                RichText::new(human_size(c.size))
+                                    .font(font(13.0, Weight::SemiBold)),
                             );
                         });
                     });
