@@ -70,6 +70,7 @@ impl Env {
         let home = root.join("Users/tester");
         let data_dir = home.join("Library/Application Support/CleanCraft");
         let fake = Arc::new(FakeSys::new());
+        fake.with(|s| s.root = Some(root.clone()));
         Env {
             home,
             root,

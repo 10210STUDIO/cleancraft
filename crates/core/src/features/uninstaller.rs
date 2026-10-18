@@ -161,6 +161,10 @@ pub fn uninstall_plan(
     );
     if reset {
         plan.lock(bundle, "Kept: a reset keeps the app");
+    } else if !env.can_modify(&app.path) {
+        // Installed by a package: owned by the system, so it moves with the administrator
+        // password. (/Applications is shared with the admin group, so only the bundle counts.)
+        plan.mark_admin(bundle);
     }
     for (path, label, conf) in find_leftovers(env, &app, &all) {
         if settings.is_ignored(&path) || policy::check(env, &allow, &path).is_err() {
@@ -191,7 +195,7 @@ pub fn uninstall_plan(
         if let Some(parent) = path.parent()
             && !env.can_modify(parent)
         {
-            plan.lock(id, "Needs administrator rights");
+            plan.mark_admin(id);
         }
     }
     if let Some(why) = app_lock(env, &app) {
@@ -299,6 +303,12 @@ impl Feature for Uninstaller {
         v.sort();
         v.dedup();
         v
+    }
+
+    /// Apps installed by a package, leftovers and extensions in folders of the system move
+    /// with the administrator password.
+    fn allows_admin(&self) -> bool {
+        true
     }
 
     /// Leftovers of removed apps, installer files in Downloads and extensions.

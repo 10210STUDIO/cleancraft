@@ -263,7 +263,8 @@ fn locked_system_folders_are_listed_not_selected() {
         .filter(|i| i.category == "system_caches")
         .collect();
     assert!(!sys_items.is_empty());
-    assert!(sys_items.iter().all(|i| i.locked.is_some() && !i.selected));
+    // FIX-1: marked for the administrator password instead of locked, never preselected.
+    assert!(sys_items.iter().all(|i| i.needs_admin && !i.selected));
 }
 
 #[test]

@@ -309,6 +309,12 @@ impl Feature for SystemJunk {
         FeatureId::SystemJunk
     }
 
+    /// System caches in `/Library/Caches` the user selects by hand move with the
+    /// administrator password (only items the scan marked).
+    fn allows_admin(&self) -> bool {
+        true
+    }
+
     fn allow_roots(&self, env: &Env) -> Vec<PathBuf> {
         let mut v: Vec<PathBuf> = [
             "~/Library/Caches",
@@ -655,8 +661,9 @@ impl Scanner<'_, '_> {
         }
     }
 
-    /// Entries of a folder, locked when this user cannot change the folder.
-    fn area(&mut self, root: &Path, cat: &str, title: &str, skip: &[&str]) {
+    /// Entries of a folder, locked when this user cannot change the folder, or with `admin`
+    /// marked for the administrator password and left for the user to select.
+    fn area(&mut self, root: &Path, cat: &str, title: &str, skip: &[&str], admin: bool) {
         if !self.readable(root) {
             return;
         }
@@ -670,7 +677,13 @@ impl Scanner<'_, '_> {
                 self.propose(&e, cat, format!("{title}: {n}"), Risk::Low, true, Some(&n))
                 && !writable
             {
-                self.plan.lock(id, LOCK_ADMIN);
+                if admin {
+                    // Never preselected: a default clean must not ask for the password.
+                    self.plan.mark_admin(id);
+                    self.plan.set_selected(id, false);
+                } else {
+                    self.plan.lock(id, LOCK_ADMIN);
+                }
             }
         }
     }
@@ -678,7 +691,7 @@ impl Scanner<'_, '_> {
     // J2
     fn system_caches(&mut self) {
         let root = self.env().sys_path("/Library/Caches");
-        self.area(&root, "system_caches", "System cache", &[]);
+        self.area(&root, "system_caches", "System cache", &[], true);
     }
 
     // J5
@@ -707,10 +720,10 @@ impl Scanner<'_, '_> {
         let user = self.env().home_path("Library/Logs");
         let mut skip: Vec<&str> = vec!["DiagnosticReports"];
         skip.extend(AI_APPS.iter().copied());
-        self.area(&user, "user_logs", "Log", &skip);
+        self.area(&user, "user_logs", "Log", &skip, false);
         for p in ["/Library/Logs", "/private/var/log"] {
             let root = self.env().sys_path(p);
-            self.area(&root, "system_logs", "System log", &[]);
+            self.area(&root, "system_logs", "System log", &[], false);
         }
     }
 

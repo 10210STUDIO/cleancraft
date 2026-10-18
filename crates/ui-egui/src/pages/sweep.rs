@@ -343,6 +343,13 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
             &t,
             "These exact files will be moved. Threats go to the CleanCraft quarantine. You can put everything back from History.",
         );
+        let admin: usize = plans
+            .iter()
+            .map(cleancraft_core::features::admin_count)
+            .sum();
+        if let Some(note) = super::plan_page::admin_note(admin) {
+            ui.label(RichText::new(note).color(t.warning));
+        }
         egui::ScrollArea::vertical()
             .max_height(380.0)
             .show(ui, |ui| {
@@ -375,7 +382,7 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
         ui.horizontal(|ui| {
             let label = match app.settings.method {
                 Method::Trash => "Move to Trash",
-                Method::Quarantine => "Move to Quarantine",
+                Method::Quarantine | Method::AdminQuarantine => "Move to Quarantine",
             };
             if kit::danger(ui, &t, label) {
                 go = true;

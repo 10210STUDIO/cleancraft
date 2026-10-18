@@ -11,6 +11,70 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
 
+/// Quote `s` for `/bin/sh` so it is one word, taken literally: wrapped in single quotes, each
+/// single quote written as `'\''`. Spaces, `$`, backticks, backslashes and newlines need
+/// nothing else inside single quotes.
+pub fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// The administrator shell command that moves each `(from, to)` without overwriting anything:
+/// one `/bin/mv -n -- 'from' 'to'` line per pair. This is the only shape of administrator move
+/// CleanCraft runs; [`parse_admin_moves`] reads it back.
+pub fn admin_move_script(pairs: &[(&str, &str)]) -> String {
+    pairs
+        .iter()
+        .map(|(a, b)| format!("{MV_PREFIX}{} {}", shell_quote(a), shell_quote(b)))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+const MV_PREFIX: &str = "/bin/mv -n -- ";
+
+/// The `(from, to)` pairs of a script made by [`admin_move_script`]; `None` for anything else.
+pub fn parse_admin_moves(script: &str) -> Option<Vec<(String, String)>> {
+    let mut out = Vec::new();
+    let mut rest = script;
+    loop {
+        rest = rest.strip_prefix(MV_PREFIX)?;
+        let (a, r) = parse_quoted(rest)?;
+        let r = r.strip_prefix(' ')?;
+        let (b, r) = parse_quoted(r)?;
+        out.push((a, b));
+        if r.is_empty() {
+            return Some(out);
+        }
+        rest = r.strip_prefix('\n')?;
+    }
+}
+
+/// One word written by [`shell_quote`]: the text and what follows it.
+fn parse_quoted(s: &str) -> Option<(String, &str)> {
+    let mut rest = s.strip_prefix('\'')?;
+    let mut word = String::new();
+    loop {
+        let end = rest.find('\'')?;
+        word.push_str(&rest[..end]);
+        rest = &rest[end + 1..];
+        match rest.strip_prefix("\\''") {
+            Some(r) => {
+                word.push('\'');
+                rest = r;
+            }
+            None => return Some((word, rest)),
+        }
+    }
+}
+
+/// True when an administrator command's output says the password dialog was cancelled
+/// (`osascript` error -128).
+pub fn admin_cancelled(out: &CmdOut) -> bool {
+    !out.ok()
+        && (out.stderr.contains("(-128)")
+            || out.stderr.contains("User canceled")
+            || out.stderr.contains("User cancelled"))
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CmdOut {
     pub status: i32,
@@ -72,7 +136,12 @@ impl Sys for RealSys {
                 "administrator commands need macOS",
             ));
         }
-        let escaped = shell_command.replace('\\', "\\\\").replace('"', "\\\"");
+        // An AppleScript string literal: backslash, quote and line breaks escaped.
+        let escaped = shell_command
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', "\\n")
+            .replace('\r', "\\r");
         let script = format!("do shell script \"{escaped}\" with administrator privileges");
         self.run("/usr/bin/osascript", &["-e", &script])
     }
@@ -195,6 +264,10 @@ pub struct FakeState {
     /// When true, the administrator password dialog is "cancelled".
     pub admin_cancelled: bool,
     pub macos: bool,
+    /// The fake Mac's folder. Administrator moves must stay inside it.
+    pub root: Option<PathBuf>,
+    /// Sources an administrator `mv` fails on ("Operation not permitted").
+    pub admin_move_fails: HashSet<PathBuf>,
 }
 
 impl FakeSys {
@@ -244,10 +317,53 @@ impl FakeSys {
     pub fn set_open(&self, path: &Path) {
         self.with(|s| s.open_files.insert(path.to_path_buf()));
     }
+
+    /// Make the administrator `mv` of `src` fail.
+    pub fn fail_admin_move(&self, src: &Path) {
+        self.with(|s| s.admin_move_fails.insert(src.to_path_buf()));
+    }
+
+    /// Carry out an administrator move script inside the fake root, like `/bin/mv -n` would.
+    fn admin_moves(s: &FakeState, pairs: &[(String, String)]) -> CmdOut {
+        let root = s
+            .root
+            .clone()
+            .expect("FakeSys: administrator moves need the fake root");
+        let mut out = CmdOut::default();
+        for (a, b) in pairs {
+            let (a, b) = (Path::new(a), Path::new(b));
+            for p in [a, b] {
+                assert!(
+                    p.is_absolute() && p.starts_with(&root) && !crate::env::has_parent_component(p),
+                    "FakeSys: administrator move outside the fake root: {}",
+                    p.display()
+                );
+            }
+            if s.admin_move_fails.contains(a) {
+                out.status = 1;
+                out.stderr.push_str(&format!(
+                    "mv: rename {}: Operation not permitted\n",
+                    a.display()
+                ));
+                continue;
+            }
+            // -n: never replace something already there.
+            if std::fs::symlink_metadata(b).is_ok() {
+                continue;
+            }
+            if let Err(e) = std::fs::rename(a, b) {
+                out.status = 1;
+                out.stderr
+                    .push_str(&format!("mv: rename {}: {e}\n", a.display()));
+            }
+        }
+        out
+    }
 }
 
-impl Sys for FakeSys {
-    fn run(&self, program: &str, args: &[&str]) -> io::Result<CmdOut> {
+impl FakeSys {
+    /// The recorded, scripted answer to a command.
+    fn run_limited(&self, program: &str, args: &[&str]) -> io::Result<CmdOut> {
         let line = std::iter::once(program)
             .chain(args.iter().copied())
             .collect::<Vec<_>>()
@@ -276,6 +392,12 @@ impl Sys for FakeSys {
                 })
         })
     }
+}
+
+impl Sys for FakeSys {
+    fn run(&self, program: &str, args: &[&str]) -> io::Result<CmdOut> {
+        self.run_limited(program, args)
+    }
 
     fn run_admin(&self, shell_command: &str) -> io::Result<CmdOut> {
         self.with(|s| {
@@ -286,6 +408,15 @@ impl Sys for FakeSys {
                     stdout: String::new(),
                     stderr: "User canceled. (-128)".into(),
                 })
+            } else if shell_command.starts_with(MV_PREFIX) {
+                // Administrator moves: only the exact script admin_move_script writes.
+                match parse_admin_moves(shell_command) {
+                    Some(pairs) => Ok(FakeSys::admin_moves(s, &pairs)),
+                    None => Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("fake: refused administrator command `{shell_command}`"),
+                    )),
+                }
             } else {
                 Ok(s.answers
                     .get(&format!("admin:{shell_command}"))
@@ -345,5 +476,98 @@ mod tests {
     fn df_free() {
         let out = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk3s1 100 50 40 50% /\n";
         assert_eq!(parse_df_free(out), Some(40 * 1024));
+    }
+    #[test]
+    fn shell_quote_keeps_every_character_literal() {
+        assert_eq!(shell_quote("plain"), "'plain'");
+        assert_eq!(shell_quote("with space"), "'with space'");
+        assert_eq!(shell_quote("it's"), r"'it'\''s'");
+        assert_eq!(shell_quote("$HOME"), "'$HOME'");
+        assert_eq!(shell_quote("`id`"), "'`id`'");
+        assert_eq!(shell_quote("a\nb"), "'a\nb'");
+        assert_eq!(shell_quote(r#"back\slash "q""#), r#"'back\slash "q"'"#);
+        assert_eq!(shell_quote(""), "''");
+    }
+
+    #[test]
+    fn admin_move_script_round_trips_awkward_names() {
+        let names = [
+            "/Library/LaunchAgents/com.x.agent.plist",
+            "/Applications/My App.app",
+            "/Library/Application Support/it's here",
+            "/Library/Caches/$(rm -rf ~)",
+            "/Library/Caches/`touch /tmp/x`",
+            "/Library/Caches/line\nbreak",
+            "/Library/Caches/'''",
+            r#"/Library/Caches/back\slash "quoted""#,
+        ];
+        let pairs: Vec<(String, String)> = names
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (n.to_string(), format!("/q/{i} {n}")))
+            .collect();
+        let refs: Vec<(&str, &str)> = pairs
+            .iter()
+            .map(|(a, b)| (a.as_str(), b.as_str()))
+            .collect();
+        let script = admin_move_script(&refs);
+        assert_eq!(script.matches("/bin/mv -n -- ").count(), names.len());
+        assert_eq!(parse_admin_moves(&script), Some(pairs));
+        // Anything else is refused.
+        assert_eq!(parse_admin_moves("/bin/rm -rf /"), None);
+        assert_eq!(parse_admin_moves("/bin/mv -n -- 'a' 'b'; rm -rf /"), None);
+        assert_eq!(parse_admin_moves("/bin/mv -n -- 'a' 'b' 'c'"), None);
+        assert_eq!(parse_admin_moves("/bin/mv -n -- 'a'"), None);
+        assert_eq!(parse_admin_moves("/bin/mv -n -- a b"), None);
+        assert_eq!(parse_admin_moves(""), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_shell_reads_a_quoted_word_back_unchanged() {
+        // Harmless: /bin/sh only prints the word back (no macOS tool, no file touched).
+        for w in [
+            "it's",
+            "$HOME `id`",
+            "a\nb",
+            r#"back\slash "q""#,
+            "*",
+            "'''",
+        ] {
+            let script = format!("printf %s {}", shell_quote(w));
+            let out = RealSys.run("/bin/sh", &["-c", &script]).unwrap();
+            assert_eq!(out.stdout, w);
+        }
+    }
+
+    #[test]
+    fn fake_admin_moves() {
+        let d = tempfile::tempdir().unwrap();
+        let f = FakeSys::new();
+        f.with(|s| s.root = Some(d.path().to_path_buf()));
+        let a = d.path().join("it's a");
+        std::fs::write(&a, "x").unwrap();
+        let b = d.path().join("b");
+        let script = admin_move_script(&[(a.to_str().unwrap(), b.to_str().unwrap())]);
+        assert!(f.run_admin(&script).unwrap().ok());
+        assert!(!a.exists() && b.exists());
+        // -n: an existing destination is left alone.
+        std::fs::write(&a, "y").unwrap();
+        f.run_admin(&script).unwrap();
+        assert!(a.exists());
+        assert!(f.run_admin("/bin/mv -n -- 'x' 'y'; reboot").is_err());
+        // A cancelled password dialog moves nothing.
+        f.with(|s| s.admin_cancelled = true);
+        let out = f.run_admin(&script).unwrap();
+        assert!(admin_cancelled(&out));
+    }
+
+    #[test]
+    #[should_panic(expected = "outside the fake root")]
+    fn fake_admin_move_outside_the_root_panics() {
+        let d = tempfile::tempdir().unwrap();
+        let f = FakeSys::new();
+        f.with(|s| s.root = Some(d.path().to_path_buf()));
+        let _ = f.run_admin(&admin_move_script(&[("/etc/hosts", "/tmp/hosts")]));
     }
 }

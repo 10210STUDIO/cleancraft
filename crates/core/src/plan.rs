@@ -158,6 +158,11 @@ pub struct Item {
     /// Seconds since the epoch, when known.
     #[serde(default)]
     pub modified: Option<i64>,
+    /// Only an administrator can move it (a folder owned by the system, an app installed by a
+    /// package). Features that allow it ([`crate::features::Feature::allows_admin`]) move these
+    /// with one administrator command after the password dialog; the confirmation says so.
+    #[serde(default)]
+    pub needs_admin: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -215,8 +220,21 @@ impl Plan {
             locked: None,
             group: None,
             modified: None,
+            needs_admin: false,
         });
         id
+    }
+
+    /// Mark an item as needing the administrator password to move.
+    pub fn mark_admin(&mut self, id: usize) {
+        if let Some(it) = self.items.get_mut(id) {
+            it.needs_admin = true;
+        }
+    }
+
+    /// Selected items that need the administrator password.
+    pub fn selected_admin_count(&self) -> usize {
+        self.selected().filter(|i| i.needs_admin).count()
     }
 
     pub fn lock(&mut self, id: usize, why: impl Into<String>) {
@@ -284,6 +302,10 @@ impl Plan {
             h.update(it.path.to_string_lossy().as_bytes());
             h.update([0]);
             h.update(it.size.to_le_bytes());
+            // The confirmation says which items need the administrator password.
+            if it.needs_admin {
+                h.update(b"admin");
+            }
         }
         hex::encode(h.finalize())
     }
@@ -323,5 +345,23 @@ mod tests {
         assert_eq!(p.selected_count(), 0);
         p.set_selected(0, true);
         assert_eq!(p.selected_count(), 0, "locked items cannot be selected");
+    }
+
+    #[test]
+    fn digest_covers_the_administrator_mark() {
+        let mut p = Plan::new(FeatureId::Malware);
+        p.push("/a".into(), 10, "c", "r", Risk::High, true);
+        let d = p.digest();
+        p.mark_admin(0);
+        assert_ne!(
+            d,
+            p.digest(),
+            "a list confirmed without the admin note is refused"
+        );
+        assert_eq!(p.selected_admin_count(), 1);
+        // Plans saved before the field existed still load.
+        let json = r#"{"id":0,"path":"/a","size":1,"category":"c","reason":"r","risk":"low","selected":true,"locked":null}"#;
+        let it: Item = serde_json::from_str(json).unwrap();
+        assert!(!it.needs_admin);
     }
 }

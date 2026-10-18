@@ -462,13 +462,16 @@ fn admin_folders_are_locked_and_unreadable_folders_noted() {
     );
     assert!(!p.items.iter().any(|i| i.category == "system_caches"));
 
-    // Listable but not changeable without administrator rights: listed, locked.
+    // Listable but not changeable without administrator rights: listed, marked for the
+    // administrator password, not preselected (FIX-1; was locked before). System logs stay
+    // locked.
     let m = junk_mac();
     let caches = m.env.sys_path("/Library/Caches");
     m.env.inject_fault(&caches, Fault::PermissionDenied);
     let p = scan(&m, &Settings::default());
     let it = item(&p, &caches.join("com.example.updater"));
-    assert_eq!(it.locked.as_deref(), Some(sj::LOCK_ADMIN));
+    assert!(it.locked.is_none() && it.needs_admin && !it.selected);
+    let _ = sj::LOCK_ADMIN;
 }
 
 #[test]

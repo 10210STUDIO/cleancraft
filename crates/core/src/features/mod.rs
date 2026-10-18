@@ -61,6 +61,12 @@ pub trait Feature: Send + Sync {
     fn method_override(&self) -> Option<Method> {
         None
     }
+    /// May items the plan marks [`crate::plan::Item::needs_admin`] be moved with the
+    /// administrator password (one `mv` per item into the quarantine, after the same checks)?
+    /// Off unless a feature turns it on.
+    fn allows_admin(&self) -> bool {
+        false
+    }
     /// Work needed right before the confirmed items move, e.g. unloading a launch agent.
     /// Runs only for the confirmed selection; must log what it does to the journal.
     fn prepare(&self, _env: &Env, _plan: &Plan) -> anyhow::Result<()> {
@@ -103,14 +109,26 @@ pub fn run_plan_with(
     let allow = f.allow_roots(env);
     let method = f.method_override().unwrap_or(settings.method);
     f.prepare(env, plan)?;
-    Ok(executor::execute(
+    Ok(executor::execute_with(
         env,
         plan,
         &allow,
         confirmed_digest,
         method,
+        f.allows_admin(),
         progress,
     )?)
+}
+
+/// How many selected items of `plan` will move with the administrator password (its feature
+/// allows it and the scan marked them). Confirmations say so when this is not zero.
+pub fn admin_count(plan: &Plan) -> usize {
+    let allowed = plan.feature.and_then(get).is_some_and(|f| f.allows_admin());
+    if allowed {
+        plan.selected_admin_count()
+    } else {
+        0
+    }
 }
 
 /// Every plan-based feature, in sidebar order.
