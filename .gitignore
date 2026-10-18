@@ -1,0 +1,8 @@
+/target
+*.log
+__pycache__/
+/.claude/
+/_agents_backup/
+/_sync/
+/_to_delete/
+/wt-*/

@@ -1,0 +1,24 @@
+[package]
+name = "cleancraft-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "CleanCraft engine: scans, cleanup plans, safe removal with undo, maintenance tasks (no UI)"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+blake3 = { workspace = true }
+chrono = { workspace = true }
+dirs = { workspace = true }
+hex = { workspace = true }
+image = { workspace = true }
+plist = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tempfile = { workspace = true }

@@ -1,0 +1,25 @@
+[package]
+name = "cleancraft"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+default-run = "cleancraft"
+description = "CleanCraft desktop app, CLI and MCP server"
+
+[lints]
+workspace = true
+
+[dependencies]
+cleancraft-core = { workspace = true }
+cleancraft-mcp = { workspace = true }
+cleancraft-ui-egui = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+egui = { workspace = true }
+eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11"] }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+craft-quit = { workspace = true, features = ["menu"] }

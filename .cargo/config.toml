@@ -1,0 +1,4 @@
+# Every process cargo starts (tests, examples, `cargo run`) refuses to touch the real home folder.
+# The installed app is built with `cargo build` and launched from /Applications, so it is not affected.
+[env]
+CLEANCRAFT_FORBID_REAL = "1"
