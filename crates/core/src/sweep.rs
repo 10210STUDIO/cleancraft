@@ -33,10 +33,21 @@ pub struct CountSource {
     pub count: fn(&Env, &Settings) -> anyhow::Result<usize>,
 }
 
-/// Count-only modules. Owners add one line each when their module exists, for example
-/// `CountSource { id: FeatureId::Maintenance, noun: "suggestions", count: crate::tasks::suggestion_count }`.
+/// Count-only modules: tune-up suggestions ([`crate::tasks::suggestions`]) and app updates
+/// ([`crate::updater::available_count`]).
 pub fn count_sources() -> Vec<CountSource> {
-    Vec::new()
+    vec![
+        CountSource {
+            id: FeatureId::Maintenance,
+            noun: "suggestions",
+            count: crate::tasks::suggestion_count,
+        },
+        CountSource {
+            id: FeatureId::Updater,
+            noun: "updates",
+            count: crate::updater::available_count,
+        },
+    ]
 }
 
 /// What a sweep looks at.
