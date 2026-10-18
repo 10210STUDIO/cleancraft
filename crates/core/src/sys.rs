@@ -5,11 +5,107 @@
 //! [`RealSys`] runs the real tools. [`FakeSys`] answers from data the test set up and records
 //! every command, so tests can check what would have run without running anything.
 
-use std::collections::{BTreeMap, HashSet};
-use std::io;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::Mutex;
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
+
+/// How long a system command may run before CleanCraft stops it ([`Sys::run`]).
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
+/// How long an administrator command may take, the password dialog included.
+pub const ADMIN_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+
+/// The error a command that ran past its time limit gives: kind `TimedOut`, and words the
+/// user understands.
+pub fn timed_out(program: &str, limit: Duration) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::TimedOut,
+        format!(
+            "{program} did not finish within {} and was stopped",
+            limit_text(limit)
+        ),
+    )
+}
+
+fn limit_text(d: Duration) -> String {
+    let s = d.as_secs();
+    if s >= 120 && s.is_multiple_of(60) {
+        format!("{} minutes", s / 60)
+    } else if s == 1 {
+        "1 second".into()
+    } else if s == 0 {
+        format!("{} ms", d.as_millis())
+    } else {
+        format!("{s} seconds")
+    }
+}
+
+/// Quote `s` for `/bin/sh` so it is one word, taken literally: wrapped in single quotes, each
+/// single quote written as `'\''`. Spaces, `$`, backticks, backslashes and newlines need
+/// nothing else inside single quotes.
+pub fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// The administrator shell command that moves each `(from, to)` without overwriting anything:
+/// one `/bin/mv -n -- 'from' 'to'` line per pair. This is the only shape of administrator move
+/// CleanCraft runs; [`parse_admin_moves`] reads it back.
+pub fn admin_move_script(pairs: &[(&str, &str)]) -> String {
+    pairs
+        .iter()
+        .map(|(a, b)| format!("{MV_PREFIX}{} {}", shell_quote(a), shell_quote(b)))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+const MV_PREFIX: &str = "/bin/mv -n -- ";
+
+/// The `(from, to)` pairs of a script made by [`admin_move_script`]; `None` for anything else.
+pub fn parse_admin_moves(script: &str) -> Option<Vec<(String, String)>> {
+    let mut out = Vec::new();
+    let mut rest = script;
+    loop {
+        rest = rest.strip_prefix(MV_PREFIX)?;
+        let (a, r) = parse_quoted(rest)?;
+        let r = r.strip_prefix(' ')?;
+        let (b, r) = parse_quoted(r)?;
+        out.push((a, b));
+        if r.is_empty() {
+            return Some(out);
+        }
+        rest = r.strip_prefix('\n')?;
+    }
+}
+
+/// One word written by [`shell_quote`]: the text and what follows it.
+fn parse_quoted(s: &str) -> Option<(String, &str)> {
+    let mut rest = s.strip_prefix('\'')?;
+    let mut word = String::new();
+    loop {
+        let end = rest.find('\'')?;
+        word.push_str(&rest[..end]);
+        rest = &rest[end + 1..];
+        match rest.strip_prefix("\\''") {
+            Some(r) => {
+                word.push('\'');
+                rest = r;
+            }
+            None => return Some((word, rest)),
+        }
+    }
+}
+
+/// True when an administrator command's output says the password dialog was cancelled
+/// (`osascript` error -128).
+pub fn admin_cancelled(out: &CmdOut) -> bool {
+    !out.ok()
+        && (out.stderr.contains("(-128)")
+            || out.stderr.contains("User canceled")
+            || out.stderr.contains("User cancelled"))
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CmdOut {
@@ -33,8 +129,14 @@ pub struct RunningApp {
 }
 
 pub trait Sys: Send + Sync {
-    /// Run a program and wait for it.
+    /// Run a program and wait for it, at most [`DEFAULT_TIMEOUT`]; a program still running
+    /// then is stopped and the call fails with `io::ErrorKind::TimedOut`.
     fn run(&self, program: &str, args: &[&str]) -> io::Result<CmdOut>;
+    /// [`Sys::run`] with its own time limit, for work known to take long (tune-up tasks).
+    fn run_timeout(&self, program: &str, args: &[&str], limit: Duration) -> io::Result<CmdOut> {
+        let _ = limit;
+        self.run(program, args)
+    }
     /// Run a shell command as administrator. On macOS this is
     /// `osascript -e 'do shell script "..." with administrator privileges'`, which shows the
     /// system password dialog. The user can cancel it.
@@ -55,14 +157,77 @@ pub trait Sys: Send + Sync {
 #[derive(Debug, Default)]
 pub struct RealSys;
 
+/// Run `cmd` and wait at most `limit`. Output is read on two threads so a chatty program
+/// cannot block on a full pipe. On time out the child CleanCraft started is killed (and
+/// reaped) and the error is [`timed_out`].
+pub fn run_with_limit(mut cmd: Command, program: &str, limit: Duration) -> io::Result<CmdOut> {
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let reader = |pipe: Option<Box<dyn Read + Send>>| {
+        let (tx, rx) = mpsc::channel();
+        if let Some(mut p) = pipe {
+            std::thread::spawn(move || {
+                let mut buf = Vec::new();
+                let _ = p.read_to_end(&mut buf);
+                let _ = tx.send(buf);
+            });
+        }
+        rx
+    };
+    let out_rx = reader(
+        child
+            .stdout
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
+    );
+    let err_rx = reader(
+        child
+            .stderr
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
+    );
+    let deadline = Instant::now() + limit;
+    let status = loop {
+        if let Some(st) = child.try_wait()? {
+            break st;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(timed_out(program, limit));
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    // A program can leave a helper running that keeps the pipes open: wait for the output only
+    // until the deadline (and at least a moment).
+    let left = deadline
+        .saturating_duration_since(Instant::now())
+        .max(Duration::from_millis(200));
+    let stdout = out_rx.recv_timeout(left).unwrap_or_default();
+    let stderr = err_rx
+        .recv_timeout(
+            Duration::from_millis(200).max(deadline.saturating_duration_since(Instant::now())),
+        )
+        .unwrap_or_default();
+    Ok(CmdOut {
+        status: status.code().unwrap_or(-1),
+        stdout: String::from_utf8_lossy(&stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&stderr).into_owned(),
+    })
+}
+
 impl Sys for RealSys {
     fn run(&self, program: &str, args: &[&str]) -> io::Result<CmdOut> {
-        let out = Command::new(program).args(args).output()?;
-        Ok(CmdOut {
-            status: out.status.code().unwrap_or(-1),
-            stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
-        })
+        self.run_timeout(program, args, DEFAULT_TIMEOUT)
+    }
+
+    fn run_timeout(&self, program: &str, args: &[&str], limit: Duration) -> io::Result<CmdOut> {
+        let mut cmd = Command::new(program);
+        cmd.args(args);
+        run_with_limit(cmd, program, limit)
     }
 
     fn run_admin(&self, shell_command: &str) -> io::Result<CmdOut> {
@@ -72,9 +237,14 @@ impl Sys for RealSys {
                 "administrator commands need macOS",
             ));
         }
-        let escaped = shell_command.replace('\\', "\\\\").replace('"', "\\\"");
+        // An AppleScript string literal: backslash, quote and line breaks escaped.
+        let escaped = shell_command
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', "\\n")
+            .replace('\r', "\\r");
         let script = format!("do shell script \"{escaped}\" with administrator privileges");
-        self.run("/usr/bin/osascript", &["-e", &script])
+        self.run_timeout("/usr/bin/osascript", &["-e", &script], ADMIN_TIMEOUT)
     }
 
     fn open_files(&self) -> io::Result<HashSet<PathBuf>> {
@@ -195,6 +365,14 @@ pub struct FakeState {
     /// When true, the administrator password dialog is "cancelled".
     pub admin_cancelled: bool,
     pub macos: bool,
+    /// The fake Mac's folder. Administrator moves must stay inside it.
+    pub root: Option<PathBuf>,
+    /// Commands (same keys as `answers`) that run past their time limit.
+    pub timeouts: BTreeSet<String>,
+    /// Time limits asked for with `run_timeout`, as ("program arg arg", limit).
+    pub limits: Vec<(String, Duration)>,
+    /// Sources an administrator `mv` fails on ("Operation not permitted").
+    pub admin_move_fails: HashSet<PathBuf>,
 }
 
 impl FakeSys {
@@ -244,10 +422,58 @@ impl FakeSys {
     pub fn set_open(&self, path: &Path) {
         self.with(|s| s.open_files.insert(path.to_path_buf()));
     }
+
+    /// Make a command (exact line, short line or program) run past its time limit.
+    pub fn time_out(&self, key: &str) {
+        self.with(|s| s.timeouts.insert(key.to_string()));
+    }
+
+    /// Make the administrator `mv` of `src` fail.
+    pub fn fail_admin_move(&self, src: &Path) {
+        self.with(|s| s.admin_move_fails.insert(src.to_path_buf()));
+    }
+
+    /// Carry out an administrator move script inside the fake root, like `/bin/mv -n` would.
+    fn admin_moves(s: &FakeState, pairs: &[(String, String)]) -> CmdOut {
+        let root = s
+            .root
+            .clone()
+            .expect("FakeSys: administrator moves need the fake root");
+        let mut out = CmdOut::default();
+        for (a, b) in pairs {
+            let (a, b) = (Path::new(a), Path::new(b));
+            for p in [a, b] {
+                assert!(
+                    p.is_absolute() && p.starts_with(&root) && !crate::env::has_parent_component(p),
+                    "FakeSys: administrator move outside the fake root: {}",
+                    p.display()
+                );
+            }
+            if s.admin_move_fails.contains(a) {
+                out.status = 1;
+                out.stderr.push_str(&format!(
+                    "mv: rename {}: Operation not permitted\n",
+                    a.display()
+                ));
+                continue;
+            }
+            // -n: never replace something already there.
+            if std::fs::symlink_metadata(b).is_ok() {
+                continue;
+            }
+            if let Err(e) = std::fs::rename(a, b) {
+                out.status = 1;
+                out.stderr
+                    .push_str(&format!("mv: rename {}: {e}\n", a.display()));
+            }
+        }
+        out
+    }
 }
 
-impl Sys for FakeSys {
-    fn run(&self, program: &str, args: &[&str]) -> io::Result<CmdOut> {
+impl FakeSys {
+    /// The recorded, scripted answer to a command, or a time out when the test asked for one.
+    fn run_limited(&self, program: &str, args: &[&str], limit: Duration) -> io::Result<CmdOut> {
         let line = std::iter::once(program)
             .chain(args.iter().copied())
             .collect::<Vec<_>>()
@@ -262,6 +488,12 @@ impl Sys for FakeSys {
                 .chain(args.iter().copied())
                 .collect::<Vec<_>>()
                 .join(" ");
+            if [&line, &short_line, &program.to_string(), &short]
+                .iter()
+                .any(|k| s.timeouts.contains(*k))
+            {
+                return Err(timed_out(program, limit));
+            }
             s.answers
                 .get(&line)
                 .or_else(|| s.answers.get(&short_line))
@@ -276,6 +508,21 @@ impl Sys for FakeSys {
                 })
         })
     }
+}
+
+impl Sys for FakeSys {
+    fn run_timeout(&self, program: &str, args: &[&str], limit: Duration) -> io::Result<CmdOut> {
+        let line = std::iter::once(program)
+            .chain(args.iter().copied())
+            .collect::<Vec<_>>()
+            .join(" ");
+        self.with(|s| s.limits.push((line, limit)));
+        self.run_limited(program, args, limit)
+    }
+
+    fn run(&self, program: &str, args: &[&str]) -> io::Result<CmdOut> {
+        self.run_limited(program, args, DEFAULT_TIMEOUT)
+    }
 
     fn run_admin(&self, shell_command: &str) -> io::Result<CmdOut> {
         self.with(|s| {
@@ -286,6 +533,15 @@ impl Sys for FakeSys {
                     stdout: String::new(),
                     stderr: "User canceled. (-128)".into(),
                 })
+            } else if shell_command.starts_with(MV_PREFIX) {
+                // Administrator moves: only the exact script admin_move_script writes.
+                match parse_admin_moves(shell_command) {
+                    Some(pairs) => Ok(FakeSys::admin_moves(s, &pairs)),
+                    None => Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("fake: refused administrator command `{shell_command}`"),
+                    )),
+                }
             } else {
                 Ok(s.answers
                     .get(&format!("admin:{shell_command}"))
@@ -345,5 +601,140 @@ mod tests {
     fn df_free() {
         let out = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk3s1 100 50 40 50% /\n";
         assert_eq!(parse_df_free(out), Some(40 * 1024));
+    }
+    #[test]
+    fn shell_quote_keeps_every_character_literal() {
+        assert_eq!(shell_quote("plain"), "'plain'");
+        assert_eq!(shell_quote("with space"), "'with space'");
+        assert_eq!(shell_quote("it's"), r"'it'\''s'");
+        assert_eq!(shell_quote("$HOME"), "'$HOME'");
+        assert_eq!(shell_quote("`id`"), "'`id`'");
+        assert_eq!(shell_quote("a\nb"), "'a\nb'");
+        assert_eq!(shell_quote(r#"back\slash "q""#), r#"'back\slash "q"'"#);
+        assert_eq!(shell_quote(""), "''");
+    }
+
+    #[test]
+    fn admin_move_script_round_trips_awkward_names() {
+        let names = [
+            "/Library/LaunchAgents/com.x.agent.plist",
+            "/Applications/My App.app",
+            "/Library/Application Support/it's here",
+            "/Library/Caches/$(rm -rf ~)",
+            "/Library/Caches/`touch /tmp/x`",
+            "/Library/Caches/line\nbreak",
+            "/Library/Caches/'''",
+            r#"/Library/Caches/back\slash "quoted""#,
+        ];
+        let pairs: Vec<(String, String)> = names
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (n.to_string(), format!("/q/{i} {n}")))
+            .collect();
+        let refs: Vec<(&str, &str)> = pairs
+            .iter()
+            .map(|(a, b)| (a.as_str(), b.as_str()))
+            .collect();
+        let script = admin_move_script(&refs);
+        assert_eq!(script.matches("/bin/mv -n -- ").count(), names.len());
+        assert_eq!(parse_admin_moves(&script), Some(pairs));
+        // Anything else is refused.
+        assert_eq!(parse_admin_moves("/bin/rm -rf /"), None);
+        assert_eq!(parse_admin_moves("/bin/mv -n -- 'a' 'b'; rm -rf /"), None);
+        assert_eq!(parse_admin_moves("/bin/mv -n -- 'a' 'b' 'c'"), None);
+        assert_eq!(parse_admin_moves("/bin/mv -n -- 'a'"), None);
+        assert_eq!(parse_admin_moves("/bin/mv -n -- a b"), None);
+        assert_eq!(parse_admin_moves(""), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_shell_reads_a_quoted_word_back_unchanged() {
+        // Harmless: /bin/sh only prints the word back (no macOS tool, no file touched).
+        for w in [
+            "it's",
+            "$HOME `id`",
+            "a\nb",
+            r#"back\slash "q""#,
+            "*",
+            "'''",
+        ] {
+            let script = format!("printf %s {}", shell_quote(w));
+            let out = RealSys.run("/bin/sh", &["-c", &script]).unwrap();
+            assert_eq!(out.stdout, w);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_command_past_its_limit_is_stopped() {
+        // Harmless: `sleep`, started and killed by this test.
+        let start = Instant::now();
+        let err = RealSys
+            .run_timeout("/bin/sleep", &["30"], Duration::from_millis(300))
+            .unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::TimedOut);
+        assert!(err.to_string().contains("did not finish within"), "{err}");
+        assert!(start.elapsed() < Duration::from_secs(10));
+        // A quick command still answers, with its output and status.
+        let out = RealSys
+            .run_timeout(
+                "/bin/sh",
+                &["-c", "echo hi; echo err >&2; exit 3"],
+                Duration::from_secs(20),
+            )
+            .unwrap();
+        assert_eq!(
+            (out.status, out.stdout.as_str(), out.stderr.as_str()),
+            (3, "hi\n", "err\n")
+        );
+    }
+
+    #[test]
+    fn fake_time_out_and_admin_moves() {
+        let d = tempfile::tempdir().unwrap();
+        let f = FakeSys::new();
+        f.with(|s| s.root = Some(d.path().to_path_buf()));
+        f.answer("tmutil", "ok");
+        f.time_out("tmutil thinlocalsnapshots /");
+        let e = f
+            .run("/usr/bin/tmutil", &["thinlocalsnapshots", "/"])
+            .unwrap_err();
+        assert_eq!(e.kind(), io::ErrorKind::TimedOut);
+        assert!(
+            f.run("/usr/bin/tmutil", &["listlocalsnapshots", "/"])
+                .is_ok()
+        );
+        let _ = f.run_timeout("/usr/bin/mdutil", &["-E", "/"], Duration::from_secs(600));
+        assert!(f.with(|s| {
+            s.limits
+                .iter()
+                .any(|(l, t)| l == "/usr/bin/mdutil -E /" && t.as_secs() == 600)
+        }));
+
+        let a = d.path().join("it's a");
+        std::fs::write(&a, "x").unwrap();
+        let b = d.path().join("b");
+        let script = admin_move_script(&[(a.to_str().unwrap(), b.to_str().unwrap())]);
+        assert!(f.run_admin(&script).unwrap().ok());
+        assert!(!a.exists() && b.exists());
+        // -n: an existing destination is left alone.
+        std::fs::write(&a, "y").unwrap();
+        f.run_admin(&script).unwrap();
+        assert!(a.exists());
+        assert!(f.run_admin("/bin/mv -n -- 'x' 'y'; reboot").is_err());
+        // A cancelled password dialog moves nothing.
+        f.with(|s| s.admin_cancelled = true);
+        let out = f.run_admin(&script).unwrap();
+        assert!(admin_cancelled(&out));
+    }
+
+    #[test]
+    #[should_panic(expected = "outside the fake root")]
+    fn fake_admin_move_outside_the_root_panics() {
+        let d = tempfile::tempdir().unwrap();
+        let f = FakeSys::new();
+        f.with(|s| s.root = Some(d.path().to_path_buf()));
+        let _ = f.run_admin(&admin_move_script(&[("/etc/hosts", "/tmp/hosts")]));
     }
 }

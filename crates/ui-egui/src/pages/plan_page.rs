@@ -626,7 +626,7 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
             kit::dim(ui, &t, &app.env.display(&it.path));
             let why = match &it.locked {
                 Some(l) => format!("{} (cannot be selected: {l})", it.reason),
-                None => it.reason.clone(),
+                None => reason_text(it),
             };
             ui.label(
                 RichText::new(why)
@@ -648,20 +648,48 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
                     p.items[id].locked = Some("on your ignore list".into());
                 }
             }
-            if ui
-                .small_button("Reveal")
-                .on_hover_text("Show in Finder")
-                .clicked()
+            // Only files and folders on disk can be shown in Finder (Wi-Fi networks and
+            // permissions are listed under a label, not a file).
+            if std::fs::symlink_metadata(&it.path).is_ok()
+                && ui
+                    .small_button("Reveal")
+                    .on_hover_text("Show in Finder")
+                    .clicked()
             {
                 app.act();
                 let path = it.path.to_string_lossy().into_owned();
-                if let Err(e) = app.env.sys.run("/usr/bin/open", &["-R", &path]) {
-                    app.warn(format!("Could not open Finder: {e}"));
+                match app.env.sys.run("/usr/bin/open", &["-R", &path]) {
+                    Ok(out) if out.ok() => {}
+                    Ok(out) => app.warn(format!("Could not open Finder: {}", out.stderr.trim())),
+                    Err(e) => app.warn(format!("Could not open Finder: {e}")),
                 }
             }
             ui.label(RichText::new(human_size(it.size)).font(font(13.0, Weight::SemiBold)));
         });
     });
+}
+
+/// The confirmation line for items that need the administrator password, when there are any.
+pub fn admin_note(n: usize) -> Option<String> {
+    match n {
+        0 => None,
+        1 => Some(
+            "1 item is in a folder only an administrator can change. macOS will ask for the administrator password, and it goes to the CleanCraft quarantine."
+                .into(),
+        ),
+        n => Some(format!(
+            "{n} items are in folders only an administrator can change. macOS will ask for the administrator password, and they go to the CleanCraft quarantine."
+        )),
+    }
+}
+
+/// The reason shown for an item, with the administrator note.
+pub fn reason_text(it: &cleancraft_core::Item) -> String {
+    let mut s = it.reason.clone();
+    if it.needs_admin && it.locked.is_none() {
+        s.push_str(" (needs the administrator password)");
+    }
+    s
 }
 
 fn confirm(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
@@ -675,7 +703,9 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         .unwrap_or(app.settings.method);
     let dest = match method {
         executor::Method::Trash => "the Trash",
-        executor::Method::Quarantine => "the CleanCraft quarantine",
+        executor::Method::Quarantine | executor::Method::AdminQuarantine => {
+            "the CleanCraft quarantine"
+        }
     };
     let mut close = false;
     let mut go = false;
@@ -694,6 +724,9 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             &t,
             "These exact files will be moved. You can put them back from History.",
         );
+        if let Some(note) = admin_note(features::admin_count(&plan)) {
+            ui.label(RichText::new(note).color(t.warning));
+        }
         egui::ScrollArea::both()
             .max_width(640.0)
             .max_height(360.0)
@@ -714,7 +747,9 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         ui.horizontal(|ui| {
             let label = match method {
                 executor::Method::Trash => "Move to Trash",
-                executor::Method::Quarantine => "Move to Quarantine",
+                executor::Method::Quarantine | executor::Method::AdminQuarantine => {
+                    "Move to Quarantine"
+                }
             };
             if kit::danger(ui, &t, label) {
                 go = true;

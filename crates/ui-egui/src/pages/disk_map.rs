@@ -786,7 +786,7 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
     let total: u64 = items.iter().map(|i| i.1).sum();
     let dest = match app.settings.method {
         Method::Trash => "the Trash",
-        Method::Quarantine => "the CleanCraft quarantine",
+        Method::Quarantine | Method::AdminQuarantine => "the CleanCraft quarantine",
     };
     let mut go = false;
     let mut close = false;
@@ -823,7 +823,7 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
         ui.horizontal(|ui| {
             let label = match app.settings.method {
                 Method::Trash => "Move to Trash",
-                Method::Quarantine => "Move to Quarantine",
+                Method::Quarantine | Method::AdminQuarantine => "Move to Quarantine",
             };
             if kit::danger(ui, &t, label) {
                 go = true;

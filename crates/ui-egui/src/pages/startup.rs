@@ -480,7 +480,9 @@ fn confirm_remove(app: &mut CleanApp, ui: &mut Ui) {
     };
     let (dest, label) = match app.settings.method {
         Method::Trash => ("the Trash", "Move to Trash"),
-        Method::Quarantine => ("the CleanCraft quarantine", "Move to Quarantine"),
+        Method::Quarantine | Method::AdminQuarantine => {
+            ("the CleanCraft quarantine", "Move to Quarantine")
+        }
     };
     let mut go = false;
     let mut close = false;

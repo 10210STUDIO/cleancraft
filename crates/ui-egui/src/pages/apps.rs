@@ -667,7 +667,7 @@ fn file_row(app: &CleanApp, ui: &mut Ui, it: &cleancraft_core::Item) -> Option<b
             ui.label(RichText::new(human_size(it.size)).font(font(13.0, Weight::SemiBold)));
             let why = match &it.locked {
                 Some(l) => format!("{} ({l})", it.reason),
-                None => it.reason.clone(),
+                None => super::plan_page::reason_text(it),
             };
             ui.label(
                 RichText::new(why)
@@ -874,7 +874,7 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, action: Action) {
     };
     let dest = match app.settings.method {
         Method::Trash => "the Trash",
-        Method::Quarantine => "the CleanCraft quarantine",
+        Method::Quarantine | Method::AdminQuarantine => "the CleanCraft quarantine",
     };
     let name = app
         .apps
@@ -900,6 +900,11 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, action: Action) {
             &t,
             "These exact files will be moved. You can put them back from History.",
         );
+        if let Some(note) =
+            super::plan_page::admin_note(cleancraft_core::features::admin_count(&plan))
+        {
+            ui.label(RichText::new(note).color(t.warning));
+        }
         egui::ScrollArea::vertical()
             .max_height(360.0)
             .show(ui, |ui| {
@@ -919,7 +924,7 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, action: Action) {
         ui.horizontal(|ui| {
             let label = match app.settings.method {
                 Method::Trash => "Move to Trash",
-                Method::Quarantine => "Move to Quarantine",
+                Method::Quarantine | Method::AdminQuarantine => "Move to Quarantine",
             };
             if kit::danger(ui, &t, label) {
                 go = true;

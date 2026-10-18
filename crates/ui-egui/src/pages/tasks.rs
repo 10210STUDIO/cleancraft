@@ -232,6 +232,19 @@ fn task_card(app: &mut CleanApp, ui: &mut Ui, info: &tasks::TaskInfo) {
             ),
             None => kit::dim(ui, &t, "Never run by CleanCraft"),
         }
+        // Same rule as Quick Sweep's tune-up count.
+        if let Some(why) = tasks::suggestion(
+            info.id,
+            &app.tasks.last,
+            matches!(ready, Some(Ok(_))),
+            chrono::Utc::now().timestamp(),
+        ) {
+            ui.label(
+                RichText::new(why)
+                    .font(font(11.5, Weight::Medium))
+                    .color(t.accent),
+            );
+        }
         if let Some(r) = app.tasks.results.get(info.id).cloned() {
             let color = match r.outcome {
                 Outcome::Done => t.success,

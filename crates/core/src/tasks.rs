@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
 use std::io;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -402,6 +403,11 @@ pub struct RunResult {
 
 pub const CANCELLED_TEXT: &str = "Cancelled, nothing changed";
 
+/// Tune-up tasks may take long (Spotlight reindex, snapshots, scripts): their own time limit,
+/// longer than the default one of [`crate::sys::Sys::run`]. Administrator steps have
+/// [`crate::sys::ADMIN_TIMEOUT`].
+pub const TASK_TIMEOUT: Duration = Duration::from_secs(20 * 60);
+
 /// The administrator dialog was cancelled: `osascript` reports error -128.
 pub fn is_admin_cancel(out: &CmdOut) -> bool {
     !out.ok()
@@ -479,7 +485,7 @@ pub fn run(env: &Env, p: &Prepared) -> RunResult {
         let res = match step {
             Step::Run { program, args } => {
                 let a: Vec<&str> = args.iter().map(String::as_str).collect();
-                env.sys.run(program, &a)
+                env.sys.run_timeout(program, &a, TASK_TIMEOUT)
             }
             Step::Admin { shell } => env.sys.run_admin(shell),
         };
@@ -516,7 +522,11 @@ pub fn run(env: &Env, p: &Prepared) -> RunResult {
             }
             Err(e) => {
                 r.outcome = Outcome::Failed;
-                r.message = format!("Could not start `{}`: {e}", step.display());
+                r.message = if e.kind() == io::ErrorKind::TimedOut {
+                    format!("Failed: {e}")
+                } else {
+                    format!("Could not start `{}`: {e}", step.display())
+                };
                 output.push_str(&e.to_string());
                 break;
             }
@@ -590,6 +600,57 @@ pub fn last_runs(env: &Env) -> BTreeMap<String, (i64, bool)> {
     m
 }
 
+/// Routine tasks Quick Sweep and the Tune-up Tasks page suggest, with how often (days). Only
+/// housekeeping that is safe to repeat; Spotlight reindex, snapshots, permissions and the
+/// others are run when there is a problem, so they are never suggested.
+pub const ROUTINE: &[(&str, i64)] = &[
+    ("verify_disk", 30),
+    ("rebuild_launch_services", 90),
+    ("speed_up_mail", 30),
+    ("periodic_scripts", 7),
+];
+
+/// Why the task `id` is suggested now, if it is: a routine task that can run on this Mac
+/// (`ready`) and that CleanCraft never ran, whose last run failed, or whose last good run is
+/// older than its interval. `last` is [`last_runs`]; `now` in seconds.
+pub fn suggestion(
+    id: &str,
+    last: &BTreeMap<String, (i64, bool)>,
+    ready: bool,
+    now: i64,
+) -> Option<String> {
+    let days = ROUTINE.iter().find(|(t, _)| *t == id)?.1;
+    if !ready {
+        return None;
+    }
+    match last.get(id) {
+        None => Some("Suggested: never run by CleanCraft".into()),
+        Some((_, false)) => Some("Suggested: the last run failed".into()),
+        Some((ts, true)) if now - ts > days * 86_400 => {
+            Some(format!("Suggested: last run more than {days} days ago"))
+        }
+        Some(_) => None,
+    }
+}
+
+/// The routine tasks suggested now, with why (same rule as the Tune-up Tasks page).
+pub fn suggestions(env: &Env) -> Vec<(&'static str, String)> {
+    let last = last_runs(env);
+    let now = chrono::Utc::now().timestamp();
+    ROUTINE
+        .iter()
+        .filter_map(|(id, _)| {
+            let ready = prepare(env, id).is_ok();
+            suggestion(id, &last, ready, now).map(|why| (*id, why))
+        })
+        .collect()
+}
+
+/// Quick Sweep's tune-up tile.
+pub fn suggestion_count(env: &Env, _settings: &crate::settings::Settings) -> anyhow::Result<usize> {
+    Ok(suggestions(env).len())
+}
+
 /// "task-flush_dns-1760000000000" -> "flush_dns".
 pub fn task_of_plan(plan_id: &str) -> Option<String> {
     let rest = plan_id.strip_prefix("task-")?;
@@ -623,6 +684,38 @@ mod tests {
             vec!["2026-10-17-101530", "2026-10-18-091200"]
         );
         assert!(parse_snapshots("Snapshots for disk /:\n").is_empty());
+    }
+
+    #[test]
+    fn routine_suggestions() {
+        let now = 100 * 86_400;
+        let mut last = BTreeMap::new();
+        assert_eq!(
+            suggestion("verify_disk", &last, true, now).as_deref(),
+            Some("Suggested: never run by CleanCraft")
+        );
+        assert_eq!(
+            suggestion("verify_disk", &last, false, now),
+            None,
+            "cannot run here"
+        );
+        assert_eq!(
+            suggestion("reindex_spotlight", &last, true, now),
+            None,
+            "not routine"
+        );
+        last.insert("verify_disk".to_string(), (now - 10 * 86_400, true));
+        assert_eq!(suggestion("verify_disk", &last, true, now), None);
+        last.insert("verify_disk".to_string(), (now - 31 * 86_400, true));
+        assert_eq!(
+            suggestion("verify_disk", &last, true, now).as_deref(),
+            Some("Suggested: last run more than 30 days ago")
+        );
+        last.insert("verify_disk".to_string(), (now - 86_400, false));
+        assert_eq!(
+            suggestion("verify_disk", &last, true, now).as_deref(),
+            Some("Suggested: the last run failed")
+        );
     }
 
     #[test]

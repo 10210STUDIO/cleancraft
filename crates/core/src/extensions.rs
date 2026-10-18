@@ -136,7 +136,8 @@ pub fn scan(ctx: &ScanCtx<'_>, allow: &[PathBuf], plan: &mut Plan) {
                 false,
             );
             if !writable {
-                plan.lock(id, "Needs administrator rights");
+                // App Remover allows administrator moves: the confirmation asks for the password.
+                plan.mark_admin(id);
             }
         }
     }
