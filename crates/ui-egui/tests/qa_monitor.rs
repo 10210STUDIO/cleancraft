@@ -8,7 +8,7 @@ mod common;
 use std::time::Duration;
 
 use cleancraft_core::executor::history;
-use cleancraft_core::fsutil::{human_size, memory_size, tree_size};
+use cleancraft_core::fsutil::{human_size, memory_size};
 use cleancraft_core::monitor::{BatteryReading, PURGE_COMMAND, pct, rate_text, uptime_text};
 use cleancraft_core::testkit::FakeMac;
 use cleancraft_core::testkit_monitor::*;
@@ -69,7 +69,7 @@ fn cards_show_the_parsed_reading() {
     assert!(has(&h, &format!("{} free", human_size(free))));
     assert!(has(&h, &human_size(s.storage.total.unwrap())));
     // Trash size recalculated from disk.
-    let trash = tree_size(&m.env.user_trash()).0;
+    let trash = cleancraft_core::features::trash::contents_size(&m.env.user_trash()).0;
     assert_eq!(s.storage.trash, Some(trash));
     assert!(has(&h, &human_size(trash)));
 

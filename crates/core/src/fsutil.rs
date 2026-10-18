@@ -97,6 +97,21 @@ pub fn tree_size_with_links(p: &Path) -> (u64, Vec<((u64, u64), u64)>) {
     (total, links)
 }
 
+/// What a folder holds, without the folder itself (how big the Trash is): the entries' sizes
+/// with the shared formula (a hard-linked file once), the number of entries, and the
+/// unreadable parts.
+pub fn contents_size(dir: &Path) -> (u64, usize, u32) {
+    let kids = children(dir);
+    let mut seen = HashSet::new();
+    let (mut size, mut unreadable) = (0, 0);
+    for k in &kids {
+        let (s, u) = tree_size_once(k, &mut seen);
+        size += s;
+        unreadable += u;
+    }
+    (size, kids.len(), unreadable)
+}
+
 /// Number of files (non-directories) in a tree.
 pub fn tree_file_count(p: &Path) -> u64 {
     let Ok(md) = fs::symlink_metadata(p) else {

@@ -481,7 +481,6 @@ fn memory_total_reads_like_the_mac() {
 }
 
 #[test]
-#[ignore = "DAT-8: Live Monitor Trash size and Trash Bins size of the same ~/.Trash use different formulas"]
 fn monitor_trash_equals_trash_bins() {
     let (m, s) = sampled();
     m.home_file(".Trash/folder/a.bin", 300_000);

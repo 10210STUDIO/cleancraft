@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::env::{Env, Fault};
 use crate::executor::{self, ActionKind, ActionRecord};
-use crate::fsutil::{human_size, memory_size, tree_size};
+use crate::fsutil::{human_size, memory_size};
 use crate::plan::FeatureId;
 
 /// Free space below this share of the disk raises the low-space alert.
@@ -762,7 +762,9 @@ pub fn trash_size(env: &Env) -> (Option<u64>, Option<String>) {
     }
     match std::fs::read_dir(&t) {
         Ok(_) => {
-            let (size, unreadable) = tree_size(&t);
+            // What the Trash holds, the same number as Trash Bins (the folder itself is not
+            // counted: an empty Trash is Zero KB).
+            let (size, _, unreadable) = crate::fsutil::contents_size(&t);
             if unreadable > 0 {
                 (
                     Some(size),
