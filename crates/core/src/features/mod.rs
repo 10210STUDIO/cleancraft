@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::env::Env;
-use crate::executor::{self, ExecError, Method, Report};
-use crate::plan::{FeatureId, Plan};
+use crate::executor::{self, ExecError, Method, Report, SkipReason};
+use crate::plan::{FeatureId, Item, Plan};
 use crate::policy;
 use crate::settings::Settings;
 
@@ -67,6 +67,26 @@ pub trait Feature: Send + Sync {
     fn allows_admin(&self) -> bool {
         false
     }
+    /// Check one selected item again, right before anything moves, with the same rules the
+    /// scan used to propose it. A saved plan is a plain file that a person or an agent can
+    /// edit, so neither its categories, its locks nor its groups are trusted: only what this
+    /// function finds on disk now. `Err` says why the item is refused (it is skipped, the
+    /// rest goes on). The allow-list and [`policy::check_move`] run after this anyway.
+    fn validate(
+        &self,
+        _env: &Env,
+        _settings: &Settings,
+        _plan: &Plan,
+        _item: &Item,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+    /// Rules about the selection as a whole (Duplicates: one copy of every content stays on
+    /// disk), checked after [`Feature::validate`] on the items that passed it. `Err` stops
+    /// the whole run: nothing moves.
+    fn validate_set(&self, _env: &Env, _settings: &Settings, _plan: &Plan) -> anyhow::Result<()> {
+        Ok(())
+    }
     /// Work needed right before the confirmed items move, e.g. unloading a launch agent.
     /// Runs only for the confirmed selection; must log what it does to the journal.
     fn prepare(&self, _env: &Env, _plan: &Plan) -> anyhow::Result<()> {
@@ -74,8 +94,10 @@ pub trait Feature: Send + Sync {
     }
 }
 
-/// Carry out a confirmed plan the one way every front end uses: the feature's allow-list,
-/// its method override, its preparation, then the executor.
+/// Carry out a confirmed plan the one way every front end uses: every selected item checked
+/// again by its feature ([`Feature::validate`], [`Feature::validate_set`]) and against the
+/// ignore list, the feature's allow-list, its method override, its preparation, then the
+/// executor. Refused items are reported as skipped and never reach the executor.
 pub fn run_plan(
     env: &Env,
     settings: &Settings,
@@ -106,18 +128,74 @@ pub fn run_plan_with(
     if plan.digest() != confirmed_digest {
         return Err(ExecError::DigestMismatch.into());
     }
+    let (checked, refused) = validated(f, env, settings, plan);
+    f.validate_set(env, settings, &checked)?;
     let allow = f.allow_roots(env);
     let method = f.method_override().unwrap_or(settings.method);
-    f.prepare(env, plan)?;
-    Ok(executor::execute_with(
+    f.prepare(env, &checked)?;
+    let mut report = executor::execute_with(
         env,
-        plan,
+        &checked,
         &allow,
-        confirmed_digest,
+        &checked.digest(),
         method,
         f.allows_admin(),
         progress,
-    )?)
+    )?;
+    report.skipped.splice(0..0, refused);
+    Ok(report)
+}
+
+/// `plan` with every selected item that fails [`Feature::validate`] or is on the ignore list
+/// unselected, and those items with the reason.
+fn validated(
+    f: &dyn Feature,
+    env: &Env,
+    settings: &Settings,
+    plan: &Plan,
+) -> (Plan, Vec<(PathBuf, SkipReason)>) {
+    let mut checked = plan.clone();
+    let mut refused = Vec::new();
+    // By position, not by `Item::id`: an edited plan may carry any ids.
+    for (n, it) in plan.items.iter().enumerate() {
+        if !(it.selected && it.locked.is_none()) {
+            continue;
+        }
+        let why = if settings.is_ignored(&it.path) {
+            Err("it is on your ignore list".to_string())
+        } else {
+            f.validate(env, settings, plan, it)
+        };
+        if let Err(why) = why {
+            checked.items[n].selected = false;
+            refused.push((it.path.clone(), SkipReason::Refused(why)));
+        }
+    }
+    (checked, refused)
+}
+
+/// Keep only the items `only` (item ids) of the plan's confirmed selection: what an agent may
+/// do with MCP `execute_plan` `only_items`. It can only narrow the list the user confirmed
+/// (the digest was checked on it), never add an item to it: an id that is not selected now is
+/// refused and nothing changes.
+pub fn narrow_selection(plan: &mut Plan, only: &[usize]) -> Result<(), String> {
+    for id in only {
+        let ok = plan
+            .items
+            .iter()
+            .any(|i| i.id == *id && i.selected && i.locked.is_none());
+        if !ok {
+            return Err(format!(
+                "Refused: item {id} is not in the confirmed list. only_items can only leave items out."
+            ));
+        }
+    }
+    for it in plan.items.iter_mut() {
+        if !only.contains(&it.id) {
+            it.selected = false;
+        }
+    }
+    Ok(())
 }
 
 /// How many selected items of `plan` will move with the administrator password (its feature

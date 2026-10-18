@@ -203,7 +203,6 @@ fn dom2_folder_holding_a_protected_place_is_not_protected() {
 // DOM-3: Large & Old Files (and Duplicates) may remove anything in the home folder.
 
 #[test]
-#[ignore = "DOM-3: Large & Old / Duplicates allow-list is the whole home: an edited plan moves ~/.ssh keys, a POP mailbox and the Contacts database"]
 fn dom3_large_old_allow_list_is_wider_than_the_row() {
     let m = FakeMac::new();
     let env = &m.env;
@@ -217,7 +216,10 @@ fn dom3_large_old_allow_list_is_wider_than_the_row() {
         "Library/Application Support/AddressBook/AddressBook-v22.abcddb",
         5_000,
     );
-    let music = m.home_file("Music/Music/Music Library.musiclibrary/Library.musicdb", 5_000);
+    let music = m.home_file(
+        "Music/Music/Music Library.musiclibrary/Library.musicdb",
+        5_000,
+    );
     let pop_mbox = env.home_path("Library/Mail/V10/POP-me@pop.example/INBOX.mbox");
     let plan = ctx_scan(env, &small_files(), |c| {
         large_old::scan_location(c, &Location::Downloads)
@@ -244,7 +246,6 @@ fn dom3_large_old_allow_list_is_wider_than_the_row() {
 // DOM-4: the last copy of a duplicate set.
 
 #[test]
-#[ignore = "DOM-4: an edited Duplicates plan without group keys moves every copy of a set"]
 fn dom4_duplicates_core_check_trusts_the_group_field() {
     let m = FakeMac::new();
     let env = &m.env;
@@ -298,7 +299,6 @@ fn dom5_mcp_only_items_widens_the_confirmed_selection() {
 // DOM-6: System Junk locks are scan-time only.
 
 #[test]
-#[ignore = "DOM-6: an edited System Junk plan moves the newest iOS backup and the iCloud cache com.apple.bird"]
 fn dom6_system_junk_locks_and_icloud_cache_are_not_fenced() {
     let m = junk_mac();
     let env = &m.env;
@@ -335,7 +335,6 @@ fn dom6_system_junk_locks_and_icloud_cache_are_not_fenced() {
 // DOM-7: Apple apps.
 
 #[test]
-#[ignore = "DOM-7: Apple app protection checks only items of category 'app': edited App Remover and Threat Check plans move /Applications/Pages.app"]
 fn dom7_apple_app_moves_when_the_category_is_edited() {
     let m = FakeMac::new();
     let env = &m.env;
@@ -697,6 +696,8 @@ fn trash_bins_and_feature_less_plans_never_move() {
     let mut p = Plan::new(FeatureId::SystemJunk);
     push(&mut p, &t, "x");
     p.feature = None;
-    assert!(features::run_plan(env, &Settings::default(), &p, &p.digest(), &mut |_, _| {}).is_err());
+    assert!(
+        features::run_plan(env, &Settings::default(), &p, &p.digest(), &mut |_, _| {}).is_err()
+    );
     assert!(t.exists());
 }

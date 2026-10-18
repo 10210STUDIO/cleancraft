@@ -330,6 +330,37 @@ impl Feature for Uninstaller {
         Ok(plan)
     }
 
+    /// Again before anything moves, whatever the plan's categories say: nothing inside a
+    /// running app.
+    fn validate(
+        &self,
+        env: &Env,
+        _settings: &Settings,
+        _plan: &Plan,
+        item: &crate::plan::Item,
+    ) -> Result<(), String> {
+        for a in item.path.ancestors() {
+            if a.extension().is_some_and(|e| e.eq_ignore_ascii_case("app")) && is_running(env, a) {
+                return Err(format!(
+                    "Quit {} first",
+                    a.file_stem().unwrap_or_default().to_string_lossy()
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Nothing that is, is inside or holds an app of macOS, or is named after an Apple id, may
+    /// be selected, whatever the plan's categories say; one is enough to stop the whole run.
+    fn validate_set(&self, env: &Env, _settings: &Settings, plan: &Plan) -> anyhow::Result<()> {
+        for it in plan.selected() {
+            if let Some(why) = apps::apple_part(&it.path, 3, true) {
+                bail!("{why}: {}. Nothing was moved.", env.display(&it.path));
+            }
+        }
+        Ok(())
+    }
+
     /// Right before anything moves: no app of the plan may be running, and no app that is
     /// part of macOS may be selected.
     fn prepare(&self, env: &Env, plan: &Plan) -> anyhow::Result<()> {

@@ -505,6 +505,40 @@ fn ago(d: u64) -> String {
     }
 }
 
+/// The scan's rules for one item of Large & Old Files, Downloads by source app, Duplicates and
+/// Similar Images, checked again before it moves (an edited plan may name anything in the
+/// home folder): inside the home folder; no folder on the way is skipped by the walk
+/// ([`skipped`]: Library, Documents, Desktop, Applications, the Music and Photo Booth
+/// libraries, hidden names, apps and media libraries, protected places); and it is a file, a
+/// link, a document package, or (Downloads by source app) an entry at the top of Downloads.
+pub fn validate_path(env: &Env, p: &Path) -> Result<(), String> {
+    let home = env.home();
+    if !p.starts_with(home) || p == home || has_parent_component(p) {
+        return Err("not in your home folder".into());
+    }
+    let mut cur = Some(p);
+    while let Some(c) = cur {
+        if c == home {
+            break;
+        }
+        if skipped(env, c) {
+            return Err(format!(
+                "{} is never cleaned by this feature (Library, Documents, Desktop, apps, media libraries and hidden items are left alone)",
+                env.display(c)
+            ));
+        }
+        cur = c.parent();
+    }
+    let md = std::fs::symlink_metadata(p).map_err(|_| "it is no longer there".to_string())?;
+    let top_of_downloads = p
+        .parent()
+        .is_some_and(|d| policy::same_path_ci(d, &env.home_path("Downloads")));
+    if md.is_dir() && !ext_in(p, PACKAGE_EXTS) && !top_of_downloads {
+        return Err("a folder: this feature only removes files and document packages".into());
+    }
+    Ok(())
+}
+
 impl Feature for LargeOldFiles {
     fn id(&self) -> FeatureId {
         FeatureId::LargeOldFiles
@@ -517,6 +551,16 @@ impl Feature for LargeOldFiles {
     fn scan(&self, ctx: &ScanCtx<'_>) -> anyhow::Result<Plan> {
         let loc = ScanOptions::load(ctx.env).large_old;
         scan_location(ctx, &loc)
+    }
+
+    fn validate(
+        &self,
+        env: &Env,
+        _settings: &crate::settings::Settings,
+        _plan: &Plan,
+        item: &crate::plan::Item,
+    ) -> Result<(), String> {
+        validate_path(env, &item.path)
     }
 }
 

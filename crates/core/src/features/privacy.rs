@@ -222,6 +222,16 @@ pub const FIREFOX_FILES: &[(Kind, &[&str])] = &[
 ];
 
 pub const SAFARI_DIR: &str = "Library/Safari";
+/// Safari's trace files in [`SAFARI_DIR`].
+pub const SAFARI_FILES: &[(Kind, &str)] = &[
+    (HISTORY, "History.db"),
+    (HISTORY, "History.db-wal"),
+    (HISTORY, "History.db-shm"),
+    (HISTORY, "History.db-lock"),
+    (SESSIONS, "LastSession.plist"),
+    (DOWNLOADS, "Downloads.plist"),
+    (FORMS, "Form Values"),
+];
 pub const SAFARI_CONTAINER_COOKIES: &str =
     "Library/Containers/com.apple.Safari/Data/Library/Cookies";
 pub const SAFARI_CONTAINER_CACHES: &str = "Library/Containers/com.apple.Safari/Data/Library/Caches";
@@ -259,6 +269,76 @@ pub fn running_browsers(env: &Env) -> Vec<&'static Browser> {
         .iter()
         .filter(|b| apps.iter().any(|a| b.process.iter().any(|p| a.name == *p)))
         .collect()
+}
+
+/// Is `p` a path the Privacy scan can propose? `Some(browser)` for a browser's trace file or
+/// cache, `Some(None)` for a recent items list, `None` for anything else.
+pub fn trace_owner(env: &Env, p: &Path) -> Option<Option<&'static Browser>> {
+    let browser = |id: &str| BROWSERS.iter().find(|b| b.id == id);
+    let under = |base: &str| p.strip_prefix(env.home_path(base)).ok();
+    let names_of = |files: &[(Kind, &[&str])], rel: &Path| {
+        files
+            .iter()
+            .flat_map(|(_, ns)| ns.iter())
+            .any(|n| rel == Path::new(n))
+    };
+    let one = |rel: &Path| rel.components().count() == 1;
+    // Safari.
+    if let Some(rel) = under(SAFARI_DIR)
+        && SAFARI_FILES.iter().any(|(_, n)| rel == Path::new(n))
+    {
+        return Some(browser("safari"));
+    }
+    for d in [SAFARI_CONTAINER_COOKIES, OLD_COOKIES] {
+        if under(d).is_some_and(|r| r == Path::new("Cookies.binarycookies")) {
+            return Some(browser("safari"));
+        }
+    }
+    if p == env.home_path("Library/Caches/com.apple.Safari")
+        || p == env
+            .home_path(SAFARI_CONTAINER_CACHES)
+            .join("com.apple.Safari")
+    {
+        return Some(browser("safari"));
+    }
+    // Chromium browsers: <data>/<profile>/<file> and <cache>/<profile>.
+    for b in BROWSERS {
+        if let Engine::Chromium { data, cache } = b.engine {
+            if let Some(rel) = under(data) {
+                let mut c = rel.components();
+                let prof = c.next().map(|x| env.home_path(data).join(x.as_os_str()));
+                if let Some(prof) = prof
+                    && chromium_profiles(&env.home_path(data)).contains(&prof)
+                    && names_of(CHROMIUM_FILES, c.as_path())
+                {
+                    return Some(Some(b));
+                }
+            }
+            if under(cache).is_some_and(one) {
+                return Some(Some(b));
+            }
+        }
+    }
+    // Firefox.
+    if let Some(rel) = under(FIREFOX_PROFILES) {
+        let mut c = rel.components();
+        if c.next().is_some() && names_of(FIREFOX_FILES, c.as_path()) {
+            return Some(browser("firefox"));
+        }
+    }
+    if under(FIREFOX_CACHE).is_some_and(one) {
+        return Some(browser("firefox"));
+    }
+    // Recent items lists.
+    let n = dir_name(p);
+    let list = (n.ends_with(".sfl2") || n.ends_with(".sfl3")) && p.is_file();
+    if list
+        && (under(SHARED_FILE_LIST).is_some_and(|r| one(r) && n.contains(".Recent"))
+            || under(&format!("{SHARED_FILE_LIST}/{RECENT_DOCS_DIR}")).is_some_and(one))
+    {
+        return Some(None);
+    }
+    None
 }
 
 /// Chromium profile folders: those with a Preferences file, except system and guest ones.
@@ -461,6 +541,45 @@ impl Feature for Privacy {
         v
     }
 
+    /// Only what the scan can propose (the trace files of each browser profile, browser
+    /// caches, recent items lists), whatever the plan's categories and locks say.
+    fn validate(
+        &self,
+        env: &Env,
+        _settings: &crate::settings::Settings,
+        _plan: &Plan,
+        item: &crate::plan::Item,
+    ) -> Result<(), String> {
+        match trace_owner(env, &item.path) {
+            Some(_) => Ok(()),
+            None => Err("not a trace file Privacy Traces cleans".into()),
+        }
+    }
+
+    /// A browser that is open now stops the whole run when any selected item is one of its
+    /// files, found by path (an edited plan may give the item another category).
+    fn validate_set(
+        &self,
+        env: &Env,
+        _settings: &crate::settings::Settings,
+        plan: &Plan,
+    ) -> anyhow::Result<()> {
+        let running = running_browsers(env);
+        let blocked: BTreeSet<&str> = plan
+            .selected()
+            .filter_map(|i| trace_owner(env, &i.path).flatten())
+            .filter(|b| running.iter().any(|r| r.id == b.id))
+            .map(|b| b.name)
+            .collect();
+        if !blocked.is_empty() {
+            anyhow::bail!(
+                "{} is open. Quit it, then scan again.",
+                blocked.into_iter().collect::<Vec<_>>().join(" and ")
+            );
+        }
+        Ok(())
+    }
+
     fn prepare(&self, env: &Env, plan: &Plan) -> anyhow::Result<()> {
         let running = running_browsers(env);
         let blocked: Vec<&str> = running
@@ -584,17 +703,9 @@ impl Scan<'_, '_> {
         if !self.note_unreadable(&dir) {
             return;
         }
-        for (kind, name) in [
-            (HISTORY, "History.db"),
-            (HISTORY, "History.db-wal"),
-            (HISTORY, "History.db-shm"),
-            (HISTORY, "History.db-lock"),
-            (SESSIONS, "LastSession.plist"),
-            (DOWNLOADS, "Downloads.plist"),
-            (FORMS, "Form Values"),
-        ] {
+        for (kind, name) in SAFARI_FILES {
             let p = dir.join(name);
-            self.file(b, &p, kind, None);
+            self.file(b, &p, *kind, None);
         }
         for d in [SAFARI_CONTAINER_COOKIES, OLD_COOKIES] {
             let p = self.env().home_path(d).join("Cookies.binarycookies");

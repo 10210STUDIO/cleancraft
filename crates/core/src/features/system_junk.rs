@@ -351,6 +351,21 @@ impl Feature for SystemJunk {
         v
     }
 
+    /// The scan's rules again, for an item about to move (an edited plan may unlock or add
+    /// anything inside the allow-list): never an iCloud or sign-in cache ([`KEEP_CACHES`]) or a
+    /// hidden entry; the newest backup of each device stays; in Downloads only unfinished
+    /// downloads and disk images; in Preferences only plists macOS's `plutil` finds damaged;
+    /// in LaunchAgents only agents whose program is gone.
+    fn validate(
+        &self,
+        env: &Env,
+        _settings: &crate::settings::Settings,
+        _plan: &Plan,
+        item: &crate::plan::Item,
+    ) -> Result<(), String> {
+        validate_item(env, &self.allow_roots(env), &item.path)
+    }
+
     fn scan(&self, ctx: &ScanCtx<'_>) -> anyhow::Result<Plan> {
         let mut s = Scanner {
             ctx,
@@ -1234,8 +1249,99 @@ impl Scanner<'_, '_> {
 }
 
 fn keep(p: &Path) -> bool {
-    let n = name_of(p);
-    KEEP_CACHES.iter().any(|k| *k == n) || n.starts_with('.')
+    p.file_name().is_some_and(kept_name)
+}
+
+/// A name System Junk never proposes: an iCloud or sign-in cache, or a hidden entry. Letter case
+/// does not matter (a default Mac volume ignores it).
+fn kept_name(n: &std::ffi::OsStr) -> bool {
+    n.to_string_lossy().starts_with('.')
+        || KEEP_CACHES
+            .iter()
+            .any(|k| policy::same_name(n, std::ffi::OsStr::new(k)))
+}
+
+/// See [`SystemJunk`]'s `validate`. `allow` is the feature's allow-list.
+pub fn validate_item(env: &Env, allow: &[PathBuf], p: &Path) -> Result<(), String> {
+    // The deepest allow-list folder holding the item (the fence refuses items outside it).
+    let Some(root) = allow
+        .iter()
+        .filter(|r| p.starts_with(r) && p != r.as_path())
+        .max_by_key(|r| r.components().count())
+    else {
+        return Ok(());
+    };
+    let rel = p.strip_prefix(root).unwrap_or(p);
+    if rel.components().any(|c| kept_name(c.as_os_str())) {
+        return Err("iCloud, sign-in and hidden data are never cleaned".into());
+    }
+    let is = |r: &str| root == &resolve(env, r);
+    let one_level = rel.components().count() == 1;
+    if is("~/Library/Application Support/MobileSync/Backup") {
+        if !one_level {
+            return Err("only whole backups are removed".into());
+        }
+        let mut newest: BTreeMap<String, (i64, PathBuf)> = BTreeMap::new();
+        for b in children(root).into_iter().filter(|b| real_dir(b)) {
+            let info = backup_info(&b);
+            let e = newest
+                .entry(info.device_id)
+                .or_insert((info.date, b.clone()));
+            if info.date > e.0 {
+                *e = (info.date, b);
+            }
+        }
+        if newest.values().any(|(_, b)| policy::same_path_ci(b, p)) {
+            return Err(LOCK_NEWEST.into());
+        }
+    } else if is("~/Downloads") {
+        let ext = |q: &Path| {
+            q.extension()
+                .map(|x| x.to_string_lossy().to_lowercase())
+                .unwrap_or_default()
+        };
+        let unfinished = one_level && ["download", "crdownload", "part"].contains(&ext(p).as_str());
+        let image = std::fs::symlink_metadata(p).is_ok_and(|m| m.is_file())
+            && ext(p) == "dmg"
+            && rel.parent().is_none_or(|d| {
+                d.components().all(|c| {
+                    let n = c.as_os_str().to_string_lossy().to_lowercase();
+                    !(n.ends_with(".app")
+                        || n.ends_with(".download")
+                        || n.ends_with(".photoslibrary"))
+                })
+            });
+        if !unfinished && !image {
+            return Err(
+                "in Downloads only unfinished downloads and disk images are cleaned".into(),
+            );
+        }
+    } else if is("~/Library/Preferences") {
+        let in_place = one_level || rel.parent().is_some_and(|d| d == Path::new("ByHost"));
+        let plist = p.extension().is_some_and(|e| e == "plist") && p.is_file();
+        if !in_place || !plist || plist_readable(p) {
+            return Err("only damaged preference files are removed".into());
+        }
+        let fs = p.to_string_lossy().into_owned();
+        match env.sys.run("/usr/bin/plutil", &["-lint", &fs]) {
+            Ok(o) if !o.ok() => {}
+            _ => return Err(LOCK_UNCHECKED.into()),
+        }
+    } else if is("~/Library/LaunchAgents") {
+        let broken = one_level
+            && p.extension().is_some_and(|e| e == "plist")
+            && plist::Value::from_file(p)
+                .ok()
+                .as_ref()
+                .and_then(agent_program)
+                .is_some_and(|prog| {
+                    prog.starts_with('/') && std::fs::symlink_metadata(env.sys_path(&prog)).is_err()
+                });
+        if !broken {
+            return Err("only startup agents whose program is gone are removed".into());
+        }
+    }
+    Ok(())
 }
 
 /// "Example-2026-05-01-101010.ips" -> "Example"; "Example_2026...crash" -> "Example".

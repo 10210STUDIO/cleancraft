@@ -270,6 +270,89 @@ pub fn check_keeps(plan: &Plan) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Content hash of a regular file (links and folders have none).
+fn file_hash(p: &Path) -> Option<[u8; 32]> {
+    let md = std::fs::symlink_metadata(p).ok()?;
+    if !md.is_file() {
+        return None;
+    }
+    hash_full(p).ok()
+}
+
+/// (device, inode) of a path, without following a link.
+fn ident(p: &Path) -> Option<(u64, u64)> {
+    std::fs::symlink_metadata(p)
+        .ok()
+        .as_ref()
+        .and_then(inode_of)
+}
+
+/// The set rule checked again before any move, without trusting the plan's `group` keys: for
+/// every selected file, at least one copy must stay, i.e. an item of the plan that is not
+/// selected, still a file on disk, a different file (not the same inode, which on a
+/// case-insensitive Mac includes the same path spelled differently), reached from the selected
+/// file through items that `same` finds alike now (Similar Images sets are chains of
+/// look-alikes; for Duplicates `same` is equal content, so a chain is one set).
+pub fn check_copies_stay(plan: &Plan, same: &dyn Fn(&Path, &Path) -> bool) -> anyhow::Result<()> {
+    let files: Vec<(&Item, Option<(u64, u64)>, bool)> = plan
+        .items
+        .iter()
+        .filter(|i| std::fs::symlink_metadata(&i.path).is_ok_and(|m| m.is_file()))
+        .map(|i| (i, ident(&i.path), i.selected && i.locked.is_none()))
+        .collect();
+    for it in plan.selected() {
+        let me = ident(&it.path);
+        let mut seen = vec![false; files.len()];
+        let mut stack = vec![it.path.as_path()];
+        let mut kept = false;
+        'search: while let Some(cur) = stack.pop() {
+            for (n, (k, id, sel)) in files.iter().enumerate() {
+                if seen[n] || k.path == it.path || (me.is_some() && *id == me) {
+                    continue;
+                }
+                if same(cur, &k.path) {
+                    seen[n] = true;
+                    if !sel {
+                        kept = true;
+                        break 'search;
+                    }
+                    stack.push(&k.path);
+                }
+            }
+        }
+        if !kept {
+            let name = it
+                .path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            anyhow::bail!(
+                "No other copy of {name} would stay on disk. Keep at least one copy in each set; nothing was moved."
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Same length and same BLAKE3 hash of the whole content, each file read once.
+pub fn content_matcher() -> impl Fn(&Path, &Path) -> bool {
+    let memo: std::cell::RefCell<HashMap<PathBuf, Option<[u8; 32]>>> = Default::default();
+    move |a: &Path, b: &Path| {
+        let len = |p: &Path| std::fs::symlink_metadata(p).ok().map(|m| m.len());
+        if len(a).is_none() || len(a) != len(b) {
+            return false;
+        }
+        let get = |p: &Path| {
+            *memo
+                .borrow_mut()
+                .entry(p.to_path_buf())
+                .or_insert_with(|| file_hash(p))
+        };
+        let x = get(a);
+        x.is_some() && x == get(b)
+    }
+}
+
 impl Feature for Duplicates {
     fn id(&self) -> FeatureId {
         FeatureId::Duplicates
@@ -286,6 +369,30 @@ impl Feature for Duplicates {
 
     fn prepare(&self, _env: &Env, plan: &Plan) -> anyhow::Result<()> {
         check_keeps(plan)
+    }
+
+    /// The Large & Old rules, and only regular files (copies are files, never folders).
+    fn validate(
+        &self,
+        env: &Env,
+        _settings: &crate::settings::Settings,
+        _plan: &Plan,
+        item: &Item,
+    ) -> Result<(), String> {
+        super::large_old::validate_path(env, &item.path)?;
+        match std::fs::symlink_metadata(&item.path) {
+            Ok(m) if m.is_file() => Ok(()),
+            _ => Err("not a file: only copies of files are removed".into()),
+        }
+    }
+
+    fn validate_set(
+        &self,
+        _env: &Env,
+        _settings: &crate::settings::Settings,
+        plan: &Plan,
+    ) -> anyhow::Result<()> {
+        check_copies_stay(plan, &content_matcher())
     }
 }
 

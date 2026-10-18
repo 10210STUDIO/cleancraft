@@ -88,6 +88,47 @@ pub struct BundleInfo {
 }
 
 /// Read an app's Info.plist (binary or XML).
+/// Why `p` must never be removed as part of macOS, if it must not: it is, is inside, or holds
+/// (up to `depth` folders down) an app whose bundle id starts with `com.apple.`, or it is a
+/// Library entry named after an Apple id (`com.apple.Safari.plist`, `group.com.apple.notes`)
+/// when `by_name` (off for Threat Check: unwanted software often borrows Apple names).
+/// Read from disk now, so an edited plan cannot hide it.
+pub fn apple_part(p: &Path, depth: usize, by_name: bool) -> Option<String> {
+    let apple_id = |id: &str| id.to_ascii_lowercase().starts_with("com.apple.");
+    let apple_app = |a: &Path| {
+        a.extension().is_some_and(|e| e.eq_ignore_ascii_case("app"))
+            && read_bundle(a).is_some_and(|b| apple_id(&b.bundle_id))
+    };
+    for a in p.ancestors() {
+        if apple_app(a) {
+            let name = a.file_stem().map(|s| s.to_string_lossy().into_owned());
+            return Some(format!(
+                "{} is part of macOS and cannot be removed",
+                name.unwrap_or_default()
+            ));
+        }
+    }
+    if by_name
+        && let Some(n) = p.file_name().and_then(|n| n.to_str())
+        && apple_id(crate::features::uninstaller::id_part(n))
+    {
+        return Some(format!("{n} belongs to macOS"));
+    }
+    let mut stack = vec![(p.to_path_buf(), 0usize)];
+    while let Some((dir, d)) = stack.pop() {
+        if d >= depth || !std::fs::symlink_metadata(&dir).is_ok_and(|m| m.is_dir()) {
+            continue;
+        }
+        for c in crate::fsutil::children(&dir) {
+            if apple_app(&c) {
+                return Some(format!("it holds {}, part of macOS", c.display()));
+            }
+            stack.push((c, d + 1));
+        }
+    }
+    None
+}
+
 pub fn read_bundle(app: &Path) -> Option<BundleInfo> {
     let v = plist::Value::from_file(app.join("Contents/Info.plist")).ok()?;
     let d = v.as_dictionary()?;

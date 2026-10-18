@@ -21,7 +21,7 @@ use crate::env::Env;
 use crate::features::{Feature, ScanCtx};
 use crate::plan::{FeatureId, Plan, Risk};
 
-use super::duplicates::{KeepRule, apply_keep_rule, check_keeps};
+use super::duplicates::{KeepRule, apply_keep_rule, check_copies_stay, check_keeps};
 use super::large_old::walk_area;
 
 pub struct SimilarImages;
@@ -277,6 +277,43 @@ impl Feature for SimilarImages {
 
     fn prepare(&self, _env: &Env, plan: &Plan) -> anyhow::Result<()> {
         check_keeps(plan)
+    }
+
+    /// The Large & Old rules, inside Pictures or Downloads, a picture file.
+    fn validate(
+        &self,
+        env: &Env,
+        _settings: &crate::settings::Settings,
+        _plan: &Plan,
+        item: &crate::plan::Item,
+    ) -> Result<(), String> {
+        super::large_old::validate_path(env, &item.path)?;
+        let is_file = std::fs::symlink_metadata(&item.path).is_ok_and(|m| m.is_file());
+        if !is_file || !IMAGE_EXTS.contains(&ext(&item.path).as_str()) {
+            return Err("not a picture file".into());
+        }
+        Ok(())
+    }
+
+    /// One look-alike stays per picture, decided by decoding the pictures again now.
+    fn validate_set(
+        &self,
+        env: &Env,
+        _settings: &crate::settings::Settings,
+        plan: &Plan,
+    ) -> anyhow::Result<()> {
+        let memo: std::cell::RefCell<std::collections::HashMap<PathBuf, Option<u64>>> =
+            Default::default();
+        let hash = |p: &Path| {
+            *memo
+                .borrow_mut()
+                .entry(p.to_path_buf())
+                .or_insert_with(|| decode(env, p).map(|i| dhash(&i)))
+        };
+        check_copies_stay(plan, &|a, b| match (hash(a), hash(b)) {
+            (Some(x), Some(y)) => distance(x, y) <= MAX_DISTANCE,
+            _ => false,
+        })
     }
 }
 
