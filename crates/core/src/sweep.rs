@@ -192,8 +192,10 @@ pub fn run(
         };
         progress(id.title());
         let result = match sources.feature(id) {
-            Some(f) => features::run_plan_with(f.as_ref(), env, settings, plan, digest, &mut |_, _| {})
-                .map_err(|e| format!("{e:#}")),
+            Some(f) => {
+                features::run_plan_with(f.as_ref(), env, settings, plan, digest, &mut |_, _| {})
+                    .map_err(|e| format!("{e:#}"))
+            }
             None => Err(format!("{} is not available", id.title())),
         };
         out.push(ModuleRun { id, result });

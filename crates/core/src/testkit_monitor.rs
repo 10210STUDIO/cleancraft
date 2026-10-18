@@ -130,7 +130,6 @@ en0        1500  <Link#11>   aa:bb:cc:dd:ee:ff  5001000     0 6004000000  300050
 utun0      1380  <Link#16>                          100     0      20000      120     0      30000     0
 ";
 
-
 /// Answer every Live Monitor command with the samples (network: the first sample).
 pub fn answer_all(fake: &FakeSys) {
     fake.answer("sysctl", SYSCTL);
@@ -170,7 +169,12 @@ impl Feature for TestMail {
     }
     fn scan(&self, ctx: &ScanCtx<'_>) -> anyhow::Result<Plan> {
         let mut p = Plan::new(FeatureId::MailAttachments);
-        p.add_category("dl", "Mail downloads", "Copies of attachments.", Risk::Medium);
+        p.add_category(
+            "dl",
+            "Mail downloads",
+            "Copies of attachments.",
+            Risk::Medium,
+        );
         for c in children(&ctx.env.home_path("Library/Mail Downloads")) {
             let keep = c.file_name().unwrap().to_string_lossy().starts_with("keep");
             p.push(
@@ -215,7 +219,14 @@ impl Feature for TestTrash {
         let mut p = Plan::new(FeatureId::TrashBins);
         p.add_category("t", "Trash", "In the Trash.", Risk::Low);
         for c in children(&ctx.env.user_trash()) {
-            p.push(c.clone(), tree_size(&c).0, "t", "in the Trash", Risk::Low, true);
+            p.push(
+                c.clone(),
+                tree_size(&c).0,
+                "t",
+                "in the Trash",
+                Risk::Low,
+                true,
+            );
         }
         Ok(p)
     }
@@ -251,4 +262,3 @@ pub fn sweep_mac() -> FakeMac {
     m.home_file(".Trash/old.dmg", 800_000);
     m
 }
-

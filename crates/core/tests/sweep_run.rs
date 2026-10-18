@@ -84,7 +84,10 @@ fn tiles_match_each_plan() {
         r.ready_bytes(&[]),
         junk.selected_size() + mail.selected_size()
     );
-    assert_eq!(r.ready_bytes(&[FeatureId::MailAttachments]), junk.selected_size());
+    assert_eq!(
+        r.ready_bytes(&[FeatureId::MailAttachments]),
+        junk.selected_size()
+    );
 }
 
 #[test]
@@ -104,8 +107,7 @@ fn run_moves_exactly_the_confirmed_files_and_undo_per_module() {
         .filter_map(|t| t.plan())
         .flat_map(|p| p.items.iter().map(|i| i.path.clone()))
         .collect();
-    let confirmed: Vec<(Plan, String)> =
-        plans.iter().map(|p| (p.clone(), p.digest())).collect();
+    let confirmed: Vec<(Plan, String)> = plans.iter().map(|p| (p.clone(), p.digest())).collect();
     let runs = sweep::run(&m.env, &Settings::default(), &s, &confirmed, &|_| {});
     assert_eq!(runs.len(), 2);
     for p in &all {
@@ -116,7 +118,10 @@ fn run_moves_exactly_the_confirmed_files_and_undo_per_module() {
             p.display()
         );
     }
-    assert!(m.env.home_path(".Trash/old.dmg").exists(), "Trash untouched");
+    assert!(
+        m.env.home_path(".Trash/old.dmg").exists(),
+        "Trash untouched"
+    );
     // Undo only Mail.
     let mail_run = runs
         .iter()
@@ -149,10 +154,20 @@ fn changed_list_and_missing_module_are_refused_others_go_on() {
     let m = sweep_mac();
     let s = sweep_sources();
     let r = scan(&m, &s);
-    let mut junk = r.tile(FeatureId::SystemJunk).unwrap().plan().unwrap().clone();
+    let mut junk = r
+        .tile(FeatureId::SystemJunk)
+        .unwrap()
+        .plan()
+        .unwrap()
+        .clone();
     let digest = junk.digest();
     junk.set_selected(0, false); // the list changed after confirming
-    let mail = r.tile(FeatureId::MailAttachments).unwrap().plan().unwrap().clone();
+    let mail = r
+        .tile(FeatureId::MailAttachments)
+        .unwrap()
+        .plan()
+        .unwrap()
+        .clone();
     let mut orphan = Plan::new(FeatureId::Duplicates);
     orphan.push(m.env.home_path("Downloads/x"), 1, "c", "r", Risk::Low, true);
     let confirmed = vec![

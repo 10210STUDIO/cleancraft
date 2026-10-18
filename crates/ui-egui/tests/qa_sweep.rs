@@ -70,7 +70,11 @@ fn tiles_show_each_module_plan() {
     assert!(has(&h, &human_size(ml)), "mail tile {}", human_size(ml));
     assert!(has(
         &h,
-        &format!("{} of {} items selected", mail.selected_count(), mail.items.len())
+        &format!(
+            "{} of {} items selected",
+            mail.selected_count(),
+            mail.items.len()
+        )
     ));
     assert_eq!(mail.selected_count(), 2);
     let t: u64 = trash.items.iter().map(|i| tree_size(&i.path).0).sum();
@@ -122,7 +126,10 @@ fn run_lists_everything_moves_exactly_that_and_undo_per_module() {
         assert_eq!(p.exists(), !listed.contains(p), "{}", p.display());
     }
     assert!(has(&h, &format!("{} freed", human_size(expect_freed))));
-    assert!(has(&h, &format!("2 moved, 0 skipped, {}", human_size(mail_size))));
+    assert!(has(
+        &h,
+        &format!("2 moved, 0 skipped, {}", human_size(mail_size))
+    ));
     // Undo only Mail (second result card).
     assert_eq!(h.query_all_by_label("Undo").count(), 2);
     click_nth(&mut h, "Undo", 1);

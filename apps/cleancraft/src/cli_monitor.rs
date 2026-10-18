@@ -52,10 +52,11 @@ pub fn status_text(s: &Snapshot) -> String {
     ));
     o.push(format!(
         "Network    {}",
-        or_unknown(
-            s.network
-                .map(|n| format!("down {}, up {}", rate_text(n.down), rate_text(n.up)))
-        )
+        or_unknown(s.network.map(|n| format!(
+            "down {}, up {}",
+            rate_text(n.down),
+            rate_text(n.up)
+        )))
     ));
     for a in monitor::alerts(s) {
         o.push(format!("alert: {}", a.text));
@@ -114,7 +115,9 @@ mod tests {
     #[test]
     fn status_lines() {
         let m = FakeMac::new();
-        answer_all(m.env.fake_sys().unwrap());
+        if let Some(f) = m.env.fake_sys() {
+            answer_all(f);
+        }
         let out = status(&m.env, false, std::time::Duration::ZERO).unwrap_or_default();
         assert!(out.contains("CPU        17%"), "{out}");
         assert!(out.contains("Battery    64%, discharging"), "{out}");

@@ -410,7 +410,7 @@ pub fn parse_df(stdout: &str) -> Option<(u64, u64)> {
 ///
 /// ```text
 /// Now drawing from 'Battery Power'
-///  -InternalBattery-0 (id=4653155)	64%; discharging; 4:12 remaining present: true
+///  -InternalBattery-0 (id=4653155)<TAB>64%; discharging; 4:12 remaining present: true
 /// ```
 pub fn parse_pmset(stdout: &str) -> Option<Option<Battery>> {
     let first = stdout.lines().next()?;
@@ -628,30 +628,30 @@ impl Sampler {
 
         // Memory.
         let memory = match (memsize, run_text(env, "/usr/bin/vm_stat", &[])) {
-            (Some(total), Ok(s)) => match parse_vm_stat(&s)
-                .and_then(|(page, m)| memory_from_vm_stat(total, page, &m))
-            {
-                Some(mut m) => {
-                    m.pressure = sysctl
-                        .get("kern.memorystatus_vm_pressure_level")
-                        .and_then(|v| parse_pressure_level(v));
-                    if let Some((u, t)) =
-                        sysctl.get("vm.swapusage").and_then(|v| parse_swapusage(v))
-                    {
-                        m.swap_used = Some(u);
-                        m.swap_total = Some(t);
+            (Some(total), Ok(s)) => {
+                match parse_vm_stat(&s).and_then(|(page, m)| memory_from_vm_stat(total, page, &m)) {
+                    Some(mut m) => {
+                        m.pressure = sysctl
+                            .get("kern.memorystatus_vm_pressure_level")
+                            .and_then(|v| parse_pressure_level(v));
+                        if let Some((u, t)) =
+                            sysctl.get("vm.swapusage").and_then(|v| parse_swapusage(v))
+                        {
+                            m.swap_used = Some(u);
+                            m.swap_total = Some(t);
+                        }
+                        m.top = apps
+                            .as_deref()
+                            .map(|a| top_by_memory(a, TOP_APPS))
+                            .unwrap_or_default();
+                        Some(m)
                     }
-                    m.top = apps
-                        .as_deref()
-                        .map(|a| top_by_memory(a, TOP_APPS))
-                        .unwrap_or_default();
-                    Some(m)
+                    None => {
+                        problems.push("memory statistics were not understood".into());
+                        None
+                    }
                 }
-                None => {
-                    problems.push("memory statistics were not understood".into());
-                    None
-                }
-            },
+            }
             (None, _) => {
                 problems.push("the amount of memory could not be read".into());
                 None

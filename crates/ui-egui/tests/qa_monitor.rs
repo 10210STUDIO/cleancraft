@@ -88,7 +88,7 @@ fn cards_show_the_parsed_reading() {
 }
 
 #[test]
-fn network_speed_after_two_readings_and_refresh_off_the_ui_thread_logic() {
+fn network_speed_after_two_readings() {
     let m = mac();
     let mut h = open(&m);
     m.env.fake_sys().unwrap().answer("netstat", NETSTAT_2);
@@ -147,12 +147,18 @@ fn alerts_appear() {
         "df",
         "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk3s1 488281250 479492188 8789062 99% /\n",
     );
-    f.answer("sysctl", &SYSCTL.replace("pressure_level: 1", "pressure_level: 4"));
+    f.answer(
+        "sysctl",
+        &SYSCTL.replace("pressure_level: 1", "pressure_level: 4"),
+    );
     let h = open(&m);
     let free = 8_789_062u64 * 1024;
     assert!(has(
         &h,
-        &format!("Your startup disk is almost full: {} free.", human_size(free))
+        &format!(
+            "Your startup disk is almost full: {} free.",
+            human_size(free)
+        )
     ));
     assert!(has_text(&h, "Memory is heavily used"));
     assert!(has_text(&h, "pressure critical"));
@@ -173,7 +179,10 @@ fn free_up_ram_asks_then_runs_purge_and_logs() {
     let mut h = open(&m);
     click(&mut h, "Free Up RAM");
     assert!(has(&h, "Free up memory?"));
-    assert!(m.env.fake_sys().unwrap().admin_calls().is_empty(), "asked first");
+    assert!(
+        m.env.fake_sys().unwrap().admin_calls().is_empty(),
+        "asked first"
+    );
     click(&mut h, "Free Up RAM Now");
     assert_eq!(
         m.env.fake_sys().unwrap().admin_calls(),
@@ -182,7 +191,9 @@ fn free_up_ram_asks_then_runs_purge_and_logs() {
     assert!(has_text(&h, "Memory freed."));
     let hist = history(&m.env);
     assert_eq!(hist.len(), 1);
-    assert!(matches!(&hist[0].kind, ActionKind::Command { command, ok: true, .. } if command == PURGE_COMMAND));
+    assert!(
+        matches!(&hist[0].kind, ActionKind::Command { command, ok: true, .. } if command == PURGE_COMMAND)
+    );
 }
 
 #[test]
@@ -222,7 +233,10 @@ fn free_up_ram_failure_is_shown() {
     let mut h = open(&m);
     click(&mut h, "Free Up RAM");
     click(&mut h, "Free Up RAM Now");
-    assert!(has_text(&h, "Could not free memory: purge: unable to purge"));
+    assert!(has_text(
+        &h,
+        "Could not free memory: purge: unable to purge"
+    ));
 }
 
 #[test]

@@ -24,7 +24,10 @@ fn sysctl_values() {
     assert_eq!(parse_pressure_level("4"), Some(Pressure::Critical));
     assert_eq!(parse_pressure_level("x"), None);
     // An unknown key prints only to stderr; the others still parse.
-    assert_eq!(parse_sysctl("sysctl: unknown oid 'x'\nhw.ncpu: 4\n").len(), 1);
+    assert_eq!(
+        parse_sysctl("sysctl: unknown oid 'x'\nhw.ncpu: 4\n").len(),
+        1
+    );
     assert_eq!(parse_boottime("garbage"), None);
     assert_eq!(parse_loadavg("{ 1.0 }"), None);
 }
@@ -87,9 +90,16 @@ fn pmset_states() {
     assert!(!b.on_ac);
     assert_eq!(b.remaining_minutes, Some(252));
     let c = parse_pmset(PMSET_CHARGING).unwrap().unwrap();
-    assert_eq!((c.percent, c.state.as_str(), c.on_ac), (87, "charging", true));
+    assert_eq!(
+        (c.percent, c.state.as_str(), c.on_ac),
+        (87, "charging", true)
+    );
     assert_eq!(c.remaining_minutes, None);
-    assert_eq!(parse_pmset(PMSET_DESKTOP), Some(None), "desktop: no battery");
+    assert_eq!(
+        parse_pmset(PMSET_DESKTOP),
+        Some(None),
+        "desktop: no battery"
+    );
     assert_eq!(parse_pmset("pmset: error\n"), None);
 }
 

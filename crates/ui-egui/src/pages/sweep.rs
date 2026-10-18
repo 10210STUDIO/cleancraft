@@ -37,7 +37,10 @@ pub struct State {
 }
 
 fn sources(app: &CleanApp) -> Sources {
-    app.sweep.sources.clone().unwrap_or_else(Sources::registered)
+    app.sweep
+        .sources
+        .clone()
+        .unwrap_or_else(Sources::registered)
 }
 
 fn start_scan(app: &mut CleanApp) {
@@ -248,7 +251,10 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile) {
                 kit::dim(
                     ui,
                     &t,
-                    &format!("{} items in the Trash. Emptied from its own page.", p.items.len()),
+                    &format!(
+                        "{} items in the Trash. Emptied from its own page.",
+                        p.items.len()
+                    ),
                 );
             }
             TileData::Plan(p) => {
@@ -260,11 +266,7 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile) {
                 kit::dim(
                     ui,
                     &t,
-                    &format!(
-                        "{} of {} items selected",
-                        p.selected_count(),
-                        p.items.len()
-                    ),
+                    &format!("{} of {} items selected", p.selected_count(), p.items.len()),
                 );
             }
             TileData::Count { count, noun } => {
@@ -417,9 +419,7 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
                 kit::card(&t).show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(r.id.title()).font(font(15.0, Weight::SemiBold)),
-                        );
+                        ui.label(RichText::new(r.id.title()).font(font(15.0, Weight::SemiBold)));
                         match &r.result {
                             Ok(rep) => {
                                 ui.label(format!(
@@ -430,9 +430,7 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
                                 ));
                                 if app.sweep.undone.contains(&r.id) {
                                     ui.label(RichText::new("Put back").color(t.text_dim));
-                                } else if !rep.moved.is_empty()
-                                    && kit::secondary(ui, &t, "Undo")
-                                {
+                                } else if !rep.moved.is_empty() && kit::secondary(ui, &t, "Undo") {
                                     undo = Some((r.id, rep.plan_id.clone()));
                                 }
                             }

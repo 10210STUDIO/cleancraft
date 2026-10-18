@@ -192,9 +192,16 @@ mod tests {
         std::fs::create_dir_all(&caches).unwrap();
         std::fs::create_dir_all(docs.join("secret")).unwrap();
         std::os::unix::fs::symlink(&docs, caches.join("link")).unwrap();
-        let r = check(&env, &[caches.clone()], &caches.join("link/secret"));
+        let r = check(
+            &env,
+            std::slice::from_ref(&caches),
+            &caches.join("link/secret"),
+        );
         assert!(matches!(r, Err(Refusal::SymlinkOnPath(_))), "{r:?}");
         // The link itself may be moved (the link, not what it points to).
-        assert_eq!(check(&env, &[caches.clone()], &caches.join("link")), Ok(()));
+        assert_eq!(
+            check(&env, std::slice::from_ref(&caches), &caches.join("link")),
+            Ok(())
+        );
     }
 }

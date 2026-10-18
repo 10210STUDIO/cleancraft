@@ -136,7 +136,14 @@ fn desktop_mac_has_no_battery() {
     m.env.fake_sys().unwrap().answer("pmset", PMSET_DESKTOP);
     let snap = Sampler::new().sample(&m.env, NOW);
     assert_eq!(snap.battery, Some(BatteryReading::None));
-    assert!(!m.env.fake_sys().unwrap().calls().iter().any(|c| c.contains("ioreg")));
+    assert!(
+        !m.env
+            .fake_sys()
+            .unwrap()
+            .calls()
+            .iter()
+            .any(|c| c.contains("ioreg"))
+    );
 }
 
 #[test]
