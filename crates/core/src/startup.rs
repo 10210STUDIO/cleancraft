@@ -935,7 +935,7 @@ pub fn quit_process(env: &Env, p: &Proc, uid: u32) -> Result<ActionRecord, Chang
         .run(&prog, &a)
         .map_err(|e| ChangeError::Failed(format!("Could not quit {}: {e}", p.name)))?;
     let shown = std::iter::once(prog.clone())
-        .chain(args.iter().map(|x| tasks::sh_quote(x)))
+        .chain(args.iter().map(|x| tasks::sh_quote_if_needed(x)))
         .collect::<Vec<_>>()
         .join(" ");
     let rec = new_record(

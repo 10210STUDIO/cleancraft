@@ -163,7 +163,8 @@ pub fn sh_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
-fn sh_quote_if_needed(s: &str) -> String {
+/// Quote only when the shell would otherwise split or interpret the text.
+pub fn sh_quote_if_needed(s: &str) -> String {
     if !s.is_empty()
         && s.chars()
             .all(|c| c.is_ascii_alphanumeric() || "/._-=:+,@%".contains(c))
