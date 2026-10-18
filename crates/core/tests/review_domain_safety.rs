@@ -78,8 +78,7 @@ fn mcp_execute_plan(
         }
     }
     let digest = plan.digest();
-    features::run_plan(env, &settings, &plan, &digest, &mut |_, _| {})
-        .map_err(|e| format!("{e:#}"))
+    features::run_plan(env, &settings, &plan, &digest, &mut |_, _| {}).map_err(|e| format!("{e:#}"))
 }
 
 /// `cleancraft clean <id> --yes` (apps/cleancraft/src/cli.rs): load and run with its own digest.
@@ -163,8 +162,10 @@ fn dom1_case_variant_of_documents_is_still_documents() {
 fn dom2_folder_holding_a_protected_place_is_not_protected() {
     let m = FakeMac::new();
     let env = &m.env;
-    let library =
-        m.home_file("Pictures/Photos Library.photoslibrary/database/Photos.sqlite", 300_000);
+    let library = m.home_file(
+        "Pictures/Photos Library.photoslibrary/database/Photos.sqlite",
+        300_000,
+    );
     m.home_file("Pictures/holiday.jpg", 100_000);
     let pictures = env.home_path("Pictures");
     let s = Settings::default();
@@ -177,7 +178,10 @@ fn dom2_folder_holding_a_protected_place_is_not_protected() {
     // Large & Old Files, edited plan: the whole ~/Library (keychains, iCloud Drive,
     // CleanCraft's own journal are inside it).
     let keychain = m.home_file("Library/Keychains/login.keychain-db", 10_000);
-    let icloud = m.home_file("Library/Mobile Documents/com~apple~CloudDocs/cv.pdf", 10_000);
+    let icloud = m.home_file(
+        "Library/Mobile Documents/com~apple~CloudDocs/cv.pdf",
+        10_000,
+    );
     let base = ctx_scan(env, &small_files(), |c| {
         large_old::scan_location(c, &Location::Downloads)
     });
@@ -214,7 +218,10 @@ fn dom3_large_old_allow_list_is_wider_than_the_row() {
         "Library/Application Support/AddressBook/AddressBook-v22.abcddb",
         5_000,
     );
-    let music = m.home_file("Music/Music/Music Library.musiclibrary/Library.musicdb", 5_000);
+    let music = m.home_file(
+        "Music/Music/Music Library.musiclibrary/Library.musicdb",
+        5_000,
+    );
     let pop_mbox = env.home_path("Library/Mail/V10/POP-me@pop.example/INBOX.mbox");
     let plan = ctx_scan(env, &small_files(), |c| {
         large_old::scan_location(c, &Location::Downloads)
@@ -390,7 +397,10 @@ fn dom9_second_copy_of_an_app_takes_the_shared_data() {
     m.app("Foo", "com.example.Foo", "2.0");
     let old = m.app("Foo 1.9", "com.example.Foo", "1.9");
     let prefs = m.home_file("Library/Preferences/com.example.Foo.plist", 4_000);
-    let data = m.home_file("Library/Application Support/com.example.Foo/db.sqlite", 90_000);
+    let data = m.home_file(
+        "Library/Application Support/com.example.Foo/db.sqlite",
+        90_000,
+    );
     let plan = uninstaller::uninstall_plan(env, &Settings::default(), &old, false).unwrap();
     let preselected: Vec<&PathBuf> = plan
         .selected()
@@ -441,6 +451,33 @@ fn dom11_ignore_entry_in_other_case_is_not_honoured() {
     assert!(
         plan.items.iter().all(|i| i.path != f),
         "proposed although it is on the ignore list (same file on a default Mac)"
+    );
+}
+
+// ----------------------------------------------------------------------------------------
+// DOM-12: "broken" startup items whose program is on a disk that is not connected.
+
+#[test]
+#[ignore = "DOM-12: a launch agent whose program is on an external disk that is not plugged in is called broken and preselected"]
+fn dom12_agent_on_unplugged_disk_is_not_broken() {
+    let m = FakeMac::new();
+    let env = &m.env;
+    let plist = env.home_path("Library/LaunchAgents/com.example.backup-sync.plist");
+    m.write(
+        &plist,
+        cleancraft_core::testkit_perf::launch_plist(
+            "com.example.backup-sync",
+            "/Volumes/Backup/tools/sync",
+            true,
+        )
+        .as_bytes(),
+    );
+    let plan = features::scan(env, &Settings::default(), FeatureId::SystemJunk).unwrap();
+    let it = plan.items.iter().find(|i| i.path == plist);
+    assert!(
+        it.is_none_or(|i| !i.selected),
+        "preselected as broken although /Volumes/Backup is only unplugged: {:?}",
+        it.map(|i| &i.reason)
     );
 }
 
@@ -537,7 +574,12 @@ fn symlink_and_hard_link_into_documents_never_reach_documents() {
     let (n, errs) = executor::undo_plan(env, &plan.id);
     assert!(errs.is_empty(), "{errs:?}");
     assert!(n >= 2);
-    assert!(fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+    assert!(
+        fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
     assert!(hard.exists());
 }
 
@@ -588,7 +630,9 @@ fn privacy_never_preselects_passwords_bookmarks_or_autofill() {
     for it in &plan.items {
         let p = it.path.to_string_lossy();
         assert!(
-            !p.ends_with("Bookmarks") && !p.ends_with("Bookmarks.plist") && !p.ends_with("Preferences"),
+            !p.ends_with("Bookmarks")
+                && !p.ends_with("Bookmarks.plist")
+                && !p.ends_with("Preferences"),
             "{p} listed"
         );
     }
@@ -676,7 +720,11 @@ fn trash_bins_and_feature_less_plans_never_move() {
     let m = FakeMac::new();
     let env = &m.env;
     let t = m.home_file(".Trash/old.zip", 10_000);
-    for f in [FeatureId::TrashBins, FeatureId::Maintenance, FeatureId::Monitor] {
+    for f in [
+        FeatureId::TrashBins,
+        FeatureId::Maintenance,
+        FeatureId::Monitor,
+    ] {
         let mut p = Plan::new(f);
         push(&mut p, &t, "x");
         let _ = features::run_plan(env, &Settings::default(), &p, &p.digest(), &mut |_, _| {});
@@ -685,6 +733,8 @@ fn trash_bins_and_feature_less_plans_never_move() {
     let mut p = Plan::new(FeatureId::SystemJunk);
     push(&mut p, &t, "x");
     p.feature = None;
-    assert!(features::run_plan(env, &Settings::default(), &p, &p.digest(), &mut |_, _| {}).is_err());
+    assert!(
+        features::run_plan(env, &Settings::default(), &p, &p.digest(), &mut |_, _| {}).is_err()
+    );
     assert!(t.exists());
 }
