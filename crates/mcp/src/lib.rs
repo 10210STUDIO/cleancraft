@@ -5,6 +5,8 @@
 //! digest returned by `scan`, which proves the agent acts on exactly the list it showed.
 //! Removal is a move to the Trash or quarantine, logged, undoable.
 
+pub mod perf;
+
 use rmcp::{
     ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
@@ -75,7 +77,7 @@ impl CleanCraftMcp {
     pub fn new(env: Env) -> Self {
         Self {
             env,
-            tool_router: Self::tool_router(),
+            tool_router: Self::tool_router() + Self::perf_router(),
         }
     }
 

@@ -104,16 +104,6 @@ pub fn poll(app: &mut CleanApp) -> bool {
     busy
 }
 
-fn when(ts: i64) -> String {
-    chrono::DateTime::from_timestamp(ts, 0)
-        .map(|d| {
-            d.with_timezone(&chrono::Local)
-                .format("%Y-%m-%d %H:%M")
-                .to_string()
-        })
-        .unwrap_or_default()
-}
-
 pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     let t = app.t;
     let (glyph, color) = kit::feature_look(&t, f);
@@ -236,7 +226,7 @@ fn task_card(app: &mut CleanApp, ui: &mut Ui, info: &tasks::TaskInfo) {
                 &t,
                 &format!(
                     "Last run {} ({})",
-                    when(*ts),
+                    tasks::local_time(*ts),
                     if *ok { "done" } else { "failed" }
                 ),
             ),

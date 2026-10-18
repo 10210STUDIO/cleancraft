@@ -562,6 +562,17 @@ pub fn run_by_id(env: &Env, id: &str) -> Result<RunResult, String> {
     Ok(run(env, &p))
 }
 
+/// A journal time as local "YYYY-MM-DD HH:MM".
+pub fn local_time(ts: i64) -> String {
+    chrono::DateTime::from_timestamp(ts, 0)
+        .map(|d| {
+            d.with_timezone(&chrono::Local)
+                .format("%Y-%m-%d %H:%M")
+                .to_string()
+        })
+        .unwrap_or_default()
+}
+
 /// Last run of each task from the journal: id -> (time, succeeded).
 pub fn last_runs(env: &Env) -> BTreeMap<String, (i64, bool)> {
     let mut m = BTreeMap::new();
