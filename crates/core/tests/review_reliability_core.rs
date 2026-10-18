@@ -132,7 +132,11 @@ fn same_plan_run_again_after_undo_can_be_undone_again() {
     assert_eq!(n, second.moved.len());
     for rec in &second.moved {
         if let ActionKind::Moved { original, .. } = &rec.kind {
-            assert!(original.exists(), "{} still in the Trash", original.display());
+            assert!(
+                original.exists(),
+                "{} still in the Trash",
+                original.display()
+            );
         }
     }
 }
@@ -256,7 +260,10 @@ fn longest_name_already_in_the_trash_still_moves() {
         rep.moved.len(),
         1,
         "not moved: {:?}",
-        rep.skipped.iter().map(|s| s.1.to_string()).collect::<Vec<_>>()
+        rep.skipped
+            .iter()
+            .map(|s| s.1.to_string())
+            .collect::<Vec<_>>()
     );
 }
 
@@ -295,7 +302,12 @@ fn item_replaced_by_a_symlink_moves_only_the_link() {
     assert_eq!(rep.moved.len(), 1);
     assert!(projects.exists(), "the link target must stay untouched");
     let stored = stored_of(&rep.moved[0]);
-    assert!(fs::symlink_metadata(&stored).unwrap().file_type().is_symlink());
+    assert!(
+        fs::symlink_metadata(&stored)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
     // The size logged is the link's own, never the target's.
     assert!(rep.freed < 5_000, "freed {}", rep.freed);
 }
@@ -360,13 +372,18 @@ fn trash_emptied_before_undo_is_explained_and_changes_nothing() {
     assert!(matches!(r, Err(UndoError::StoredMissing(_))), "{r:?}");
     assert!(r.unwrap_err().to_string().contains("Trash emptied"));
     assert!(!editor.exists());
-    assert!(history(&m.env)[0].can_undo(), "still listed, not marked put back");
+    assert!(
+        history(&m.env)[0].can_undo(),
+        "still listed, not marked put back"
+    );
 }
 
 #[test]
 fn undo_recreates_a_missing_parent_folder() {
     let m = FakeMac::sample();
-    let log = m.env.home_path("Library/Logs/DiagnosticReports/Example-2026.ips");
+    let log = m
+        .env
+        .home_path("Library/Logs/DiagnosticReports/Example-2026.ips");
     let plan = junk_plan(&m);
     let Some(item) = plan.items.iter().find(|i| i.path == log) else {
         panic!("crash report not proposed")
@@ -475,7 +492,10 @@ fn damaged_settings_fall_back_to_safe_defaults() {
     let full = fs::read(Settings::path(&m.env)).unwrap();
     fs::write(Settings::path(&m.env), &full[..full.len() / 2]).unwrap();
     let loaded = Settings::load(&m.env);
-    assert!(!loaded.agents_may_clean, "a damaged file never lets agents clean");
+    assert!(
+        !loaded.agents_may_clean,
+        "a damaged file never lets agents clean"
+    );
     assert_eq!(loaded.method, Method::Trash);
 }
 
@@ -576,5 +596,8 @@ fn many_files_in_one_tree_move_as_one_item_with_exact_size() {
     let plan = only(&plan, &root);
     let rep = run(&m, &plan);
     assert_eq!(rep.freed, expect);
-    assert_eq!(cleancraft_core::fsutil::tree_file_count(&stored_of(&rep.moved[0])), 10_000);
+    assert_eq!(
+        cleancraft_core::fsutil::tree_file_count(&stored_of(&rep.moved[0])),
+        10_000
+    );
 }
