@@ -187,6 +187,7 @@ fn disk_use_from_df() {
     );
     let u = space::disk_use(&mac.env, mac.env.home());
     assert_eq!(u.total, Some(1_024_000_000));
-    assert_eq!(u.used, Some(614_400_000));
+    // Used = total - free (DAT-5), not df's Used column.
+    assert_eq!(u.used, Some(1_024_000_000 - 409_600_000));
     assert_eq!(u.free, Some(409_600_000));
 }

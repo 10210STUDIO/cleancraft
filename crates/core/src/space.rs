@@ -449,14 +449,17 @@ pub fn outermost(paths: &[PathBuf]) -> Vec<PathBuf> {
     out
 }
 
-/// Used and total bytes of the volume holding `path`, from `df -Pk`: (total, used, free).
+/// Total, used and free bytes of the volume holding `path`, from `df -Pk`: (total, used,
+/// free). Used is total minus free, like Finder and Live Monitor: on APFS df's own Used column
+/// counts only this volume, while other volumes of the container share the space, so it would
+/// not add up with free to the disk size.
 pub fn parse_df(stdout: &str) -> Option<(u64, u64, u64)> {
     let line = stdout.lines().nth(1)?;
     let cols: Vec<&str> = line.split_whitespace().collect();
     let total: u64 = cols.get(1)?.parse().ok()?;
-    let used: u64 = cols.get(2)?.parse().ok()?;
     let free: u64 = cols.get(3)?.parse().ok()?;
-    Some((total * 1024, used * 1024, free * 1024))
+    let (total, free) = (total * 1024, free * 1024);
+    Some((total, total.saturating_sub(free), free))
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -597,6 +600,9 @@ mod tests {
     fn df_columns() {
         let out = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk3s1 1000 600 400 60% /\n";
         assert_eq!(parse_df(out), Some((1000 * 1024, 600 * 1024, 400 * 1024)));
+        // APFS: this volume's Used (500) + free (400) is not the disk (1000).
+        let apfs = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk3s1 1000 500 400 56% /\n";
+        assert_eq!(parse_df(apfs), Some((1000 * 1024, 600 * 1024, 400 * 1024)));
     }
 
     #[test]

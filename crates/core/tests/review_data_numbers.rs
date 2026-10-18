@@ -297,7 +297,6 @@ fn disk_map_sizes_match_a_recalculation_with_links() {
 }
 
 #[test]
-#[ignore = "DAT-5: Disk Map 'used' is df's Used column; used + free is not the disk size on APFS"]
 fn disk_map_used_plus_free_is_the_disk() {
     let mac = FakeMac::new();
     mac.env.fake_sys().unwrap().answer("df", DF);
