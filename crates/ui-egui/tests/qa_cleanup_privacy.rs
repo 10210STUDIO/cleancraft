@@ -33,7 +33,11 @@ fn browsers_numbers_and_clean() {
     let mac = privacy_mac();
     let mut h = open(&mac);
     let p = plan(&h);
-    let total: u64 = p.items.iter().map(|i| tree_size(&i.path).0 * u64::from(i.size > 0)).sum();
+    let total: u64 = p
+        .items
+        .iter()
+        .map(|i| tree_size(&i.path).0 * u64::from(i.size > 0))
+        .sum();
     assert_eq!(total, p.total_size());
     assert!(has(&h, &human_size(total)));
     for (cat, title) in [
@@ -52,14 +56,33 @@ fn browsers_numbers_and_clean() {
         assert!(has(&h, &format!("{title}  {}", human_size(s))), "{title}");
     }
     // Firefox only: history (with bookmarks) and passwords are not selected.
-    click(&mut h, &format!("Firefox  {}", human_size(
-        p.items.iter().filter(|i| i.category == "firefox").map(|i| i.size).sum(),
-    )));
-    assert!(has_text(&h, "browsing history, download list and bookmarks"));
+    click(
+        &mut h,
+        &format!(
+            "Firefox  {}",
+            human_size(
+                p.items
+                    .iter()
+                    .filter(|i| i.category == "firefox")
+                    .map(|i| i.size)
+                    .sum(),
+            )
+        ),
+    );
+    assert!(has_text(
+        &h,
+        "browsing history, download list and bookmarks"
+    ));
     assert!(has(&h, "places.sqlite") && has(&h, "logins.json"));
-    let sel: Vec<_> = p.selected().map(|i| (i.path.clone(), tree_size(&i.path).0)).collect();
+    let sel: Vec<_> = p
+        .selected()
+        .map(|i| (i.path.clone(), tree_size(&i.path).0))
+        .collect();
     let sel_size: u64 = sel.iter().map(|(_, s)| s).sum();
-    assert!(has(&h, &format!("{} selected, {}", sel.len(), human_size(sel_size))));
+    assert!(has(
+        &h,
+        &format!("{} selected, {}", sel.len(), human_size(sel_size))
+    ));
     click(&mut h, "Review and Clean");
     click(&mut h, "Move to Trash");
     for (path, _) in &sel {
@@ -83,10 +106,21 @@ fn running_browser_and_errors() {
     let mac = privacy_mac();
     kit::set_running(&mac.env, "Google Chrome", "/Applications/Google Chrome.app");
     let mut h = open(&mac);
-    assert!(has_text(&h, "Google Chrome is open. Quit it and scan again"));
-    assert!(has_text(&h, "(cannot be selected: Quit Google Chrome first)"));
+    assert!(has_text(
+        &h,
+        "Google Chrome is open. Quit it and scan again"
+    ));
+    assert!(has_text(
+        &h,
+        "(cannot be selected: Quit Google Chrome first)"
+    ));
     let p = plan(&h);
-    assert!(p.items.iter().filter(|i| i.category == "chrome").all(|i| !i.selected));
+    assert!(
+        p.items
+            .iter()
+            .filter(|i| i.category == "chrome")
+            .all(|i| !i.selected)
+    );
     // Faults on three selected files.
     let safari = mac.env.home_path("Library/Safari/History.db");
     let session = mac.env.home_path("Library/Safari/LastSession.plist");
@@ -100,7 +134,11 @@ fn running_browser_and_errors() {
     assert!(has(&h, "permission denied"));
     assert!(has(&h, "open in a running app"));
     assert!(has(&h, "the disk is full"));
-    assert!(mac.env.home_path(&format!("{CHROME}/Default/History")).exists());
+    assert!(
+        mac.env
+            .home_path(&format!("{CHROME}/Default/History"))
+            .exists()
+    );
 
     // A browser opened after the scan: the cleanup is refused.
     let mac = privacy_mac();
@@ -118,7 +156,10 @@ fn wifi_settings_button() {
     let mut h = open(&mac);
     click(&mut h, "Wi-Fi networks  Zero KB");
     assert!(has(&h, "Home Net") && has(&h, "Cafe Guest"));
-    assert!(has_text(&h, "macOS removes known networks in System Settings"));
+    assert!(has_text(
+        &h,
+        "macOS removes known networks in System Settings"
+    ));
     click(&mut h, "Wi-Fi Settings");
     let urls = mac.env.fake_sys().unwrap().with(|s| s.opened_urls.clone());
     assert_eq!(urls, vec![privacy::WIFI_SETTINGS_URL.to_string()]);
@@ -129,11 +170,20 @@ fn wifi_settings_button() {
 fn reset_permissions_flow() {
     let mac = privacy_mac();
     let fake = mac.env.fake_sys().unwrap();
-    fake.answer("/usr/bin/tccutil reset Camera us.zoom.xos", "Successfully reset\n");
+    fake.answer(
+        "/usr/bin/tccutil reset Camera us.zoom.xos",
+        "Successfully reset\n",
+    );
     let mut h = open(&mac);
     click(&mut h, "App permissions  Zero KB");
-    assert!(has_text(&h, "Camera access granted to us.zoom.xos (cannot be selected"));
-    assert!(has_text(&h, "Screen recording access granted to com.example.Recorder"));
+    assert!(has_text(
+        &h,
+        "Camera access granted to us.zoom.xos (cannot be selected"
+    ));
+    assert!(has_text(
+        &h,
+        "Screen recording access granted to com.example.Recorder"
+    ));
     // Open, cancel: nothing runs.
     click(&mut h, "Reset Permissions");
     assert!(has(&h, "Reset app permissions"));
@@ -146,7 +196,11 @@ fn reset_permissions_flow() {
     click(&mut h, "Screen recording: com.example.Recorder");
     let scans_before = plan(&h).id;
     click(&mut h, "Reset Selected");
-    let calls: Vec<String> = fake.calls().into_iter().filter(|c| c.contains("tccutil")).collect();
+    let calls: Vec<String> = fake
+        .calls()
+        .into_iter()
+        .filter(|c| c.contains("tccutil"))
+        .collect();
     assert_eq!(
         calls,
         vec![
@@ -167,7 +221,10 @@ fn reset_permissions_flow() {
         cmds,
         vec![
             ("tccutil reset Camera us.zoom.xos".to_string(), true),
-            ("tccutil reset ScreenCapture com.example.Recorder".to_string(), false),
+            (
+                "tccutil reset ScreenCapture com.example.Recorder".to_string(),
+                false
+            ),
         ]
     );
     assert_ne!(plan(&h).id, scans_before, "scanned again");

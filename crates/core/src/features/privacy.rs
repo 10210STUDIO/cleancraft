@@ -241,7 +241,8 @@ pub const TCC_QUERY: &str = "SELECT service, client, auth_value FROM access WHER
 pub const SQLITE3: &str = "/usr/bin/sqlite3";
 pub const TCCUTIL: &str = "/usr/bin/tccutil";
 
-pub const LOCK_WIFI: &str = "macOS removes known networks in System Settings > Wi-Fi: use Open Wi-Fi Settings";
+pub const LOCK_WIFI: &str =
+    "macOS removes known networks in System Settings > Wi-Fi: use Open Wi-Fi Settings";
 pub const LOCK_PERMISSION: &str =
     "Not a file: use Reset Permissions to take this access back (the app asks again next time)";
 pub const NOTE_TCC: &str =
@@ -396,7 +397,10 @@ pub fn reset_permission(env: &Env, service: &str, client: &str) -> Result<String
         .map_err(|e| format!("the action log could not be written ({e}); nothing was reset"))?;
     let res = env.sys.run(TCCUTIL, &["reset", svc, client]);
     let (ok, output) = match &res {
-        Ok(o) => (o.ok(), format!("{}{}", o.stdout, o.stderr).trim().to_string()),
+        Ok(o) => (
+            o.ok(),
+            format!("{}{}", o.stdout, o.stderr).trim().to_string(),
+        ),
         Err(e) => (false, e.to_string()),
     };
     let now = chrono::Utc::now();
@@ -808,14 +812,19 @@ mod tests {
     fn networksetup_output() {
         let ports = "\nHardware Port: Ethernet\nDevice: en1\nEthernet Address: aa\n\nHardware Port: Wi-Fi\nDevice: en0\nEthernet Address: bb\n";
         assert_eq!(parse_wifi_device(ports).as_deref(), Some("en0"));
-        assert_eq!(parse_wifi_device("Hardware Port: Ethernet\nDevice: en1\n"), None);
+        assert_eq!(
+            parse_wifi_device("Hardware Port: Ethernet\nDevice: en1\n"),
+            None
+        );
         let list = "Preferred networks on en0:\n\tHome Net\n\tCafe/Guest\n";
         assert_eq!(
             parse_preferred_networks(list),
             Some(vec!["Home Net".to_string(), "Cafe/Guest".to_string()])
         );
         assert_eq!(
-            parse_preferred_networks("en1 is not a Wi-Fi interface.\n** Error: Error obtaining wireless information.\n"),
+            parse_preferred_networks(
+                "en1 is not a Wi-Fi interface.\n** Error: Error obtaining wireless information.\n"
+            ),
             None
         );
     }
@@ -831,7 +840,10 @@ mod tests {
             ]
         );
         assert_eq!(tccutil_service("kTCCServiceScreenCapture"), "ScreenCapture");
-        assert_eq!(service_title("kTCCServiceScreenCapture"), "Screen recording");
+        assert_eq!(
+            service_title("kTCCServiceScreenCapture"),
+            "Screen recording"
+        );
         assert!(!safe_token("com.x; rm"));
     }
 }

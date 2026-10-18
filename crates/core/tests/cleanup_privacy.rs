@@ -45,8 +45,18 @@ fn browsers_are_listed_with_safe_defaults() {
     };
     // Safari.
     check("Library/Safari/History.db", "safari", "History", true);
-    check("Library/Safari/LastSession.plist", "safari", "Last session", true);
-    check("Library/Safari/Downloads.plist", "safari", "Download list", true);
+    check(
+        "Library/Safari/LastSession.plist",
+        "safari",
+        "Last session",
+        true,
+    );
+    check(
+        "Library/Safari/Downloads.plist",
+        "safari",
+        "Download list",
+        true,
+    );
     check("Library/Safari/Form Values", "safari", "Form values", true);
     check(
         "Library/Containers/com.apple.Safari/Data/Library/Cookies/Cookies.binarycookies",
@@ -58,15 +68,57 @@ fn browsers_are_listed_with_safe_defaults() {
     assert!(!has(&p, &h(&m, "Library/Safari/Bookmarks.plist")));
     assert!(p.notes.iter().any(|n| n.contains("Passwords app")));
     // Chrome, two profiles; passwords and autofill (with saved addresses) not preselected.
-    check(&format!("{CHROME}/Default/History"), "chrome", "History", true);
-    check(&format!("{CHROME}/Default/Cookies"), "chrome", "Cookies", true);
-    check(&format!("{CHROME}/Default/Current Session"), "chrome", "Last session", true);
-    check(&format!("{CHROME}/Default/Web Data"), "chrome", "Form values", false);
-    check(&format!("{CHROME}/Default/Login Data"), "chrome", "Saved passwords", false);
-    assert_eq!(item(&p, &h(&m, &format!("{CHROME}/Default/Login Data"))).risk, Risk::High);
-    check(&format!("{CHROME}/Profile 1/History"), "chrome", "History", true);
-    check("Library/Caches/Google/Chrome/Default", "chrome", "Cache", true);
-    for kept in ["Default/Bookmarks", "Default/Preferences", "System Profile/History"] {
+    check(
+        &format!("{CHROME}/Default/History"),
+        "chrome",
+        "History",
+        true,
+    );
+    check(
+        &format!("{CHROME}/Default/Cookies"),
+        "chrome",
+        "Cookies",
+        true,
+    );
+    check(
+        &format!("{CHROME}/Default/Current Session"),
+        "chrome",
+        "Last session",
+        true,
+    );
+    check(
+        &format!("{CHROME}/Default/Web Data"),
+        "chrome",
+        "Form values",
+        false,
+    );
+    check(
+        &format!("{CHROME}/Default/Login Data"),
+        "chrome",
+        "Saved passwords",
+        false,
+    );
+    assert_eq!(
+        item(&p, &h(&m, &format!("{CHROME}/Default/Login Data"))).risk,
+        Risk::High
+    );
+    check(
+        &format!("{CHROME}/Profile 1/History"),
+        "chrome",
+        "History",
+        true,
+    );
+    check(
+        "Library/Caches/Google/Chrome/Default",
+        "chrome",
+        "Cache",
+        true,
+    );
+    for kept in [
+        "Default/Bookmarks",
+        "Default/Preferences",
+        "System Profile/History",
+    ] {
         assert!(!has(&p, &h(&m, &format!("{CHROME}/{kept}"))), "{kept}");
     }
     assert!(
@@ -83,11 +135,29 @@ fn browsers_are_listed_with_safe_defaults() {
     );
     // Firefox: places.sqlite also holds bookmarks, so it is never preselected.
     check(&format!("{FF}/places.sqlite"), "firefox", "History", false);
-    assert_eq!(item(&p, &h(&m, &format!("{FF}/places.sqlite"))).risk, Risk::High);
+    assert_eq!(
+        item(&p, &h(&m, &format!("{FF}/places.sqlite"))).risk,
+        Risk::High
+    );
     check(&format!("{FF}/cookies.sqlite"), "firefox", "Cookies", true);
-    check(&format!("{FF}/formhistory.sqlite"), "firefox", "Form values", true);
-    check(&format!("{FF}/sessionstore.jsonlz4"), "firefox", "Last session", true);
-    check(&format!("{FF}/logins.json"), "firefox", "Saved passwords", false);
+    check(
+        &format!("{FF}/formhistory.sqlite"),
+        "firefox",
+        "Form values",
+        true,
+    );
+    check(
+        &format!("{FF}/sessionstore.jsonlz4"),
+        "firefox",
+        "Last session",
+        true,
+    );
+    check(
+        &format!("{FF}/logins.json"),
+        "firefox",
+        "Saved passwords",
+        false,
+    );
     check(
         "Library/Caches/Firefox/Profiles/abcd.default-release",
         "firefox",
@@ -101,7 +171,11 @@ fn browsers_are_listed_with_safe_defaults() {
         assert_eq!(it.size, tree_size(&it.path).0, "{}", it.path.display());
         assert_eq!(policy::check(&m.env, &allow, &it.path), Ok(()));
     }
-    assert!(!p.items.iter().any(|i| i.path.starts_with(h(&m, "Documents"))));
+    assert!(
+        !p.items
+            .iter()
+            .any(|i| i.path.starts_with(h(&m, "Documents")))
+    );
 }
 
 #[test]
@@ -109,42 +183,79 @@ fn recent_items_wifi_and_permissions() {
     let m = privacy_mac();
     let p = scan(&m);
     let sfl = h(&m, privacy::SHARED_FILE_LIST);
-    let recent: Vec<&Item> = p.items.iter().filter(|i| i.category == "recent_items").collect();
+    let recent: Vec<&Item> = p
+        .items
+        .iter()
+        .filter(|i| i.category == "recent_items")
+        .collect();
     assert_eq!(recent.len(), 4, "{recent:#?}");
     assert!(recent.iter().all(|i| i.selected && i.risk == Risk::Low));
-    assert!(!has(&p, &sfl.join("com.apple.LSSharedFileList.FavoriteItems.sfl3")));
+    assert!(!has(
+        &p,
+        &sfl.join("com.apple.LSSharedFileList.FavoriteItems.sfl3")
+    ));
     assert_eq!(
-        item(&p, &sfl.join("com.apple.LSSharedFileList.RecentDocuments.sfl3")).reason,
+        item(
+            &p,
+            &sfl.join("com.apple.LSSharedFileList.RecentDocuments.sfl3")
+        )
+        .reason,
         "Recently opened documents"
     );
     // Wi-Fi: listed, locked, nothing to move.
     let wifi: Vec<&Item> = p.items.iter().filter(|i| i.category == "wifi").collect();
     assert_eq!(wifi.len(), 2);
-    assert!(wifi.iter().all(|i| i.locked.as_deref() == Some(privacy::LOCK_WIFI)));
-    assert!(wifi.iter().any(|i| i.reason == "Known Wi-Fi network Home Net"));
+    assert!(
+        wifi.iter()
+            .all(|i| i.locked.as_deref() == Some(privacy::LOCK_WIFI))
+    );
+    assert!(
+        wifi.iter()
+            .any(|i| i.reason == "Known Wi-Fi network Home Net")
+    );
     let calls = m.env.fake_sys().unwrap().calls();
-    assert!(calls.contains(&"/usr/sbin/networksetup -listpreferredwirelessnetworks en0".to_string()));
+    assert!(
+        calls.contains(&"/usr/sbin/networksetup -listpreferredwirelessnetworks en0".to_string())
+    );
     // Permissions: granted ones only, from both databases, locked.
-    let perms: Vec<&Item> = p.items.iter().filter(|i| i.category == "permissions").collect();
+    let perms: Vec<&Item> = p
+        .items
+        .iter()
+        .filter(|i| i.category == "permissions")
+        .collect();
     assert_eq!(perms.len(), 3, "{perms:#?}");
-    assert!(perms.iter().all(|i| i.locked.as_deref() == Some(privacy::LOCK_PERMISSION)));
+    assert!(
+        perms
+            .iter()
+            .all(|i| i.locked.as_deref() == Some(privacy::LOCK_PERMISSION))
+    );
     let reasons: Vec<&str> = perms.iter().map(|i| i.reason.as_str()).collect();
     assert!(reasons.contains(&"Camera access granted to us.zoom.xos"));
     assert!(reasons.contains(&"Screen recording access granted to com.example.Recorder"));
     assert!(!reasons.iter().any(|r| r.contains("com.example.Old")));
-    let cam = perms.iter().find(|i| i.reason.starts_with("Camera")).unwrap();
+    let cam = perms
+        .iter()
+        .find(|i| i.reason.starts_with("Camera"))
+        .unwrap();
     assert_eq!(
         privacy::permission_of(&m.env, &cam.path),
         Some(("kTCCServiceCamera".into(), "us.zoom.xos".into()))
     );
-    assert_eq!(privacy::permission_of(&m.env, &h(&m, "Library/Safari/History.db")), None);
+    assert_eq!(
+        privacy::permission_of(&m.env, &h(&m, "Library/Safari/History.db")),
+        None
+    );
     // None of these pseudo items is inside the fence.
     let allow = privacy::Privacy.allow_roots(&m.env);
     for it in wifi.iter().chain(perms.iter()) {
         assert!(policy::check(&m.env, &allow, &it.path).is_err());
     }
     // The TCC databases were read read-only.
-    assert!(calls.iter().any(|c| c.starts_with("/usr/bin/sqlite3 -readonly")));
+    assert!(
+        calls
+            .iter()
+            .any(|c| c.starts_with("/usr/bin/sqlite3 -readonly"))
+    );
 }
 
 #[test]
@@ -154,9 +265,22 @@ fn running_browser_is_locked_and_blocks_cleaning() {
     let p = scan(&m);
     let chrome: Vec<&Item> = p.items.iter().filter(|i| i.category == "chrome").collect();
     assert!(!chrome.is_empty());
-    assert!(chrome.iter().all(|i| i.locked.as_deref() == Some("Quit Google Chrome first")));
-    assert!(p.items.iter().filter(|i| i.category == "safari").all(|i| i.locked.is_none()));
-    assert!(p.notes.iter().any(|n| n.starts_with("Google Chrome is open")));
+    assert!(
+        chrome
+            .iter()
+            .all(|i| i.locked.as_deref() == Some("Quit Google Chrome first"))
+    );
+    assert!(
+        p.items
+            .iter()
+            .filter(|i| i.category == "safari")
+            .all(|i| i.locked.is_none())
+    );
+    assert!(
+        p.notes
+            .iter()
+            .any(|n| n.starts_with("Google Chrome is open"))
+    );
 
     // Scanned while quit, opened before the cleanup: refused, nothing moved.
     let m = privacy_mac();
@@ -180,7 +304,12 @@ fn clean_moves_selected_traces_and_reports_errors() {
     m.env.fake_sys().unwrap().set_open(&cookies);
     m.env.inject_fault(&safari, Fault::DiskFull);
     let rep = features::run_plan(&m.env, &s, &p, &p.digest(), &mut |_, _| {}).unwrap();
-    let why = |path: &Path| rep.skipped.iter().find(|(p, _)| p == path).map(|(_, r)| r.clone());
+    let why = |path: &Path| {
+        rep.skipped
+            .iter()
+            .find(|(p, _)| p == path)
+            .map(|(_, r)| r.clone())
+    };
     assert_eq!(why(&hist), Some(SkipReason::PermissionDenied));
     assert_eq!(why(&cookies), Some(SkipReason::InUse));
     assert_eq!(why(&safari), Some(SkipReason::DiskFull));
@@ -226,7 +355,11 @@ fn wifi_listing_failure_is_noted() {
         "** Error: Error obtaining wireless information.",
     );
     let p = scan(&m);
-    assert!(p.notes.iter().any(|n| n.contains("Wi-Fi networks could not be listed")));
+    assert!(
+        p.notes
+            .iter()
+            .any(|n| n.contains("Wi-Fi networks could not be listed"))
+    );
     assert!(!p.items.iter().any(|i| i.category == "wifi"));
 }
 
@@ -240,7 +373,10 @@ fn reset_permission_runs_tccutil_and_logs() {
     );
     let msg = privacy::reset_permission(&m.env, "kTCCServiceCamera", "us.zoom.xos").unwrap();
     assert!(msg.contains("Camera access of us.zoom.xos was reset"));
-    assert!(fake.calls().contains(&"/usr/bin/tccutil reset Camera us.zoom.xos".to_string()));
+    assert!(
+        fake.calls()
+            .contains(&"/usr/bin/tccutil reset Camera us.zoom.xos".to_string())
+    );
     let h = executor::history(&m.env);
     match &h[0].kind {
         ActionKind::Command { command, ok, .. } => {
@@ -250,7 +386,8 @@ fn reset_permission_runs_tccutil_and_logs() {
         k => panic!("{k:?}"),
     }
     // tccutil fails: error, logged as failed.
-    let err = privacy::reset_permission(&m.env, "kTCCServiceMicrophone", "us.zoom.xos").unwrap_err();
+    let err =
+        privacy::reset_permission(&m.env, "kTCCServiceMicrophone", "us.zoom.xos").unwrap_err();
     assert!(err.contains("could not reset Microphone"));
     assert_eq!(executor::history(&m.env).len(), 2);
     // Names that are not plain identifiers never reach a command.
@@ -267,9 +404,12 @@ fn reset_permission_runs_tccutil_and_logs() {
 #[test]
 fn unreadable_safari_folder_is_noted() {
     let m = privacy_mac();
-    m.env
-        .inject_fault(&h(&m, privacy::SAFARI_DIR), Fault::PermissionDenied);
+    kit::make_unlistable(&h(&m, privacy::SAFARI_DIR));
     let p = scan(&m);
-    assert!(p.notes.iter().any(|n| n.contains("Library/Safari could not be read")));
+    assert!(
+        p.notes
+            .iter()
+            .any(|n| n.contains("Library/Safari could not be read"))
+    );
     assert!(!p.items.iter().any(|i| i.category == "safari"));
 }

@@ -81,17 +81,31 @@ fn every_category_is_found_with_its_default() {
         assert_eq!(it.locked.as_deref(), Some(why), "{}", path.display());
     };
     // J1: one entry per app cache, sandboxed caches too; iCloud caches never.
-    sel(h(&m, "Library/Caches/com.example.Browser"), "user_caches", true);
-    sel(h(&m, "Library/Caches/com.example.Editor"), "user_caches", true);
     sel(
-        h(&m, "Library/Containers/com.example.Notes/Data/Library/Caches/com.example.Notes"),
+        h(&m, "Library/Caches/com.example.Browser"),
+        "user_caches",
+        true,
+    );
+    sel(
+        h(&m, "Library/Caches/com.example.Editor"),
+        "user_caches",
+        true,
+    );
+    sel(
+        h(
+            &m,
+            "Library/Containers/com.example.Notes/Data/Library/Caches/com.example.Notes",
+        ),
         "user_caches",
         true,
     );
     assert!(!has(&p, &h(&m, "Library/Caches/com.apple.bird")));
     assert!(!has(
         &p,
-        &h(&m, "Library/Containers/com.example.Notes/Data/Library/Caches/CloudKit")
+        &h(
+            &m,
+            "Library/Containers/com.example.Notes/Data/Library/Caches/CloudKit"
+        )
     ));
     assert_eq!(
         item(&p, &h(&m, "Library/Caches/com.example.Browser"))
@@ -101,7 +115,10 @@ fn every_category_is_found_with_its_default() {
     );
     // J15: the Sparkle download is its own entry; the rest of that app's cache stays in J1.
     sel(
-        h(&m, "Library/Caches/com.example.Updater/org.sparkle-project.Sparkle"),
+        h(
+            &m,
+            "Library/Caches/com.example.Updater/org.sparkle-project.Sparkle",
+        ),
         "old_updates",
         true,
     );
@@ -123,14 +140,20 @@ fn every_category_is_found_with_its_default() {
         true,
     );
     sel(h(&m, "Library/Logs/Example"), "user_logs", true);
-    sel(m.env.sys_path("/Library/Logs/Install.log"), "system_logs", true);
+    sel(
+        m.env.sys_path("/Library/Logs/Install.log"),
+        "system_logs",
+        true,
+    );
     sel(
         m.env.sys_path("/private/var/log/system.log"),
         "system_logs",
         true,
     );
-    let crash =
-        h(&m, "Library/Logs/DiagnosticReports/Example-2026-05-01-101010.ips");
+    let crash = h(
+        &m,
+        "Library/Logs/DiagnosticReports/Example-2026-05-01-101010.ips",
+    );
     sel(crash.clone(), "crash_reports", true);
     assert_eq!(item(&p, &crash).group.as_deref(), Some("Example"));
     assert!(!has(&p, &h(&m, "Library/Logs/DiagnosticReports")));
@@ -152,7 +175,10 @@ fn every_category_is_found_with_its_default() {
         "broken_agents",
         true,
     );
-    assert!(!has(&p, &h(&m, "Library/LaunchAgents/com.example.atlas.plist")));
+    assert!(!has(
+        &p,
+        &h(&m, "Library/LaunchAgents/com.example.atlas.plist")
+    ));
     sel(
         h(&m, "Library/Preferences/com.example.broken.plist"),
         "broken_prefs",
@@ -163,7 +189,10 @@ fn every_category_is_found_with_its_default() {
         "broken_prefs",
         sj::LOCK_UNCHECKED,
     );
-    assert!(!has(&p, &h(&m, "Library/Preferences/com.example.good.plist")));
+    assert!(!has(
+        &p,
+        &h(&m, "Library/Preferences/com.example.good.plist")
+    ));
     // J10.
     locked(
         m.env.sys_path("/.DocumentRevisions-V100"),
@@ -171,14 +200,22 @@ fn every_category_is_found_with_its_default() {
         sj::LOCK_VERSIONS,
     );
     // J11: newest per device kept, older ones offered but not selected.
-    let bk = |d: &str| h(&m, &format!("Library/Application Support/MobileSync/Backup/{d}"));
+    let bk = |d: &str| {
+        h(
+            &m,
+            &format!("Library/Application Support/MobileSync/Backup/{d}"),
+        )
+    };
     sel(bk("AAA"), "ios_backups", false);
     locked(bk("BBB"), "ios_backups", sj::LOCK_NEWEST);
     locked(bk("CCC"), "ios_backups", sj::LOCK_NEWEST);
     assert!(item(&p, &bk("AAA")).reason.contains("Tester's iPhone"));
     // J12, J13.
     sel(
-        h(&m, "Library/iTunes/iPhone Software Updates/iPhone_17.0_Restore.ipsw"),
+        h(
+            &m,
+            "Library/iTunes/iPhone Software Updates/iPhone_17.0_Restore.ipsw",
+        ),
         "ios_updates",
         true,
     );
@@ -189,15 +226,24 @@ fn every_category_is_found_with_its_default() {
     );
     assert!(!has(
         &p,
-        &h(&m, "Library/Developer/Xcode/DerivedData/ModuleCache.noindex")
+        &h(
+            &m,
+            "Library/Developer/Xcode/DerivedData/ModuleCache.noindex"
+        )
     ));
     sel(
-        h(&m, "Library/Developer/Xcode/Archives/2026-05-01/Demo 5-1-26.xcarchive"),
+        h(
+            &m,
+            "Library/Developer/Xcode/Archives/2026-05-01/Demo 5-1-26.xcarchive",
+        ),
         "xcode_archives",
         false,
     );
     sel(
-        h(&m, "Library/Developer/Xcode/iOS DeviceSupport/17.0 (21A329)"),
+        h(
+            &m,
+            "Library/Developer/Xcode/iOS DeviceSupport/17.0 (21A329)",
+        ),
         "xcode_device_support",
         true,
     );
@@ -227,14 +273,24 @@ fn every_category_is_found_with_its_default() {
     sel(h(&m, "Downloads/sub/Nested.dmg"), "disk_images", false);
     assert!(!has(&p, &h(&m, "Downloads/New.dmg")));
     // J17: Gradle never preselected; grouped per tool.
-    sel(h(&m, "Library/Caches/Homebrew/downloads"), "dev_caches", true);
+    sel(
+        h(&m, "Library/Caches/Homebrew/downloads"),
+        "dev_caches",
+        true,
+    );
     sel(h(&m, ".npm/_cacache/content-v2"), "dev_caches", true);
-    sel(h(&m, ".cargo/registry/cache/index.crates.io"), "dev_caches", true);
+    sel(
+        h(&m, ".cargo/registry/cache/index.crates.io"),
+        "dev_caches",
+        true,
+    );
     sel(h(&m, ".gradle/caches/modules-2"), "dev_caches", false);
     assert!(!has(&p, &h(&m, "Library/Caches/Homebrew")));
     assert!(!has(&p, &h(&m, ".npm/_logs")));
     assert_eq!(
-        item(&p, &h(&m, ".npm/_cacache/content-v2")).group.as_deref(),
+        item(&p, &h(&m, ".npm/_cacache/content-v2"))
+            .group
+            .as_deref(),
         Some("npm")
     );
     // J18.
@@ -249,10 +305,17 @@ fn every_category_is_found_with_its_default() {
         true,
     );
     sel(h(&m, "Library/Logs/Claude"), "ai_clutter", true);
-    assert!(!has(&p, &h(&m, "Library/Application Support/Claude/config.json")));
+    assert!(!has(
+        &p,
+        &h(&m, "Library/Application Support/Claude/config.json")
+    ));
     // J19.
     sel(h(&m, ".ollama/models"), "ai_models", false);
-    assert!(item(&p, &h(&m, ".ollama/models")).reason.contains("llama3:8b"));
+    assert!(
+        item(&p, &h(&m, ".ollama/models"))
+            .reason
+            .contains("llama3:8b")
+    );
     assert!(!has(&p, &h(&m, ".ollama/id_ed25519")));
     sel(
         h(&m, ".lmstudio/models/lmstudio-community/Qwen-7B-GGUF"),
@@ -336,7 +399,11 @@ fn default_clean_moves_selected_only_and_undo_restores() {
         assert!(!path.exists(), "{} not moved", path.display());
     }
     for path in &kept {
-        assert!(path.exists(), "{} moved but was not selected", path.display());
+        assert!(
+            path.exists(),
+            "{} moved but was not selected",
+            path.display()
+        );
     }
     assert!(m.env.user_trash().join("com.example.Browser").exists());
     assert_eq!(executor::history(&m.env).len(), selected.len());
@@ -385,8 +452,7 @@ fn errors_per_item_and_unwritable_log() {
 #[test]
 fn admin_folders_are_locked_and_unreadable_folders_noted() {
     let m = junk_mac();
-    m.env
-        .inject_fault(&m.env.sys_path("/Library/Caches"), Fault::PermissionDenied);
+    kit::make_unlistable(&m.env.sys_path("/Library/Caches"));
     let p = scan(&m, &Settings::default());
     // A folder that cannot be listed gives a note instead of items.
     assert!(
@@ -396,22 +462,11 @@ fn admin_folders_are_locked_and_unreadable_folders_noted() {
     );
     assert!(!p.items.iter().any(|i| i.category == "system_caches"));
 
+    // Listable but not changeable without administrator rights: listed, locked.
     let m = junk_mac();
-    // Readable but not writable: listed, locked.
     let caches = m.env.sys_path("/Library/Caches");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        // No write bit for the owner: Env::can_modify answers no (it reads the mode, so this
-        // also holds when tests run as root).
-        let _ = std::fs::set_permissions(&caches, std::fs::Permissions::from_mode(0o555));
-    }
+    m.env.inject_fault(&caches, Fault::PermissionDenied);
     let p = scan(&m, &Settings::default());
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&caches, std::fs::Permissions::from_mode(0o755));
-    }
     let it = item(&p, &caches.join("com.example.updater"));
     assert_eq!(it.locked.as_deref(), Some(sj::LOCK_ADMIN));
 }
@@ -425,7 +480,10 @@ fn settings_drive_the_scan() {
     s.keep_languages = vec!["de".into()];
     let p = scan(&m, &s);
     assert!(!has(&p, &h(&m, "Library/Caches/com.example.Browser")));
-    assert!(!has(&p, &h(&m, "Downloads/Old Installer.dmg")), "200 days < 300");
+    assert!(
+        !has(&p, &h(&m, "Downloads/Old Installer.dmg")),
+        "200 days < 300"
+    );
     let res = m.env.sys_path("/Applications/Atlas.app/Contents/Resources");
     assert!(!has(&p, &res.join("de.lproj")));
     assert!(has(&p, &res.join("fr.lproj")));
@@ -437,8 +495,16 @@ fn missing_tool_answers_are_honest() {
     kit::app_with_languages(&m, "Atlas", &["en", "it"], 10_000);
     // No answers for defaults, uname, lipo: nothing is guessed.
     let p = scan(&m, &Settings::default());
-    assert!(p.notes.iter().any(|n| n.contains("system languages could not be read")));
-    assert!(p.notes.iter().any(|n| n.contains("processor type could not be read")));
+    assert!(
+        p.notes
+            .iter()
+            .any(|n| n.contains("system languages could not be read"))
+    );
+    assert!(
+        p.notes
+            .iter()
+            .any(|n| n.contains("processor type could not be read"))
+    );
     let res = m.env.sys_path("/Applications/Atlas.app/Contents/Resources");
     assert!(has(&p, &res.join("it.lproj")), "only English kept");
     assert!(!p.items.iter().any(|i| i.category == "universal_binaries"));

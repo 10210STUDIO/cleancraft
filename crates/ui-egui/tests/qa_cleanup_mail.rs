@@ -50,16 +50,28 @@ fn scan_shows_disk_numbers_and_clean_keeps_modified() {
             .sum();
         assert!(has(&h, &format!("{title}  {}", human_size(s))), "{title}");
     }
-    assert!(has_text(&h, "attachments in POP or On My Mac mailboxes were left out"));
+    assert!(has_text(
+        &h,
+        "attachments in POP or On My Mac mailboxes were left out"
+    ));
     assert!(!has(&h, "only-copy.pdf") && !has(&h, "local.pdf"));
-    assert!(has_text(&h, "changed after Mail saved it, so it is not selected"));
-    assert!(has_text(&h, "could not tell whether the mail server keeps a copy"));
+    assert!(has_text(
+        &h,
+        "changed after Mail saved it, so it is not selected"
+    ));
+    assert!(has_text(
+        &h,
+        "could not tell whether the mail server keeps a copy"
+    ));
     let sel: Vec<(PathBuf, u64)> = p
         .selected()
         .map(|i| (i.path.clone(), tree_size(&i.path).0))
         .collect();
     let sel_size: u64 = sel.iter().map(|(_, s)| s).sum();
-    assert!(has(&h, &format!("{} selected, {}", sel.len(), human_size(sel_size))));
+    assert!(has(
+        &h,
+        &format!("{} selected, {}", sel.len(), human_size(sel_size))
+    ));
     click(&mut h, "Review and Clean");
     click(&mut h, "Move to Trash");
     for (path, _) in &sel {
@@ -67,7 +79,13 @@ fn scan_shows_disk_numbers_and_clean_keeps_modified() {
     }
     let edited = att(&mac, "IMAP-me@example.com", "INBOX", "12346", "edited.key");
     let pop = att(&mac, "POP-old@pop.example", "INBOX", "9", "only-copy.pdf");
-    let mystery = att(&mac, kit::UUID_UNKNOWN_ACCOUNT, "INBOX", "66", "mystery.zip");
+    let mystery = att(
+        &mac,
+        kit::UUID_UNKNOWN_ACCOUNT,
+        "INBOX",
+        "66",
+        "mystery.zip",
+    );
     assert!(edited.exists() && pop.exists() && mystery.exists());
     assert!(has(&h, &format!("{} freed", human_size(sel_size))));
     click(&mut h, "Undo");
@@ -103,7 +121,13 @@ fn errors_per_attachment() {
     let mut h = open(&mac);
     let p = plan(&h);
     let photo = att(&mac, "IMAP-me@example.com", "INBOX", "12345", "photo.jpg");
-    let deck = att(&mac, kit::UUID_PLIST_ACCOUNT, "Sent Messages", "55", "deck.pdf");
+    let deck = att(
+        &mac,
+        kit::UUID_PLIST_ACCOUNT,
+        "Sent Messages",
+        "55",
+        "deck.pdf",
+    );
     let budget = att(&mac, kit::UUID_DB_ACCOUNT, "INBOX", "77", "budget.xlsx");
     mac.env.inject_fault(&photo, Fault::PermissionDenied);
     mac.env.fake_sys().unwrap().set_open(&deck);
@@ -126,11 +150,11 @@ fn errors_per_attachment() {
 #[test]
 fn without_full_disk_access_the_page_says_so() {
     let mac = mail_mac();
-    mac.env.inject_fault(
-        &mac.env.home_path("Library/Mail"),
-        Fault::PermissionDenied,
-    );
+    kit::make_unlistable(&mac.env.home_path("Library/Mail"));
     let h = open(&mac);
-    assert!(has_text(&h, "Turn on Full Disk Access to include attachments"));
+    assert!(has_text(
+        &h,
+        "Turn on Full Disk Access to include attachments"
+    ));
     assert!(plan(&h).items.iter().all(|i| i.category == "mail_opened"));
 }

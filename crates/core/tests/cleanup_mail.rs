@@ -63,7 +63,11 @@ fn server_accounts_only_and_modified_kept() {
             .any(|n| n.starts_with("2 attachments in POP or On My Mac"))
     );
     // Message files never.
-    assert!(!p.items.iter().any(|i| i.path.to_string_lossy().ends_with(".emlx")));
+    assert!(
+        !p.items
+            .iter()
+            .any(|i| i.path.to_string_lossy().ends_with(".emlx"))
+    );
     // Sizes recalculated from disk.
     for it in &p.items {
         assert_eq!(it.size, tree_size(&it.path).0);
@@ -77,11 +81,19 @@ fn server_accounts_only_and_modified_kept() {
         att(&m, "Mailboxes", "Archive", "7", "local.pdf"),
         mystery.path.clone(),
     ] {
-        assert!(policy::check(&m.env, &allow, &p).is_err(), "{}", p.display());
+        assert!(
+            policy::check(&m.env, &allow, &p).is_err(),
+            "{}",
+            p.display()
+        );
     }
     // sqlite3 was asked about the system account store, read only by a query.
     let calls = m.env.fake_sys().unwrap().calls();
-    assert!(calls.iter().any(|c| c.starts_with("/usr/bin/sqlite3 -separator |")));
+    assert!(
+        calls
+            .iter()
+            .any(|c| c.starts_with("/usr/bin/sqlite3 -separator |"))
+    );
 }
 
 #[test]
@@ -116,13 +128,24 @@ fn clean_moves_selected_and_errors_are_reported() {
     let s = Settings::default();
     let p = scan(&m);
     let photo = att(&m, "IMAP-me@example.com", "INBOX", "12345", "photo.jpg");
-    let deck = att(&m, kit::UUID_PLIST_ACCOUNT, "Sent Messages", "55", "deck.pdf");
+    let deck = att(
+        &m,
+        kit::UUID_PLIST_ACCOUNT,
+        "Sent Messages",
+        "55",
+        "deck.pdf",
+    );
     let budget = att(&m, kit::UUID_DB_ACCOUNT, "INBOX", "77", "budget.xlsx");
     m.env.inject_fault(&photo, Fault::PermissionDenied);
     m.env.fake_sys().unwrap().set_open(&deck);
     m.env.inject_fault(&budget, Fault::DiskFull);
     let rep = features::run_plan(&m.env, &s, &p, &p.digest(), &mut |_, _| {}).unwrap();
-    let why = |path: &Path| rep.skipped.iter().find(|(p, _)| p == path).map(|(_, r)| r.clone());
+    let why = |path: &Path| {
+        rep.skipped
+            .iter()
+            .find(|(p, _)| p == path)
+            .map(|(_, r)| r.clone())
+    };
     assert_eq!(why(&photo), Some(SkipReason::PermissionDenied));
     assert_eq!(why(&deck), Some(SkipReason::InUse));
     assert_eq!(why(&budget), Some(SkipReason::DiskFull));
@@ -141,10 +164,12 @@ fn clean_moves_selected_and_errors_are_reported() {
 #[test]
 fn without_full_disk_access_mail_storage_is_noted() {
     let m = mail_mac();
-    m.env
-        .inject_fault(&m.env.home_path(mail::MAIL_DIR), Fault::PermissionDenied);
+    kit::make_unlistable(&m.env.home_path(mail::MAIL_DIR));
     let p = scan(&m);
     assert!(p.notes.iter().any(|n| n.contains("Full Disk Access")));
     assert!(!p.items.iter().any(|i| i.category == "mail_downloaded"));
-    assert!(find(&p, "Invoice.pdf").is_some(), "opened attachments still listed");
+    assert!(
+        find(&p, "Invoice.pdf").is_some(),
+        "opened attachments still listed"
+    );
 }

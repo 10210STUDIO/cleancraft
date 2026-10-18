@@ -89,7 +89,11 @@ fn trash_toolbar(app: &mut CleanApp, ui: &mut Ui) {
             }
         }
     }
-    if !plan_has(app, FeatureId::TrashBins, &["startup_trash", "external_trash"]) {
+    if !plan_has(
+        app,
+        FeatureId::TrashBins,
+        &["startup_trash", "external_trash"],
+    ) {
         store(ui, st);
         return;
     }

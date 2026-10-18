@@ -95,10 +95,10 @@ pub fn known_accounts(env: &Env) -> BTreeMap<String, (AccountKind, Option<String
     let db = env.home_path(ACCOUNTS_DB);
     if db.exists() {
         let dbs = db.to_string_lossy().into_owned();
-        if let Ok(out) = env
-            .sys
-            .run("/usr/bin/sqlite3", &["-separator", "|", &dbs, ACCOUNTS_QUERY])
-            && out.ok()
+        if let Ok(out) = env.sys.run(
+            "/usr/bin/sqlite3",
+            &["-separator", "|", &dbs, ACCOUNTS_QUERY],
+        ) && out.ok()
         {
             for (id, kind) in parse_accounts_db(&out.stdout) {
                 m.entry(id).or_insert((kind, None));
@@ -113,9 +113,11 @@ pub fn kind_of_type(t: &str) -> AccountKind {
     let t = t.to_lowercase();
     if t.contains("pop") || t.contains("local") {
         AccountKind::Local
-    } else if ["imap", "ews", "exchange", "google", "gmail", "yahoo", "aol", "icloud", "hotmail"]
-        .iter()
-        .any(|k| t.contains(k))
+    } else if [
+        "imap", "ews", "exchange", "google", "gmail", "yahoo", "aol", "icloud", "hotmail",
+    ]
+    .iter()
+    .any(|k| t.contains(k))
     {
         AccountKind::Server
     } else {
@@ -461,10 +463,16 @@ mod tests {
     #[test]
     fn kinds() {
         assert_eq!(kind_of_type("IMAPAccount"), AccountKind::Server);
-        assert_eq!(kind_of_type("com.apple.account.Exchange"), AccountKind::Server);
+        assert_eq!(
+            kind_of_type("com.apple.account.Exchange"),
+            AccountKind::Server
+        );
         assert_eq!(kind_of_type("POPAccount"), AccountKind::Local);
         assert_eq!(kind_of_type("LocalAccount"), AccountKind::Local);
-        assert_eq!(kind_of_type("com.apple.account.CardDAV"), AccountKind::Unknown);
+        assert_eq!(
+            kind_of_type("com.apple.account.CardDAV"),
+            AccountKind::Unknown
+        );
         let rows = parse_accounts_db("A1|com.apple.account.IMAP\nB2|com.apple.account.POP\n\n");
         assert_eq!(
             rows,

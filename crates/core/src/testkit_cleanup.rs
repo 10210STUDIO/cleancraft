@@ -58,6 +58,15 @@ pub fn clear_running(env: &Env) {
     }
 }
 
+/// Make a folder impossible to list, the way a folder protected by macOS privacy settings is
+/// (tests may run as root, which ignores file modes): the folder is moved aside and a plain file
+/// takes its name, so listing it fails. Nothing is deleted.
+pub fn make_unlistable(p: &Path) {
+    let aside = p.with_extension("moved-aside");
+    let _ = std::fs::rename(p, &aside);
+    let _ = std::fs::write(p, b"not a folder");
+}
+
 /// Set a folder's modification time to `days` ago.
 pub fn age_dir(p: &Path, days: u64) {
     let t = SystemTime::now() - Duration::from_secs(days * 86_400);
@@ -163,7 +172,10 @@ pub fn junk_mac() -> FakeMac {
         "Library/Logs/DiagnosticReports/Example-2026-05-02-101010.ips",
         70_000,
     );
-    m.home_file("Library/Logs/DiagnosticReports/Other_2026-05-01.crash", 30_000);
+    m.home_file(
+        "Library/Logs/DiagnosticReports/Other_2026-05-01.crash",
+        30_000,
+    );
     // J6, J7 apps.
     app_with_languages(&m, "Atlas", &["en", "Base", "it", "de", "fr"], 40_000);
     m.app("Solo", "com.example.Solo", "2.0");
@@ -181,7 +193,9 @@ pub fn junk_mac() -> FakeMac {
         &env,
         "/usr/bin/lipo",
         &["-detailed_info", &atlas],
-        &format!("Fat header in: {atlas}\nfat_magic 0xcafebabe\nnfat_arch 2\narchitecture x86_64\n    cputype CPU_TYPE_X86_64\n    offset 16384\n    size 600000\n    align 2^14 (16384)\narchitecture arm64\n    cputype CPU_TYPE_ARM64\n    offset 622592\n    size 400000\n    align 2^14 (16384)\n"),
+        &format!(
+            "Fat header in: {atlas}\nfat_magic 0xcafebabe\nnfat_arch 2\narchitecture x86_64\n    cputype CPU_TYPE_X86_64\n    offset 16384\n    size 600000\n    align 2^14 (16384)\narchitecture arm64\n    cputype CPU_TYPE_ARM64\n    offset 622592\n    size 400000\n    align 2^14 (16384)\n"
+        ),
     );
     answer(&env, "/usr/bin/lipo", &["-archs", &solo], "arm64\n");
     // J8 launch agents: one broken, one fine.
@@ -216,7 +230,10 @@ pub fn junk_mac() -> FakeMac {
         &dict(vec![("Key", s("value"))]),
     );
     let unchecked = env.home_path("Library/Preferences/com.example.unchecked.plist");
-    m.write(&unchecked, b"<?xml version=\"1.0\"?><plist><array><string>x");
+    m.write(
+        &unchecked,
+        b"<?xml version=\"1.0\"?><plist><array><string>x",
+    );
     // J10 document versions.
     m.sys_file("/.DocumentRevisions-V100/PerUID/501/ab/file", 800_000);
     // J11 backups: two of one iPhone, one of an iPad.
@@ -329,9 +346,23 @@ pub fn mail_mac() -> FakeMac {
     age(&con, 10);
     age_dir(&env.home_path(&format!("{md}/C3D4")), 30);
 
-    let photo = mail_attachment(&m, "IMAP-me@example.com", "INBOX", "12345", "photo.jpg", 1_200_000);
+    let photo = mail_attachment(
+        &m,
+        "IMAP-me@example.com",
+        "INBOX",
+        "12345",
+        "photo.jpg",
+        1_200_000,
+    );
     age(&photo, 20);
-    let edited = mail_attachment(&m, "IMAP-me@example.com", "INBOX", "12346", "edited.key", 800_000);
+    let edited = mail_attachment(
+        &m,
+        "IMAP-me@example.com",
+        "INBOX",
+        "12346",
+        "edited.key",
+        800_000,
+    );
     age(&edited, 10);
     if let Some(d) = edited.parent() {
         age_dir(d, 40);
@@ -340,11 +371,32 @@ pub fn mail_mac() -> FakeMac {
         &format!("{MAIL_V}/IMAP-me@example.com/INBOX.mbox/0F0F/Data/1/Messages/12345.emlx"),
         5_000,
     );
-    mail_attachment(&m, "POP-old@pop.example", "INBOX", "9", "only-copy.pdf", 600_000);
+    mail_attachment(
+        &m,
+        "POP-old@pop.example",
+        "INBOX",
+        "9",
+        "only-copy.pdf",
+        600_000,
+    );
     mail_attachment(&m, "Mailboxes", "Archive", "7", "local.pdf", 400_000);
-    mail_attachment(&m, UUID_PLIST_ACCOUNT, "Sent Messages", "55", "deck.pdf", 900_000);
+    mail_attachment(
+        &m,
+        UUID_PLIST_ACCOUNT,
+        "Sent Messages",
+        "55",
+        "deck.pdf",
+        900_000,
+    );
     mail_attachment(&m, UUID_DB_ACCOUNT, "INBOX", "77", "budget.xlsx", 350_000);
-    mail_attachment(&m, UUID_UNKNOWN_ACCOUNT, "INBOX", "66", "mystery.zip", 500_000);
+    mail_attachment(
+        &m,
+        UUID_UNKNOWN_ACCOUNT,
+        "INBOX",
+        "66",
+        "mystery.zip",
+        500_000,
+    );
     write_plist(
         &env.home_path(&format!("{MAIL_V}/MailData/Accounts.plist")),
         &dict(vec![(
@@ -360,10 +412,13 @@ pub fn mail_mac() -> FakeMac {
     answer(
         &env,
         "/usr/bin/sqlite3",
-        &["-separator", "|", &db.to_string_lossy(), mail::ACCOUNTS_QUERY],
-        &format!(
-            "{UUID_DB_ACCOUNT}|com.apple.account.Exchange\nFFFF|com.apple.account.CalDAV\n"
-        ),
+        &[
+            "-separator",
+            "|",
+            &db.to_string_lossy(),
+            mail::ACCOUNTS_QUERY,
+        ],
+        &format!("{UUID_DB_ACCOUNT}|com.apple.account.Exchange\nFFFF|com.apple.account.CalDAV\n"),
     );
     m.home_file(
         &format!("{MAIL_V}/IMAP-me@example.com/Deleted Messages.mbox/0A/Data/Messages/1.emlx"),

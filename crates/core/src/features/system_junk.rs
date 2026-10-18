@@ -41,7 +41,11 @@ pub const DEV_CACHES: &[(&str, &str, bool)] = &[
     ("Homebrew", "~/Library/Caches/Homebrew", true),
     ("pip", "~/Library/Caches/pip", true),
     ("CocoaPods", "~/Library/Caches/CocoaPods", true),
-    ("Swift Package Manager", "~/Library/Caches/org.swift.swiftpm", true),
+    (
+        "Swift Package Manager",
+        "~/Library/Caches/org.swift.swiftpm",
+        true,
+    ),
     ("Cargo", "~/.cargo/registry/cache", true),
     // Gradle downloads are slow to rebuild; listed, never preselected.
     ("Gradle", "~/.gradle/caches", false),
@@ -98,9 +102,9 @@ pub const LOCK_LIPO: &str = "Stripping code from a signed app would break its co
 pub const LOCK_VERSIONS: &str = "Managed by macOS: remove old versions from the app that saved the document (File > Revert To > Browse All Versions)";
 pub const LOCK_NEWEST: &str = "The newest backup of this device is always kept";
 pub const LOCK_DELETED_USER: &str = "Belongs to another account: remove it in System Settings > Users & Groups with administrator rights";
-pub const LOCK_DOWNLOADING: &str = "Still open in an app (download in progress or disk image mounted)";
-pub const LOCK_UNCHECKED: &str =
-    "CleanCraft could not double check it with plutil, so it is kept";
+pub const LOCK_DOWNLOADING: &str =
+    "Still open in an app (download in progress or disk image mounted)";
+pub const LOCK_UNCHECKED: &str = "CleanCraft could not double check it with plutil, so it is kept";
 
 pub struct Cat {
     pub id: &'static str,
@@ -257,11 +261,10 @@ pub fn resolve(env: &Env, p: &str) -> PathBuf {
     }
 }
 
-/// Can this folder be listed? An injected `PermissionDenied` fault answers no (tests run as a
-/// user who could read anything).
-pub fn can_read(env: &Env, p: &Path) -> bool {
-    !matches!(env.fault_for(p), Some(crate::env::Fault::PermissionDenied))
-        && std::fs::read_dir(p).is_ok()
+/// Can this folder be listed? (Without Full Disk Access macOS refuses to list protected
+/// folders; an injected `PermissionDenied` fault means "cannot change", not "cannot list".)
+pub fn can_read(_env: &Env, p: &Path) -> bool {
+    std::fs::read_dir(p).is_ok()
 }
 
 /// A real folder (not a link to one).
@@ -663,14 +666,9 @@ impl Scanner<'_, '_> {
             if keep(&e) || skip.contains(&n.as_str()) {
                 continue;
             }
-            if let Some(id) = self.propose(
-                &e,
-                cat,
-                format!("{title}: {n}"),
-                Risk::Low,
-                true,
-                Some(&n),
-            ) && !writable
+            if let Some(id) =
+                self.propose(&e, cat, format!("{title}: {n}"), Risk::Low, true, Some(&n))
+                && !writable
             {
                 self.plan.lock(id, LOCK_ADMIN);
             }
@@ -987,7 +985,7 @@ impl Scanner<'_, '_> {
                 .push((info.date, b, info.name));
         }
         for (_, mut list) in by_device {
-            list.sort_by(|a, b| b.0.cmp(&a.0));
+            list.sort_by_key(|e| std::cmp::Reverse(e.0));
             for (i, (date, path, name)) in list.iter().enumerate() {
                 let when = chrono::DateTime::from_timestamp(*date, 0)
                     .map(|d| d.format("%Y-%m-%d").to_string())
@@ -1014,7 +1012,9 @@ impl Scanner<'_, '_> {
         for dir in ipsw_dirs(self.env()) {
             let dev = name_of(&dir).replace(" Software Updates", "");
             for f in children(&dir) {
-                if f.extension().is_some_and(|e| e.eq_ignore_ascii_case("ipsw")) {
+                if f.extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("ipsw"))
+                {
                     self.propose(
                         &f,
                         "ios_updates",
@@ -1118,9 +1118,7 @@ impl Scanner<'_, '_> {
         };
         walk_files(&root, &skip, &mut files);
         for (f, md) in files {
-            if f.extension()
-                .is_none_or(|e| !e.eq_ignore_ascii_case("dmg"))
-            {
+            if f.extension().is_none_or(|e| !e.eq_ignore_ascii_case("dmg")) {
                 continue;
             }
             let idle = match (accessed_days_ago(&md, now), modified_days_ago(&md, now)) {
@@ -1232,7 +1230,9 @@ pub fn crash_app(file: &str) -> String {
     let stem = file.split('.').next().unwrap_or(file);
     let cut = stem
         .char_indices()
-        .find(|(i, c)| (*c == '-' || *c == '_') && stem[i + 1..].starts_with(|d: char| d.is_ascii_digit()))
+        .find(|(i, c)| {
+            (*c == '-' || *c == '_') && stem[i + 1..].starts_with(|d: char| d.is_ascii_digit())
+        })
         .map(|(i, _)| i)
         .unwrap_or(stem.len());
     let app = stem[..cut].trim();

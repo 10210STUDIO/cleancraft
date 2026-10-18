@@ -247,7 +247,10 @@ pub fn empty_trash_in_finder(env: &Env) -> EmptyOutcome {
     let command = format!("osascript -e '{EMPTY_SCRIPT}'");
     let res = env.sys.run(OSASCRIPT, &["-e", EMPTY_SCRIPT]);
     let (ok, output) = match &res {
-        Ok(o) => (o.ok(), format!("{}{}", o.stdout, o.stderr).trim().to_string()),
+        Ok(o) => (
+            o.ok(),
+            format!("{}{}", o.stdout, o.stderr).trim().to_string(),
+        ),
         Err(e) => (false, e.to_string()),
     };
     let after = finder_trash_size(env);

@@ -49,17 +49,30 @@ fn sizes_locked_items_and_empty_in_finder() {
     let usb = mac.env.sys_path(&format!("/Volumes/USB/.Trashes/{uid}"));
     let user_size = tree_size(&user.join("old.zip")).0 + tree_size(&user.join("Folder")).0;
     let usb_size = tree_size(&usb.join("movie.mov")).0;
-    let mail_size = tree_size(&mac.env.home_path(
-        "Library/Mail/V10/IMAP-me@example.com/Deleted Messages.mbox",
-    ))
+    let mail_size = tree_size(
+        &mac.env
+            .home_path("Library/Mail/V10/IMAP-me@example.com/Deleted Messages.mbox"),
+    )
     .0;
     assert!(has(&h, &human_size(user_size + usb_size + mail_size)));
-    assert!(has(&h, &format!("Startup disk Trash  {}", human_size(user_size))));
+    assert!(has(
+        &h,
+        &format!("Startup disk Trash  {}", human_size(user_size))
+    ));
     assert!(has(&h, &format!("Other disks  {}", human_size(usb_size))));
     assert!(has(&h, &format!("Mail trash  {}", human_size(mail_size))));
-    assert!(has_text(&h, "use Empty Trash in Finder to remove it for good"));
-    assert!(has_text(&h, "erase it in Mail with Mailbox > Erase Deleted Items"));
-    assert!(!has(&h, "Review and Clean"), "Trash items cannot be moved again");
+    assert!(has_text(
+        &h,
+        "use Empty Trash in Finder to remove it for good"
+    ));
+    assert!(has_text(
+        &h,
+        "erase it in Mail with Mailbox > Erase Deleted Items"
+    ));
+    assert!(
+        !has(&h, "Review and Clean"),
+        "Trash items cannot be moved again"
+    );
     // Cancel: Finder is not asked.
     click(&mut h, "Empty Trash in Finder");
     assert!(has(
@@ -77,7 +90,10 @@ fn sizes_locked_items_and_empty_in_finder() {
     assert!(has_text(&h, "Finder emptied the Trash."));
     let hist = executor::history(&mac.env);
     assert_eq!(hist.len(), 1);
-    assert!(matches!(&hist[0].kind, ActionKind::Command { ok: true, .. }));
+    assert!(matches!(
+        &hist[0].kind,
+        ActionKind::Command { ok: true, .. }
+    ));
     assert_ne!(plan(&h).id, first_id, "scanned again");
     // CleanCraft itself removed nothing.
     assert!(user.join("old.zip").exists());
@@ -85,7 +101,10 @@ fn sizes_locked_items_and_empty_in_finder() {
     // shell layout issue reported to the coordinator, so navigate the way the row does.)
     h.state_mut().navigate("history");
     steps(&mut h);
-    assert!(has(&h, "osascript -e 'tell application \"Finder\" to empty trash'"));
+    assert!(has(
+        &h,
+        "osascript -e 'tell application \"Finder\" to empty trash'"
+    ));
 }
 
 #[test]

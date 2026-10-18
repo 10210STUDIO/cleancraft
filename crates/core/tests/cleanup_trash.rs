@@ -17,9 +17,9 @@ fn every_trash_is_measured_and_locked() {
     let uid = trash::uid(&m.env);
     let user = m.env.user_trash();
     let usb = m.env.sys_path(&format!("/Volumes/USB/.Trashes/{uid}"));
-    let mail = m
-        .env
-        .home_path(&format!("{MAIL_V}/IMAP-me@example.com/Deleted Messages.mbox"));
+    let mail = m.env.home_path(&format!(
+        "{MAIL_V}/IMAP-me@example.com/Deleted Messages.mbox"
+    ));
     assert_eq!(p.items.len(), 3, "{:#?}", p.items);
     let by = |path: &std::path::Path| p.items.iter().find(|i| i.path == path).unwrap();
     // Sizes: each entry of a Trash with the shared formula; Mail's trash as a tree.
@@ -53,7 +53,11 @@ fn an_edited_plan_still_cannot_move_trash() {
     }
     let rep = features::run_plan(&m.env, &s, &p, &p.digest(), &mut |_, _| {}).unwrap();
     assert!(rep.moved.is_empty());
-    assert!(rep.skipped.iter().all(|(_, r)| matches!(r, SkipReason::Refused(_))));
+    assert!(
+        rep.skipped
+            .iter()
+            .all(|(_, r)| matches!(r, SkipReason::Refused(_)))
+    );
     assert!(m.env.user_trash().join("old.zip").exists());
 }
 
@@ -63,14 +67,23 @@ fn empty_asks_finder_and_logs_it() {
     m.env.fake_sys().unwrap().answer(EMPTY_CALL, "");
     let out = trash::empty_trash_in_finder(&m.env);
     assert!(out.ok, "{out:?}");
-    assert!(m.env.fake_sys().unwrap().calls().contains(&EMPTY_CALL.to_string()));
+    assert!(
+        m.env
+            .fake_sys()
+            .unwrap()
+            .calls()
+            .contains(&EMPTY_CALL.to_string())
+    );
     let h = executor::history(&m.env);
     assert_eq!(h.len(), 1);
     assert_eq!(h[0].feature, Some(FeatureId::TrashBins));
     assert!(!h[0].can_undo());
     match &h[0].kind {
         ActionKind::Command { command, ok, .. } => {
-            assert_eq!(command, "osascript -e 'tell application \"Finder\" to empty trash'");
+            assert_eq!(
+                command,
+                "osascript -e 'tell application \"Finder\" to empty trash'"
+            );
             assert!(ok);
         }
         k => panic!("{k:?}"),
@@ -120,9 +133,13 @@ fn empty_errors_are_explained() {
 #[test]
 fn unreadable_trash_is_noted() {
     let m = trash_mac();
-    m.env.inject_fault(&m.env.user_trash(), Fault::PermissionDenied);
+    cleancraft_core::testkit_cleanup::make_unlistable(&m.env.user_trash());
     let p = features::scan(&m.env, &Settings::default(), FeatureId::TrashBins).unwrap();
-    assert!(p.notes.iter().any(|n| n.contains("/Users/tester/.Trash could not be read")));
+    assert!(
+        p.notes
+            .iter()
+            .any(|n| n.contains("/Users/tester/.Trash could not be read"))
+    );
     assert!(!p.items.iter().any(|i| i.path == m.env.user_trash()));
     assert_eq!(p.items.len(), 2);
 }
