@@ -268,6 +268,25 @@ impl Plan {
             .filter(|i| i.selected && i.locked.is_none())
     }
 
+    /// A hard-linked file listed under two items has its data on disk once: the later item
+    /// stops counting it, so totals use the same formula as [`crate::fsutil::tree_size`] and
+    /// the Disk Map. Items whose size is not their tree size (labels, sizes from a tool) are
+    /// left as they are.
+    pub fn count_links_once(&mut self) {
+        let mut seen = std::collections::HashSet::new();
+        for it in &mut self.items {
+            let (full, links) = crate::fsutil::tree_size_with_links(&it.path);
+            if links.is_empty() || it.size != full {
+                continue;
+            }
+            for (id, size) in links {
+                if !seen.insert(id) {
+                    it.size = it.size.saturating_sub(size);
+                }
+            }
+        }
+    }
+
     pub fn total_size(&self) -> u64 {
         self.items.iter().map(|i| i.size).sum()
     }

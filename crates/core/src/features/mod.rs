@@ -157,6 +157,14 @@ pub fn allow_roots(env: &Env, id: FeatureId) -> Vec<PathBuf> {
     get(id).map(|f| f.allow_roots(env)).unwrap_or_default()
 }
 
+/// Run a feature's scan the one way every front end uses: then a hard-linked file listed
+/// twice counts once ([`Plan::count_links_once`]).
+pub fn scan_with(f: &dyn Feature, ctx: &ScanCtx<'_>) -> anyhow::Result<Plan> {
+    let mut plan = f.scan(ctx)?;
+    plan.count_links_once();
+    Ok(plan)
+}
+
 /// Scan with a fresh context.
 pub fn scan(env: &Env, settings: &Settings, id: FeatureId) -> anyhow::Result<Plan> {
     let f = get(id).ok_or_else(|| anyhow::anyhow!("{} has no scan", id.title()))?;
@@ -167,5 +175,5 @@ pub fn scan(env: &Env, settings: &Settings, id: FeatureId) -> anyhow::Result<Pla
         cancel: &cancel,
         progress: &|_| {},
     };
-    f.scan(&ctx)
+    scan_with(f.as_ref(), &ctx)
 }

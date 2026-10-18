@@ -158,7 +158,7 @@ pub fn scan(
             cancel,
             progress,
         };
-        let data = match f.scan(&ctx) {
+        let data = match features::scan_with(f.as_ref(), &ctx) {
             Ok(p) => TileData::Plan(p),
             Err(e) => TileData::Failed(format!("{e:#}")),
         };

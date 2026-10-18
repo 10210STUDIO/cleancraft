@@ -2,6 +2,7 @@
 //! in tests: bytes allocated on disk (`st_blocks * 512`) on Unix, file length elsewhere.
 //! Symbolic links count as their own (tiny) size and are never followed.
 
+use std::collections::HashSet;
 use std::fs::{self, Metadata};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -19,20 +20,43 @@ pub fn entry_size(md: &Metadata) -> u64 {
     }
 }
 
-/// Total size of a file or folder tree, without following links. Unreadable parts are
-/// skipped and counted in the second value.
+/// A file's identity for hard links: (device, inode) when it has more than one link.
+pub fn link_id(md: &Metadata) -> Option<(u64, u64)> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        (!md.is_dir() && md.nlink() > 1).then(|| (md.dev(), md.ino()))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = md;
+        None
+    }
+}
+
+/// Total size of a file or folder tree, without following links. A file with several hard
+/// links inside the tree counts once (its data is on disk once), like the Disk Map.
+/// Unreadable parts are skipped and counted in the second value.
 pub fn tree_size(p: &Path) -> (u64, u32) {
+    tree_size_once(p, &mut HashSet::new())
+}
+
+/// [`tree_size`] sharing `seen` with other trees, so a hard-linked file counts once across a
+/// whole list (a plan, an executor report).
+pub fn tree_size_once(p: &Path, seen: &mut HashSet<(u64, u64)>) -> (u64, u32) {
     let mut total = 0u64;
     let mut unreadable = 0u32;
     let Ok(md) = fs::symlink_metadata(p) else {
         return (0, 1);
     };
-    total += entry_size(&md);
+    if link_id(&md).is_none_or(|id| seen.insert(id)) {
+        total += entry_size(&md);
+    }
     if md.is_dir() {
         match fs::read_dir(p) {
             Ok(rd) => {
                 for e in rd.flatten() {
-                    let (s, u) = tree_size(&e.path());
+                    let (s, u) = tree_size_once(&e.path(), seen);
                     total += s;
                     unreadable += u;
                 }
@@ -41,6 +65,36 @@ pub fn tree_size(p: &Path) -> (u64, u32) {
         }
     }
     (total, unreadable)
+}
+
+/// [`tree_size`] of `p`, and the files in it that have other hard links, with their own size.
+pub fn tree_size_with_links(p: &Path) -> (u64, Vec<((u64, u64), u64)>) {
+    fn walk(p: &Path, seen: &mut HashSet<(u64, u64)>, links: &mut Vec<((u64, u64), u64)>) -> u64 {
+        let Ok(md) = fs::symlink_metadata(p) else {
+            return 0;
+        };
+        let mut total = 0;
+        match link_id(&md) {
+            Some(id) => {
+                if seen.insert(id) {
+                    total += entry_size(&md);
+                    links.push((id, entry_size(&md)));
+                }
+            }
+            None => total += entry_size(&md),
+        }
+        if md.is_dir()
+            && let Ok(rd) = fs::read_dir(p)
+        {
+            for e in rd.flatten() {
+                total += walk(&e.path(), seen, links);
+            }
+        }
+        total
+    }
+    let mut links = Vec::new();
+    let total = walk(p, &mut HashSet::new(), &mut links);
+    (total, links)
 }
 
 /// Number of files (non-directories) in a tree.
@@ -164,6 +218,23 @@ mod tests {
         assert_eq!(human_size(9_994_000), "9.99 MB");
         assert_eq!(count(1, "item", "items"), "1 item");
         assert_eq!(count(0, "item", "items"), "0 items");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hard_links_count_once() {
+        let d = tempfile::tempdir().unwrap();
+        let a = d.path().join("a");
+        fs::create_dir_all(&a).unwrap();
+        fs::write(a.join("x"), vec![1u8; 40_000]).unwrap();
+        fs::hard_link(a.join("x"), a.join("y")).unwrap();
+        let one = entry_size(&fs::symlink_metadata(a.join("x")).unwrap());
+        let dir = entry_size(&fs::symlink_metadata(&a).unwrap());
+        assert_eq!(tree_size(&a).0, dir + one);
+        // Across trees with a shared set: the second link adds nothing.
+        let mut seen = HashSet::new();
+        assert_eq!(tree_size_once(&a.join("x"), &mut seen).0, one);
+        assert_eq!(tree_size_once(&a.join("y"), &mut seen).0, 0);
     }
 
     #[test]

@@ -183,7 +183,6 @@ fn freed_is_the_sum_of_really_moved_items_when_some_are_skipped() {
 // Disk Map: hard links once, refresh equals a fresh scan, Done equals the map.
 
 #[test]
-#[ignore = "DAT-3: Disk Map counts a hard-linked file once but Done 'freed' counts every link"]
 fn disk_map_freed_matches_the_map_for_hard_links() {
     let mac = FakeMac::new();
     let a = mac.home_file("Shots/a.bin", 400_000);

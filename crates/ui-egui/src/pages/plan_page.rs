@@ -89,7 +89,7 @@ pub fn start_scan(app: &mut CleanApp, f: FeatureId) {
             cancel: &cancel,
             progress: &|s| status(s),
         };
-        feat.scan(&ctx).map_err(|e| format!("{e:#}"))
+        features::scan_with(feat.as_ref(), &ctx).map_err(|e| format!("{e:#}"))
     });
     let st = app.plan_state(f);
     st.phase = Phase::Scanning(job);
