@@ -101,17 +101,13 @@ fn start_map(app: &mut CleanApp, root: PathBuf, fresh: bool) {
             st.phase = Phase::Map;
             return;
         }
-        let from_parent = st.trees.values().find_map(|t| t.find(&root).cloned());
-        if let Some(node) = from_parent
-            && node.is_dir
-        {
-            st.trees.insert(
-                root.clone(),
-                Tree {
-                    root: Some(node),
-                    ..Default::default()
-                },
-            );
+        let from_parent = st
+            .trees
+            .values()
+            .find(|t| t.find(&root).is_some_and(|n| n.is_dir))
+            .and_then(|t| t.subtree(&root));
+        if let Some(sub) = from_parent {
+            st.trees.insert(root.clone(), sub);
             st.root = Some(root.clone());
             st.current = Some(root);
             st.phase = Phase::Map;
@@ -167,11 +163,15 @@ pub fn poll(app: &mut CleanApp) -> bool {
                 match (out.result, out.undo) {
                     (_, Some((n, errs))) => {
                         notice = Some(if errs.is_empty() {
-                            (format!("{n} items put back."), false)
+                            (
+                                format!("{} put back.", cleancraft_core::fsutil::items(n)),
+                                false,
+                            )
                         } else {
                             (
                                 format!(
-                                    "{n} items put back, {} could not be: {}",
+                                    "{} put back, {} could not be: {}",
+                                    cleancraft_core::fsutil::items(n),
                                     errs.len(),
                                     errs[0]
                                 ),
@@ -792,8 +792,8 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
         ui.set_width(640.0);
         ui.label(
             RichText::new(format!(
-                "Move {} items ({}) to {dest}?",
-                items.len(),
+                "Move {} ({}) to {dest}?",
+                cleancraft_core::fsutil::items(items.len()),
                 human_size(total)
             ))
             .font(font(18.0, Weight::Bold)),
@@ -847,13 +847,16 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
     };
     let rep = rep.clone();
     ui.label(
-        RichText::new(format!("{} freed", human_size(rep.freed)))
+        RichText::new(cleancraft_core::features::moved_text([&rep]))
             .font(font(30.0, Weight::Bold))
             .color(t.accent),
     );
+    if !rep.moved.is_empty() {
+        kit::dim(ui, &t, cleancraft_core::features::SPACE_NOTE);
+    }
     ui.label(format!(
-        "{} items moved. {} skipped.",
-        rep.moved.len(),
+        "{} moved. {} skipped.",
+        cleancraft_core::fsutil::items(rep.moved.len()),
         rep.skipped.len()
     ));
     if !rep.skipped.is_empty() {

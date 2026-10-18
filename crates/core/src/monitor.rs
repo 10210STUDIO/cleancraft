@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::env::{Env, Fault};
 use crate::executor::{self, ActionKind, ActionRecord};
-use crate::fsutil::{human_size, tree_size};
+use crate::fsutil::{human_size, memory_size};
 use crate::plan::FeatureId;
 
 /// Free space below this share of the disk raises the low-space alert.
@@ -141,6 +141,24 @@ pub struct Battery {
     pub cycles: Option<u32>,
     /// Full-charge capacity as a percent of the design capacity.
     pub health: Option<u8>,
+}
+
+impl Battery {
+    /// While charging, pmset's estimate is the time until full, otherwise the time left on
+    /// the battery.
+    pub fn charging(&self) -> bool {
+        let st = self.state.to_lowercase();
+        st == "charging" || st.starts_with("finishing charge")
+    }
+
+    /// What `remaining_minutes` means: "Time to full" or "Time left".
+    pub fn estimate_label(&self) -> &'static str {
+        if self.charging() {
+            "Time to full"
+        } else {
+            "Time left"
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -762,7 +780,9 @@ pub fn trash_size(env: &Env) -> (Option<u64>, Option<String>) {
     }
     match std::fs::read_dir(&t) {
         Ok(_) => {
-            let (size, unreadable) = tree_size(&t);
+            // What the Trash holds, the same number as Trash Bins (the folder itself is not
+            // counted: an empty Trash is Zero KB).
+            let (size, _, unreadable) = crate::fsutil::contents_size(&t);
             if unreadable > 0 {
                 (
                     Some(size),
@@ -804,8 +824,8 @@ pub fn alerts(s: &Snapshot) -> Vec<Alert> {
                 kind: AlertKind::HeavyMemory,
                 text: format!(
                     "Memory is heavily used: {} of {}{}.",
-                    human_size(m.used),
-                    human_size(m.total),
+                    memory_size(m.used),
+                    memory_size(m.total),
                     match m.pressure {
                         Some(p) if pressed => format!(", pressure {}", p.label().to_lowercase()),
                         _ => String::new(),
@@ -868,8 +888,8 @@ pub fn menu_bar_entries(s: &Snapshot) -> Vec<String> {
     v.push(match &s.memory {
         Some(m) => format!(
             "Memory: {} of {} used",
-            human_size(m.used),
-            human_size(m.total)
+            memory_size(m.used),
+            memory_size(m.total)
         ),
         None => format!("Memory: {UNKNOWN}"),
     });

@@ -87,7 +87,10 @@ fn scan_shows_disk_numbers_and_clean_keeps_modified() {
         "mystery.zip",
     );
     assert!(edited.exists() && pop.exists() && mystery.exists());
-    assert!(has(&h, &format!("{} freed", human_size(sel_size))));
+    assert!(has(
+        &h,
+        &format!("{} moved to the Trash", human_size(sel_size))
+    ));
     click(&mut h, "Undo");
     for (path, _) in &sel {
         assert!(path.exists(), "{} not restored", path.display());
@@ -144,7 +147,7 @@ fn errors_per_attachment() {
         .filter(|i| ![&photo, &deck, &budget].contains(&&i.path))
         .map(|i| i.size)
         .sum();
-    assert!(has(&h, &format!("{} freed", human_size(rest))));
+    assert!(has(&h, &format!("{} moved to the Trash", human_size(rest))));
 }
 
 #[test]

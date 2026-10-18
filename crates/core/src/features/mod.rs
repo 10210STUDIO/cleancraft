@@ -92,6 +92,12 @@ pub trait Feature: Send + Sync {
     fn prepare(&self, _env: &Env, _plan: &Plan) -> anyhow::Result<()> {
         Ok(())
     }
+    /// Work for what really moved, right after the executor (stopping a launch agent whose
+    /// property list moved). Items that were skipped are left untouched. Must log what it
+    /// does; a failure here is in the journal, the move itself stands.
+    fn finish(&self, _env: &Env, _plan: &Plan, _report: &Report) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 /// Carry out a confirmed plan the one way every front end uses: every selected item checked
@@ -142,6 +148,8 @@ pub fn run_plan_with(
         f.allows_admin(),
         progress,
     )?;
+    // The files moved; what finish could not do is logged in the journal by finish itself.
+    let _ = f.finish(env, &checked, &report);
     report.skipped.splice(0..0, refused);
     Ok(report)
 }
@@ -209,6 +217,36 @@ pub fn admin_count(plan: &Plan) -> usize {
     }
 }
 
+/// What a cleanup did, in words: "1.20 MB moved to the Trash". Moving to the Trash or the
+/// quarantine frees no space yet (it comes back when the Trash is emptied), so the word
+/// "freed" is never used here. The bytes stay in `Report::freed` for the CLI and MCP.
+pub fn moved_text<'a>(reports: impl IntoIterator<Item = &'a Report>) -> String {
+    let mut bytes = 0;
+    let (mut trash, mut quarantine) = (false, false);
+    for r in reports {
+        bytes += r.freed;
+        for m in &r.moved {
+            if let crate::executor::ActionKind::Moved { method, .. } = &m.kind {
+                match method {
+                    Method::Trash => trash = true,
+                    Method::Quarantine | Method::AdminQuarantine => quarantine = true,
+                }
+            }
+        }
+    }
+    let size = crate::fsutil::human_size(bytes);
+    match (trash, quarantine) {
+        (false, false) => "Nothing moved".into(),
+        (true, false) => format!("{size} moved to the Trash"),
+        (false, true) => format!("{size} moved to the CleanCraft quarantine"),
+        (true, true) => format!("{size} moved to the Trash and the CleanCraft quarantine"),
+    }
+}
+
+/// The line under [`moved_text`]: when the space really comes back.
+pub const SPACE_NOTE: &str =
+    "The space is freed when the Trash is emptied or the quarantine is cleared.";
+
 /// Every plan-based feature, in sidebar order.
 pub fn registry() -> Vec<Box<dyn Feature>> {
     vec![
@@ -235,6 +273,14 @@ pub fn allow_roots(env: &Env, id: FeatureId) -> Vec<PathBuf> {
     get(id).map(|f| f.allow_roots(env)).unwrap_or_default()
 }
 
+/// Run a feature's scan the one way every front end uses: then a hard-linked file listed
+/// twice counts once ([`Plan::count_links_once`]).
+pub fn scan_with(f: &dyn Feature, ctx: &ScanCtx<'_>) -> anyhow::Result<Plan> {
+    let mut plan = f.scan(ctx)?;
+    plan.count_links_once();
+    Ok(plan)
+}
+
 /// Scan with a fresh context.
 pub fn scan(env: &Env, settings: &Settings, id: FeatureId) -> anyhow::Result<Plan> {
     let f = get(id).ok_or_else(|| anyhow::anyhow!("{} has no scan", id.title()))?;
@@ -245,5 +291,5 @@ pub fn scan(env: &Env, settings: &Settings, id: FeatureId) -> anyhow::Result<Pla
         cancel: &cancel,
         progress: &|_| {},
     };
-    f.scan(&ctx)
+    scan_with(f.as_ref(), &ctx)
 }

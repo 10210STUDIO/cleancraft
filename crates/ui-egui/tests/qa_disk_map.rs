@@ -82,7 +82,7 @@ fn map_drill_select_remove_undo() {
     click(&mut h, "Move to Trash");
     assert!(!target.exists() && !film.exists());
     assert!(env.user_trash().join("target").exists());
-    assert!(has(&h, &format!("{} freed", human_size(sel))));
+    assert!(has(&h, &format!("{} moved to the Trash", human_size(sel))));
     click(&mut h, "Done");
     // The map shows the new sizes.
     click(&mut h, "Go to Home folder");
@@ -100,7 +100,7 @@ fn map_drill_select_remove_undo() {
     assert!(!projects.exists());
     click(&mut h, "Undo");
     assert!(projects.exists());
-    assert!(has_text(&h, "1 items put back."));
+    assert!(has_text(&h, "1 item put back."));
     let t = h.state().disk_map.tree().unwrap().clone();
     assert_eq!(t.find(&home).unwrap().size, tree_size(&home).0);
 }

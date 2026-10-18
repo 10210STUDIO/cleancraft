@@ -202,10 +202,13 @@ fn remove_agent_file_after_confirmation_and_undo() {
     click(&mut h, "Move to Trash");
     assert!(!plist.exists());
     assert!(m.env.user_trash().join("com.example.helper.plist").exists());
-    assert!(m.env.fake_sys().unwrap().calls().contains(
-        &"/bin/launchctl bootout gui/501 /Users/tester/Library/LaunchAgents/com.example.helper.plist"
-            .to_string()
-    ));
+    assert!(
+        m.env
+            .fake_sys()
+            .unwrap()
+            .calls()
+            .contains(&"/bin/launchctl bootout gui/501/com.example.helper".to_string())
+    );
     assert!(has_text(&h, "Moved 1 startup file."));
     assert!(!has(&h, "com.example.helper"), "gone from the list");
     let hist = executor::history(&m.env);

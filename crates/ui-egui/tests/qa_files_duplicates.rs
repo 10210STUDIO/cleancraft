@@ -107,7 +107,10 @@ fn duplicate_sets_keep_one_copy() {
     click(&mut h, "Move to Trash");
     assert!(a_keep.exists() && !a_dl.exists() && !a_music.exists());
     assert!(b2.exists() && !b1.exists());
-    assert!(has(&h, &format!("{} freed", human_size(expect))));
+    assert!(has(
+        &h,
+        &format!("{} moved to the Trash", human_size(expect))
+    ));
     click(&mut h, "Undo");
     assert!(a_dl.exists() && a_music.exists() && b1.exists());
 }
@@ -172,5 +175,5 @@ fn similar_pictures_keep_the_biggest() {
     click(&mut h, "Review and Clean");
     click(&mut h, "Move to Trash");
     assert!(big.exists() && !a.exists() && !small.exists() && other.exists());
-    assert!(has(&h, &format!("{} freed", human_size(rm))));
+    assert!(has(&h, &format!("{} moved to the Trash", human_size(rm))));
 }

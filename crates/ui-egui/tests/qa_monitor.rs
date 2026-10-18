@@ -8,7 +8,7 @@ mod common;
 use std::time::Duration;
 
 use cleancraft_core::executor::history;
-use cleancraft_core::fsutil::{human_size, tree_size};
+use cleancraft_core::fsutil::{human_size, memory_size};
 use cleancraft_core::monitor::{BatteryReading, PURGE_COMMAND, pct, rate_text, uptime_text};
 use cleancraft_core::testkit::FakeMac;
 use cleancraft_core::testkit_monitor::*;
@@ -53,15 +53,15 @@ fn cards_show_the_parsed_reading() {
     let mem = s.memory.as_ref().unwrap();
     assert!(has(
         &h,
-        &format!("{} of {}", human_size(mem.used), human_size(mem.total))
+        &format!("{} of {}", memory_size(mem.used), memory_size(mem.total))
     ));
     // Recalculated from the vm_stat sample: (anonymous - purgeable + wired + compressor) pages.
     assert_eq!(mem.used, (330_000 + 130_000 + 50_000) * 16384);
-    assert!(has(&h, &human_size(mem.available())));
+    assert!(has(&h, &memory_size(mem.available())));
     assert!(has(&h, "Normal"));
-    assert!(has(&h, &human_size(mem.swap_used.unwrap())));
+    assert!(has(&h, &memory_size(mem.swap_used.unwrap())));
     for a in &mem.top {
-        assert!(has(&h, &human_size(a.memory)), "{}", a.name);
+        assert!(has(&h, &memory_size(a.memory)), "{}", a.name);
     }
 
     let free = s.storage.free.unwrap();
@@ -69,7 +69,7 @@ fn cards_show_the_parsed_reading() {
     assert!(has(&h, &format!("{} free", human_size(free))));
     assert!(has(&h, &human_size(s.storage.total.unwrap())));
     // Trash size recalculated from disk.
-    let trash = tree_size(&m.env.user_trash()).0;
+    let trash = cleancraft_core::features::trash::contents_size(&m.env.user_trash()).0;
     assert_eq!(s.storage.trash, Some(trash));
     assert!(has(&h, &human_size(trash)));
 

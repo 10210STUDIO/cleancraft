@@ -6,7 +6,7 @@
 use std::time::{Duration, Instant};
 
 use cleancraft_core::FeatureId;
-use cleancraft_core::fsutil::human_size;
+use cleancraft_core::fsutil::{human_size, memory_size};
 use cleancraft_core::monitor::{
     self, BatteryReading, PurgeOutcome, Sampler, Snapshot, UNKNOWN, pct, rate_text, uptime_text,
 };
@@ -266,7 +266,7 @@ fn memory_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
                 big(
                     app,
                     ui,
-                    &format!("{} of {}", human_size(m.used), human_size(m.total)),
+                    &format!("{} of {}", memory_size(m.used), memory_size(m.total)),
                 );
                 let frac = m.used_fraction() as f32;
                 let w = ui.available_width();
@@ -277,7 +277,7 @@ fn memory_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
                     if frac > 0.9 { t.warning } else { t.accent },
                     w,
                 );
-                row(app, ui, "Available", &human_size(m.available()));
+                row(app, ui, "Available", &memory_size(m.available()));
                 row(
                     app,
                     ui,
@@ -289,12 +289,12 @@ fn memory_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
                     ui,
                     "Swap used",
                     &m.swap_used
-                        .map(human_size)
+                        .map(memory_size)
                         .unwrap_or_else(|| UNKNOWN.into()),
                 );
                 ui.add_space(4.0);
                 for a in &m.top {
-                    row(app, ui, &a.name, &human_size(a.memory));
+                    row(app, ui, &a.name, &memory_size(a.memory));
                 }
             }
             None => big(app, ui, UNKNOWN),
@@ -364,7 +364,7 @@ fn battery_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
             row(
                 app,
                 ui,
-                "Time left",
+                b.estimate_label(),
                 &b.remaining_minutes
                     .map(|m| uptime_text(u64::from(m) * 60))
                     .unwrap_or_else(|| "No estimate".into()),

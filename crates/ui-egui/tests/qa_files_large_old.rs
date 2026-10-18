@@ -68,7 +68,7 @@ fn downloads_scan_select_clean_undo() {
     click(&mut h, "Move to Trash");
     assert!(!big.exists() && old.exists());
     assert!(mac.env.user_trash().join("big.zip").exists());
-    assert!(has(&h, &format!("{} freed", human_size(size))));
+    assert!(has(&h, &format!("{} moved to the Trash", human_size(size))));
     click(&mut h, "Undo");
     assert!(big.exists());
 }

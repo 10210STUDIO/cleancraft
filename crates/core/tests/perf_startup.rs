@@ -289,7 +289,7 @@ fn quit_rechecks_the_pid() {
 }
 
 #[test]
-fn remove_agent_plist_through_the_plan_with_bootout_first_and_undo() {
+fn remove_agent_plist_through_the_plan_with_bootout_after_the_move_and_undo() {
     let m = tp::startup_mac();
     let settings = Settings::default();
     let mut plan = features::scan(&m.env, &settings, FeatureId::LoginItems).unwrap();
@@ -324,13 +324,12 @@ fn remove_agent_plist_through_the_plan_with_bootout_first_and_undo() {
     assert!(!helper_path.exists());
     assert!(m.env.user_trash().join("com.example.helper.plist").exists());
     let calls = m.env.fake_sys().unwrap().calls();
-    assert!(calls.contains(
-        &"/bin/launchctl bootout gui/501 /Users/tester/Library/LaunchAgents/com.example.helper.plist"
-            .to_string()
-    ));
+    // REL-6: stopped after its file moved, by label.
+    assert!(calls.contains(&"/bin/launchctl bootout gui/501/com.example.helper".to_string()));
     let h = executor::history(&m.env);
+    assert!(matches!(&h[0].kind, ActionKind::Moved { .. }));
     assert!(
-        matches!(&h[0].kind, ActionKind::Command { command, .. } if command.contains("bootout"))
+        matches!(&h[1].kind, ActionKind::Command { command, .. } if command.contains("bootout"))
     );
     executor::undo_plan(&m.env, &rep.plan_id);
     assert!(helper_path.exists());

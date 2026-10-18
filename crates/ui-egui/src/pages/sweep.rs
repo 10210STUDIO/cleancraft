@@ -252,8 +252,8 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile) {
                     ui,
                     &t,
                     &format!(
-                        "{} items in the Trash. Emptied from its own page.",
-                        p.items.len()
+                        "{} in the Trash. Emptied from its own page.",
+                        cleancraft_core::fsutil::items(p.items.len())
                     ),
                 );
             }
@@ -266,14 +266,22 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile) {
                 kit::dim(
                     ui,
                     &t,
-                    &format!("{} of {} items selected", p.selected_count(), p.items.len()),
+                    &format!(
+                        "{} of {} selected",
+                        p.selected_count(),
+                        cleancraft_core::fsutil::items(p.items.len())
+                    ),
                 );
             }
             TileData::Count { count, noun } => {
                 ui.label(
-                    RichText::new(format!("{count} {noun}"))
-                        .font(font(22.0, Weight::Bold))
-                        .color(t.text),
+                    RichText::new(cleancraft_core::fsutil::count(
+                        *count,
+                        noun.trim_end_matches('s'),
+                        noun,
+                    ))
+                    .font(font(22.0, Weight::Bold))
+                    .color(t.text),
                 );
                 kit::dim(ui, &t, "Open the page to act on them.");
             }
@@ -335,7 +343,11 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
     egui::Modal::new(egui::Id::new("sweep-confirm")).show(ui.ctx(), |ui| {
         ui.set_width(680.0);
         ui.label(
-            RichText::new(format!("Clean {count} items ({})?", human_size(size)))
+            RichText::new(format!(
+                "Clean {} ({})?",
+                cleancraft_core::fsutil::items(count),
+                human_size(size)
+            ))
                 .font(font(18.0, Weight::Bold)),
         );
         kit::dim(
@@ -358,9 +370,9 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
                     ui.add_space(6.0);
                     ui.label(
                         RichText::new(format!(
-                            "{}: {} items, {}",
+                            "{}: {}, {}",
                             fid.title(),
-                            p.selected_count(),
+                            cleancraft_core::fsutil::items(p.selected_count()),
                             human_size(p.selected_size())
                         ))
                         .font(font(14.0, Weight::SemiBold)),
@@ -407,16 +419,20 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
         return;
     };
     let runs = runs.clone();
-    let freed: u64 = runs
-        .iter()
-        .filter_map(|r| r.result.as_ref().ok())
-        .map(|r| r.freed)
-        .sum();
+    let headline =
+        cleancraft_core::features::moved_text(runs.iter().filter_map(|r| r.result.as_ref().ok()));
     ui.label(
-        RichText::new(format!("{} freed", human_size(freed)))
+        RichText::new(headline)
             .font(font(30.0, Weight::Bold))
             .color(t.accent),
     );
+    if runs
+        .iter()
+        .filter_map(|r| r.result.as_ref().ok())
+        .any(|r| !r.moved.is_empty())
+    {
+        kit::dim(ui, &t, cleancraft_core::features::SPACE_NOTE);
+    }
     ui.add_space(8.0);
     let mut undo: Option<(FeatureId, String)> = None;
     egui::ScrollArea::vertical()
@@ -463,11 +479,16 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
         let (n, errs) = executor::undo_plan(&app.env, &plan_id);
         app.sweep.undone.push(id);
         if errs.is_empty() {
-            app.tell(format!("{}: {n} items put back.", id.title()));
+            app.tell(format!(
+                "{}: {} put back.",
+                id.title(),
+                cleancraft_core::fsutil::items(n)
+            ));
         } else {
             app.warn(format!(
-                "{}: {n} items put back, {} could not be: {}",
+                "{}: {} put back, {} could not be: {}",
                 id.title(),
+                cleancraft_core::fsutil::items(n),
                 errs.len(),
                 errs[0].1
             ));

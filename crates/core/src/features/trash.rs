@@ -60,8 +60,8 @@ pub struct TrashInfo {
 
 /// Size of a Trash's contents: each entry with the shared formula.
 pub fn contents_size(dir: &Path) -> (u64, usize) {
-    let kids = children(dir);
-    (kids.iter().map(|c| tree_size(c).0).sum(), kids.len())
+    let (size, entries, _) = crate::fsutil::contents_size(dir);
+    (size, entries)
 }
 
 fn info(env: &Env, path: PathBuf, label: String, mail: bool) -> TrashInfo {

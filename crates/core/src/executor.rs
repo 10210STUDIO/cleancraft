@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::env::{Env, Fault};
-use crate::fsutil::tree_size;
+use crate::fsutil::tree_size_once;
 use crate::plan::{FeatureId, Item, Plan};
 use crate::policy::{self, Refusal};
 use crate::sys::{CmdOut, RunningApp, admin_cancelled, admin_move_script};
@@ -253,6 +253,7 @@ pub fn execute_with(
     let running = env.sys.running_apps();
     let total = selected.len();
     let mut admin_batch: Vec<(&Item, u64)> = Vec::new();
+    let mut counted = HashSet::new();
     for (n, item) in selected.iter().enumerate() {
         progress(n, total);
         let p = &item.path;
@@ -261,7 +262,8 @@ pub fn execute_with(
             report.skipped.push((p.clone(), why));
             continue;
         }
-        let (size, _) = tree_size(p);
+        // A hard-linked file counts once in the whole report, like in the plan and the map.
+        let (size, _) = tree_size_once(p, &mut counted);
         if by_admin {
             admin_batch.push((item, size));
             continue;

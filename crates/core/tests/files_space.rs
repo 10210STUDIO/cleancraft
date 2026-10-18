@@ -51,8 +51,11 @@ fn hard_links_once_and_links_not_followed() {
     std::os::unix::fs::symlink(mac.env.home_path("Data"), mac.env.home_path("Shortcut")).unwrap();
     let t = build(&mac);
     let data = t.find(&mac.env.home_path("Data")).unwrap();
-    let once = tree_size(&mac.env.home_path("Data")).0 - entry_size(&fs::metadata(&a).unwrap());
+    // tree_size counts a hard-linked file once too (DAT-3): the same formula everywhere.
+    let once = entry_size(&fs::symlink_metadata(mac.env.home_path("Data")).unwrap())
+        + entry_size(&fs::metadata(&a).unwrap());
     assert_eq!(data.size, once);
+    assert_eq!(data.size, tree_size(&mac.env.home_path("Data")).0);
     #[cfg(unix)]
     {
         let link = t.find(&mac.env.home_path("Shortcut")).unwrap();
@@ -184,6 +187,7 @@ fn disk_use_from_df() {
     );
     let u = space::disk_use(&mac.env, mac.env.home());
     assert_eq!(u.total, Some(1_024_000_000));
-    assert_eq!(u.used, Some(614_400_000));
+    // Used = total - free (DAT-5), not df's Used column.
+    assert_eq!(u.used, Some(1_024_000_000 - 409_600_000));
     assert_eq!(u.free, Some(409_600_000));
 }

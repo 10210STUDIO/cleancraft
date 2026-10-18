@@ -125,7 +125,10 @@ fn run_lists_everything_moves_exactly_that_and_undo_per_module() {
     for p in &all {
         assert_eq!(p.exists(), !listed.contains(p), "{}", p.display());
     }
-    assert!(has(&h, &format!("{} freed", human_size(expect_freed))));
+    assert!(has(
+        &h,
+        &format!("{} moved to the Trash", human_size(expect_freed))
+    ));
     assert!(has(
         &h,
         &format!("2 moved, 0 skipped, {}", human_size(mail_size))

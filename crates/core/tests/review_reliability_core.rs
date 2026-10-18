@@ -211,7 +211,6 @@ fn undo_refuses_a_different_file_at_the_stored_place() {
 /// denied, file in use, disk full) the agent is stopped anyway, the file stays, and the journal
 /// holds only a Command line, which cannot be undone.
 #[test]
-#[ignore = "REL-6: launch agent is booted out even when its plist is then skipped; nothing to undo"]
 fn agent_is_not_stopped_when_its_file_is_not_moved() {
     let m = tp::startup_mac();
     let settings = Settings::default();

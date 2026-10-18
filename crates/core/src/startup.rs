@@ -970,29 +970,57 @@ pub fn domain_of(env: &Env, plist: &Path) -> Option<Domain> {
         .find(|d| plist.parent() == Some(d.path(env).as_path()))
 }
 
-/// Stop the agents of the confirmed selection before their property lists move. Each stop is
-/// logged. A stop that fails because the agent was not running is fine.
-pub fn bootout_selected(env: &Env, plan: &Plan, feature: FeatureId) -> anyhow::Result<()> {
-    let selected: Vec<_> = plan
-        .selected()
-        .filter(|i| {
-            i.path.extension().is_some_and(|e| e == "plist")
+/// The `Label` of a launch item's property list, else its file name without `.plist`.
+fn plist_label(path: &Path) -> Option<String> {
+    plist::Value::from_file(path)
+        .ok()
+        .and_then(|v| {
+            v.as_dictionary()?
+                .get("Label")?
+                .as_string()
+                .map(str::to_string)
+        })
+        .or_else(|| path.file_stem().map(|s| s.to_string_lossy().into_owned()))
+}
+
+/// Stop the launch agents whose property list really moved (REL-6: an agent whose file was
+/// skipped is left running and untouched). Runs after the move, by label:
+/// `launchctl bootout gui/<uid>/<label>`. Each stop is logged; a stop that fails because the
+/// agent was not running is fine. Daemons are not stopped (that needs root): they stop at the
+/// next restart.
+pub fn bootout_moved(
+    env: &Env,
+    report: &executor::Report,
+    feature: FeatureId,
+) -> anyhow::Result<()> {
+    let moved: Vec<(PathBuf, PathBuf)> = report
+        .moved
+        .iter()
+        .filter_map(|r| match &r.kind {
+            ActionKind::Moved {
+                original, stored, ..
+            } => Some((original.clone(), stored.clone())),
+            _ => None,
+        })
+        .filter(|(original, _)| {
+            original.extension().is_some_and(|e| e == "plist")
                 && matches!(
-                    domain_of(env, &i.path),
+                    domain_of(env, original),
                     Some(Domain::UserAgent | Domain::GlobalAgent)
                 )
         })
-        .cloned()
         .collect();
-    if selected.is_empty() {
+    if moved.is_empty() {
         return Ok(());
     }
     let uid = tasks::current_uid(env).map_err(|e| anyhow::anyhow!(e))?;
     journal_writable(env)?;
-    for it in selected {
-        let shown = env.display(&it.path);
-        let domain = format!("gui/{uid}");
-        let (ok, output) = match env.sys.run(LAUNCHCTL, &["bootout", &domain, &shown]) {
+    for (original, stored) in moved {
+        let Some(label) = plist_label(&stored) else {
+            continue;
+        };
+        let target = format!("gui/{uid}/{label}");
+        let (ok, output) = match env.sys.run(LAUNCHCTL, &["bootout", &target]) {
             Ok(out) => (
                 out.ok(),
                 tasks::first_lines(&format!("{}\n{}", out.stdout, out.stderr), 3),
@@ -1001,10 +1029,10 @@ pub fn bootout_selected(env: &Env, plan: &Plan, feature: FeatureId) -> anyhow::R
         };
         let mut rec = new_record(
             ActionKind::Command {
-                command: format!("{LAUNCHCTL} bootout {domain} {}", sh_quote(&shown)),
+                command: format!("{LAUNCHCTL} bootout {}", sh_quote(&target)),
                 ok,
                 output: if ok {
-                    output
+                    format!("stopped after {} moved", env.display(&original))
                 } else {
                     format!("not running ({output})")
                 },
@@ -1064,8 +1092,8 @@ impl Feature for StartupFeature {
         Ok(plan)
     }
 
-    fn prepare(&self, env: &Env, plan: &Plan) -> anyhow::Result<()> {
-        bootout_selected(env, plan, FeatureId::LoginItems)
+    fn finish(&self, env: &Env, _plan: &Plan, report: &executor::Report) -> anyhow::Result<()> {
+        bootout_moved(env, report, FeatureId::LoginItems)
     }
 }
 

@@ -5,7 +5,7 @@
 use std::fs;
 
 use cleancraft_core::executor::history;
-use cleancraft_core::fsutil::tree_size;
+use cleancraft_core::features::trash;
 use cleancraft_core::monitor::*;
 use cleancraft_core::testkit::FakeMac;
 use cleancraft_core::testkit_monitor::*;
@@ -45,7 +45,10 @@ fn full_snapshot_from_tools() {
 
     assert_eq!(snap.storage.total, Some(488_245_288 * 1024));
     assert_eq!(snap.storage.free, Some(80_000_000 * 1024));
-    assert_eq!(snap.storage.trash, Some(tree_size(&m.env.user_trash()).0));
+    assert_eq!(
+        snap.storage.trash,
+        Some(trash::contents_size(&m.env.user_trash()).0)
+    );
     assert!(snap.storage.trash.unwrap() >= 4_000_000);
 
     match snap.battery.as_ref().unwrap() {
@@ -102,7 +105,10 @@ fn every_tool_missing_means_unknown_not_zero() {
     assert!(snap.network.is_none());
     assert!(snap.problems.len() >= 6, "{:?}", snap.problems);
     // The Trash itself is a folder, still measured.
-    assert_eq!(snap.storage.trash, Some(tree_size(&m.env.user_trash()).0));
+    assert_eq!(
+        snap.storage.trash,
+        Some(trash::contents_size(&m.env.user_trash()).0)
+    );
     assert_eq!(menu_bar_title(&snap), "CPU ? RAM ?");
     assert!(alerts(&snap).is_empty());
 }
@@ -278,4 +284,23 @@ fn free_up_ram_with_unwritable_log() {
         o => panic!("{o:?}"),
     }
     assert!(m.env.fake_sys().unwrap().admin_calls().is_empty());
+}
+
+#[test]
+fn battery_estimate_label_follows_charging() {
+    let mut b = Battery {
+        percent: 87,
+        state: "charging".into(),
+        on_ac: true,
+        remaining_minutes: Some(90),
+        cycles: None,
+        health: None,
+    };
+    assert_eq!(b.estimate_label(), "Time to full");
+    b.state = "finishing charge".into();
+    assert_eq!(b.estimate_label(), "Time to full");
+    b.state = "discharging".into();
+    assert_eq!(b.estimate_label(), "Time left");
+    b.state = "AC attached".into();
+    assert_eq!(b.estimate_label(), "Time left");
 }

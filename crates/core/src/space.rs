@@ -1,9 +1,10 @@
 //! Disk Map: a size tree of a folder, the treemap layout that draws it, and the rules for what
 //! may be selected.
 //!
-//! Sizes use the shared formula ([`crate::fsutil::entry_size`], bytes on disk) with three
-//! differences from [`crate::fsutil::tree_size`], all to keep the numbers honest:
-//! - a file with several hard links is counted once (the first path met, in name order),
+//! Sizes use the shared formula ([`crate::fsutil::entry_size`], bytes on disk). Like
+//! [`crate::fsutil::tree_size`], a file with several hard links is counted once: on the first
+//! path met in name order, in the whole tree, also after a refresh. Two more rules keep the
+//! numbers honest:
 //! - the walk does not cross into another volume (a folder whose device differs from the
 //!   root's is listed with size 0 and counted in `other_volumes`),
 //! - symbolic links are never followed (they count as their own small size).
@@ -11,7 +12,7 @@
 //! A tree is built once per scanned folder and kept: drilling down needs no new scan. After a
 //! removal or an undo only the folders that changed are measured again ([`Tree::refresh`]).
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -41,11 +42,20 @@ pub struct Tree {
     pub other_volumes: u32,
     /// The scan was stopped; sizes are partial.
     pub stopped: bool,
+    /// Every path of each file that has several hard links, by (device, inode). The first
+    /// path (name order) carries the size; the others count 0.
+    pub links: HashMap<(u64, u64), BTreeSet<PathBuf>>,
 }
+
+/// Link paths by (device, inode).
+type Links = HashMap<(u64, u64), BTreeSet<PathBuf>>;
 
 struct Walker<'a> {
     dev: Option<u64>,
-    seen: HashSet<(u64, u64)>,
+    /// Link paths already in the tree outside the part being measured.
+    known: &'a Links,
+    /// Link paths met in this walk.
+    found: Links,
     unreadable: u32,
     other_volumes: u32,
     files: u64,
@@ -116,9 +126,19 @@ impl Walker<'_> {
             if self.files.is_multiple_of(500) {
                 (self.progress)(self.files, p);
             }
-            if nlink > 1 && !md.is_dir() && !self.seen.insert((dev, ino)) {
-                // Another link to a file already counted.
-                return Some(n);
+            if nlink > 1 && !md.is_dir() {
+                let here = self.found.entry((dev, ino)).or_default();
+                let first_here = here.is_empty();
+                here.insert(p.to_path_buf());
+                let earlier_elsewhere = self
+                    .known
+                    .get(&(dev, ino))
+                    .and_then(|s| s.first())
+                    .is_some_and(|q| q.as_path() < p);
+                if !first_here || earlier_elsewhere {
+                    // Another link to a file counted on an earlier path.
+                    return Some(n);
+                }
             }
             n.size = entry_size(&md);
         }
@@ -128,10 +148,23 @@ impl Walker<'_> {
 
 /// Measure `root`. `progress` gets the number of files seen so far.
 pub fn build(root: &Path, cancel: &AtomicBool, progress: &(dyn Fn(u64, &Path) + Sync)) -> Tree {
-    let dev = std::fs::symlink_metadata(root).ok().map(|m| dev_ino(&m).0);
+    build_with(root, cancel, progress, &Links::new(), None)
+}
+
+/// [`build`] of a part of a tree whose other link paths are `known`; `dev` is the tree's
+/// device.
+fn build_with(
+    root: &Path,
+    cancel: &AtomicBool,
+    progress: &(dyn Fn(u64, &Path) + Sync),
+    known: &Links,
+    dev: Option<u64>,
+) -> Tree {
+    let dev = dev.or_else(|| std::fs::symlink_metadata(root).ok().map(|m| dev_ino(&m).0));
     let mut w = Walker {
         dev,
-        seen: HashSet::new(),
+        known,
+        found: Links::new(),
         unreadable: 0,
         other_volumes: 0,
         files: 0,
@@ -144,6 +177,7 @@ pub fn build(root: &Path, cancel: &AtomicBool, progress: &(dyn Fn(u64, &Path) + 
         unreadable: w.unreadable,
         other_volumes: w.other_volumes,
         stopped: cancel.load(Ordering::Relaxed),
+        links: w.found,
     }
 }
 
@@ -207,6 +241,17 @@ impl Node {
         true
     }
 
+    /// Set the size of the file node at `p` and fix every ancestor's total.
+    fn set_file_size(&mut self, p: &Path, size: u64) {
+        if let Some(mut n) = self.find(p).cloned()
+            && !n.is_dir
+            && n.size != size
+        {
+            n.size = size;
+            self.put(p, Some(n));
+        }
+    }
+
     /// Keep "biggest first" on every folder from here down to `p` after sizes changed.
     fn resort_towards(&mut self, p: &Path) {
         if let Some(c) = self.children.iter_mut().find(|c| p.starts_with(&c.path)) {
@@ -230,9 +275,27 @@ impl Tree {
         self.root.as_ref().map(|r| r.path.as_path())
     }
 
+    /// The part of this tree at folder `p`, as a tree of its own (its link paths included).
+    pub fn subtree(&self, p: &Path) -> Option<Tree> {
+        let node = self.find(p)?.clone();
+        let mut links = Links::new();
+        for (id, paths) in &self.links {
+            let inside: BTreeSet<PathBuf> =
+                paths.iter().filter(|q| q.starts_with(p)).cloned().collect();
+            if !inside.is_empty() {
+                links.insert(*id, inside);
+            }
+        }
+        Some(Tree {
+            root: Some(node),
+            links,
+            ..Default::default()
+        })
+    }
+
     /// Measure `p` again after it changed (moved away, put back, created). Climbs to the
-    /// nearest ancestor present in the tree when `p` is new. Hard links inside the measured
-    /// part are counted once within that part.
+    /// nearest ancestor present in the tree when `p` is new. A hard-linked file still counts
+    /// once in the whole tree, on its first path in name order, as in a new scan.
     pub fn refresh(&mut self, p: &Path) {
         let Some(root) = self.root.as_mut() else {
             return;
@@ -253,13 +316,51 @@ impl Tree {
             }
             target = parent.to_path_buf();
         }
+        let dev = std::fs::symlink_metadata(&root.path)
+            .ok()
+            .map(|m| dev_ino(&m).0);
+        // Link paths of the measured part are forgotten; the walk finds them again.
+        let carriers_before: HashMap<(u64, u64), PathBuf> = self
+            .links
+            .iter()
+            .filter_map(|(id, s)| s.first().map(|c| (*id, c.clone())))
+            .collect();
+        for s in self.links.values_mut() {
+            s.retain(|q| !q.starts_with(&target));
+        }
         let never = AtomicBool::new(false);
         let fresh = if std::fs::symlink_metadata(&target).is_ok() {
-            build(&target, &never, &|_, _| {}).root
+            build_with(&target, &never, &|_, _| {}, &self.links, dev)
         } else {
-            None
+            Tree::default()
         };
-        root.put(&target, fresh);
+        let Some(root) = self.root.as_mut() else {
+            return;
+        };
+        root.put(&target, fresh.root);
+        for (id, paths) in fresh.links {
+            self.links.entry(id).or_default().extend(paths);
+        }
+        self.links.retain(|_, s| !s.is_empty());
+        // A link outside the measured part may have to start or stop carrying the size.
+        for (id, before) in carriers_before {
+            let Some(now) = self.links.get(&id).and_then(|s| s.first()).cloned() else {
+                continue;
+            };
+            if now == before || now.starts_with(&target) {
+                if !before.starts_with(&target) && now != before {
+                    root.set_file_size(&before, 0);
+                }
+                continue;
+            }
+            // `now` lies outside the measured part and was counting 0.
+            if let Ok(md) = std::fs::symlink_metadata(&now) {
+                root.set_file_size(&now, entry_size(&md));
+            }
+            if !before.starts_with(&target) {
+                root.set_file_size(&before, 0);
+            }
+        }
     }
 
     /// Measure again what a removal or an undo changed: each item's old and new place, and
@@ -377,14 +478,17 @@ pub fn outermost(paths: &[PathBuf]) -> Vec<PathBuf> {
     out
 }
 
-/// Used and total bytes of the volume holding `path`, from `df -Pk`: (total, used, free).
+/// Total, used and free bytes of the volume holding `path`, from `df -Pk`: (total, used,
+/// free). Used is total minus free, like Finder and Live Monitor: on APFS df's own Used column
+/// counts only this volume, while other volumes of the container share the space, so it would
+/// not add up with free to the disk size.
 pub fn parse_df(stdout: &str) -> Option<(u64, u64, u64)> {
     let line = stdout.lines().nth(1)?;
     let cols: Vec<&str> = line.split_whitespace().collect();
     let total: u64 = cols.get(1)?.parse().ok()?;
-    let used: u64 = cols.get(2)?.parse().ok()?;
     let free: u64 = cols.get(3)?.parse().ok()?;
-    Some((total * 1024, used * 1024, free * 1024))
+    let (total, free) = (total * 1024, free * 1024);
+    Some((total, total.saturating_sub(free), free))
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -525,6 +629,9 @@ mod tests {
     fn df_columns() {
         let out = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk3s1 1000 600 400 60% /\n";
         assert_eq!(parse_df(out), Some((1000 * 1024, 600 * 1024, 400 * 1024)));
+        // APFS: this volume's Used (500) + free (400) is not the disk (1000).
+        let apfs = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk3s1 1000 500 400 56% /\n";
+        assert_eq!(parse_df(apfs), Some((1000 * 1024, 600 * 1024, 400 * 1024)));
     }
 
     #[test]
