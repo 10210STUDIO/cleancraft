@@ -109,7 +109,6 @@ fn undo_keeps_journal_lines_it_cannot_read() {
 /// Undo looks up the first record with that id, finds it already put back, and refuses: the
 /// item stays in the Trash and History offers an Undo that cannot work.
 #[test]
-#[ignore = "REL-3: a plan run again after Undo reuses action ids; the second Undo says 'already put back'"]
 fn same_plan_run_again_after_undo_can_be_undone_again() {
     let m = FakeMac::sample();
     let plan = junk_plan(&m);

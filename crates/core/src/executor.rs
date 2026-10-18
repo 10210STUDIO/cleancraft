@@ -201,6 +201,7 @@ pub fn execute_with(
     if selected.is_empty() {
         return Ok(report);
     }
+    let mut used = used_ids(env);
     let open = env.sys.open_files();
     let running = env.sys.running_apps();
     let total = selected.len();
@@ -219,8 +220,8 @@ pub fn execute_with(
             continue;
         }
         match move_one(env, p, &plan.id, method) {
-            Ok((stored, used)) => {
-                let rec = moved_record(plan, item, size, stored.clone(), used);
+            Ok((stored, used_method)) => {
+                let rec = moved_record(plan, item, size, stored.clone(), used_method, &mut used);
                 if let Err(e) = append_journal(env, &rec) {
                     // No log line, no removal: put it back.
                     let _ = fs::rename(&stored, p);
@@ -239,7 +240,7 @@ pub fn execute_with(
         }
     }
     if !admin_batch.is_empty() {
-        admin_move(env, plan, &admin_batch, &mut report);
+        admin_move(env, plan, &admin_batch, &mut report, &mut used);
     }
     progress(total, total);
     Ok(report)
@@ -299,15 +300,37 @@ fn skip_for(e: &io::Error) -> SkipReason {
     }
 }
 
+/// An action id not used yet: `<plan>#<item>`, or `<plan>#<item>~2`, `~3`... when the same plan
+/// ran before (run again after an Undo), so every record stays reachable by its id.
+fn fresh_id(base: String, used: &mut HashSet<String>) -> String {
+    let mut id = base.clone();
+    let mut n = 2;
+    while used.contains(&id) {
+        id = format!("{base}~{n}");
+        n += 1;
+    }
+    used.insert(id.clone());
+    id
+}
+
+/// Ids already in the journal, damaged lines included as far as they show one.
+fn used_ids(env: &Env) -> HashSet<String> {
+    journal_lines(env)
+        .into_iter()
+        .filter_map(|(_, r)| r.map(|r| r.id))
+        .collect()
+}
+
 fn moved_record(
     plan: &Plan,
     item: &Item,
     size: u64,
     stored: PathBuf,
     method: Method,
+    used: &mut HashSet<String>,
 ) -> ActionRecord {
     ActionRecord {
-        id: format!("{}#{}", plan.id, item.id),
+        id: fresh_id(format!("{}#{}", plan.id, item.id), used),
         plan_id: plan.id.clone(),
         feature: plan.feature,
         time: chrono::Utc::now().timestamp(),
@@ -367,7 +390,13 @@ fn admin_failure(out: &CmdOut, src: &Path) -> SkipReason {
 
 /// Move every item of `batch` into the quarantine with one administrator command, then journal
 /// what really moved (checked on disk).
-fn admin_move(env: &Env, plan: &Plan, batch: &[(&Item, u64)], report: &mut Report) {
+fn admin_move(
+    env: &Env,
+    plan: &Plan,
+    batch: &[(&Item, u64)],
+    report: &mut Report,
+    used: &mut HashSet<String>,
+) {
     let dir = env.quarantine_dir().join(sanitize(&plan.id));
     let fail_all = |report: &mut Report, why: SkipReason| {
         for (it, _) in batch {
@@ -409,7 +438,7 @@ fn admin_move(env: &Env, plan: &Plan, batch: &[(&Item, u64)], report: &mut Repor
             report.skipped.push((src.clone(), admin_failure(&out, src)));
             continue;
         }
-        let rec = moved_record(plan, it, *size, dest.clone(), Method::AdminQuarantine);
+        let rec = moved_record(plan, it, *size, dest.clone(), Method::AdminQuarantine, used);
         match append_journal(env, &rec) {
             Ok(()) => {
                 report.freed += size;
@@ -703,6 +732,18 @@ fn check_restore(env: &Env, original: &Path, stored: &Path) -> Result<(), UndoEr
     Ok(())
 }
 
+/// The record of `action_id`: the newest one not put back yet, else the newest (ids are unique
+/// since each run gets fresh ones; older journals may repeat them).
+fn find_record(recs: &[ActionRecord], action_id: &str) -> Option<usize> {
+    let mut found = None;
+    for (i, r) in recs.iter().enumerate() {
+        if r.id == action_id && (found.is_none() || r.undone.is_none()) {
+            found = Some(i);
+        }
+    }
+    found
+}
+
 fn is_admin_move(r: &ActionRecord) -> bool {
     matches!(
         r.kind,
@@ -716,7 +757,7 @@ fn is_admin_move(r: &ActionRecord) -> bool {
 /// Put one action back.
 pub fn undo(env: &Env, action_id: &str) -> Result<ActionRecord, UndoError> {
     let mut recs = history(env);
-    let Some(i) = recs.iter().position(|r| r.id == action_id) else {
+    let Some(i) = find_record(&recs, action_id) else {
         return Err(UndoError::NotFound);
     };
     if recs[i].undone.is_some() {
@@ -727,9 +768,9 @@ pub fn undo(env: &Env, action_id: &str) -> Result<ActionRecord, UndoError> {
         if let Some((_, e)) = errs.pop() {
             return Err(e);
         }
-        return history(env)
-            .into_iter()
-            .find(|r| r.id == action_id)
+        let recs = history(env);
+        return find_record(&recs, action_id)
+            .map(|i| recs[i].clone())
             .ok_or(UndoError::NotFound);
     }
     match recs[i].kind.clone() {
@@ -769,7 +810,7 @@ fn undo_admin(env: &Env, ids: &[String]) -> (usize, Vec<(String, UndoError)>) {
     let mut errs = Vec::new();
     let mut ready: Vec<(usize, PathBuf, PathBuf)> = Vec::new();
     for id in ids {
-        let Some(i) = recs.iter().position(|r| &r.id == id) else {
+        let Some(i) = find_record(&recs, id) else {
             errs.push((id.clone(), UndoError::NotFound));
             continue;
         };
@@ -872,4 +913,27 @@ pub fn undo_plan(env: &Env, plan_id: &str) -> (usize, Vec<(String, UndoError)>) 
 /// Explain a refusal for display.
 pub fn explain(r: &Refusal) -> String {
     r.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn numbered_names_fit_the_limit() {
+        assert_eq!(numbered("report", ".pdf", 2), "report 2.pdf");
+        let long = "é".repeat(127); // 254 bytes
+        let n = numbered(&long, ".txt", 12);
+        assert!(n.len() <= NAME_MAX, "{}", n.len());
+        assert!(n.ends_with(" 12.txt"));
+        let ext = format!(".{}", "x".repeat(250));
+        assert!(numbered("a", &ext, 3).len() <= NAME_MAX);
+    }
+
+    #[test]
+    fn fresh_ids_never_repeat() {
+        let mut used = HashSet::from(["p#1".to_string(), "p#1~2".to_string()]);
+        assert_eq!(fresh_id("p#1".into(), &mut used), "p#1~3");
+        assert_eq!(fresh_id("p#2".into(), &mut used), "p#2");
+    }
 }
