@@ -549,3 +549,18 @@ fn sweep_tiles_and_text_match_each_module_plan() {
     assert_eq!(res.ready_bytes(&[]), disk + mail.selected_size());
     assert_eq!(res.ready_bytes(&[FeatureId::MailAttachments]), disk);
 }
+
+#[test]
+#[ignore = "DAT-6: App Remover 'Today' for an app last opened yesterday evening (same 24-hour rule)"]
+fn app_last_opened_uses_calendar_days() {
+    let now = chrono::Utc::now().timestamp();
+    let t = local_midnight_today()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64
+        - 60;
+    assert_eq!(
+        cleancraft_core::apps::last_used_text(Some(t), now),
+        "Yesterday"
+    );
+}
