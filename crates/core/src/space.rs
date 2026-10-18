@@ -311,6 +311,30 @@ pub fn lock_reason(env: &Env, p: &Path) -> Option<String> {
     None
 }
 
+/// Check a folder typed for the map: inside the home folder, existing, a real folder. Protected
+/// folders may be viewed (their items stay locked).
+pub fn parse_map_folder(env: &Env, input: &str) -> Result<PathBuf, String> {
+    match crate::features::large_old::parse_folder(env, input) {
+        Ok(p) => Ok(p),
+        Err(e) if e.contains("protected") || e.contains("Library") => {
+            let s = input.trim().trim_end_matches('/');
+            let p = if let Some(rest) = s.strip_prefix("~/") {
+                env.home_path(rest)
+            } else if s.starts_with('/') {
+                let p = PathBuf::from(s);
+                if env.contains(&p) { p } else { env.sys_path(s) }
+            } else {
+                env.home_path(s)
+            };
+            match std::fs::symlink_metadata(&p) {
+                Ok(md) if md.is_dir() => Ok(p),
+                _ => Err(format!("There is no folder at {}.", env.display(&p))),
+            }
+        }
+        Err(e) => Err(e),
+    }
+}
+
 /// Selected paths without those inside another selected path (moving the folder moves them).
 pub fn outermost(paths: &[PathBuf]) -> Vec<PathBuf> {
     let mut v: Vec<PathBuf> = paths.to_vec();
