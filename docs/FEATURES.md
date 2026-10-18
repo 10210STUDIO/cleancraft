@@ -85,8 +85,8 @@ Every row is one user-facing capability. CleanCraft aims for feature parity with
 
 | ID | Feature | What | Paths / APIs | Risk | Test | Status |
 |---|---|---|---|---|---|---|
-| P1 | Threat Check scan | Checks startup locations and installed apps: unsigned or ad hoc signed programs in launch agents and daemons, items matching CleanCraft's own rule list (known adware names and paths), apps failing Gatekeeper assessment | `~/Library/LaunchAgents`, `/Library/LaunchAgents`, `/Library/LaunchDaemons`, `/Library/StartupItems`, `/Applications`; `codesign --verify`, `spctl --assess` | High | | PLANNED |
-| P2 | Quarantine threats | Selected findings move to the quarantine (never deleted); launch agents unloaded first | `launchctl bootout` | High | | PLANNED |
+| P1 | Threat Check scan | Checks startup locations and installed apps: unsigned or ad hoc signed programs in launch agents and daemons, items matching CleanCraft's own rule list (known adware names and paths), apps failing Gatekeeper assessment | `~/Library/LaunchAgents`, `/Library/LaunchAgents`, `/Library/LaunchDaemons`, `/Library/StartupItems`, `/Applications`; `codesign --verify`, `spctl --assess` | High | `qa_malware::scan_shows_reasons_and_quarantines_the_confirmed_threats`, `perf_malware::findings_have_reasons_and_only_high_confidence_rules_are_preselected`, `perf_malware::apple_name_without_apple_signature_and_legacy_items` | MAC-CHECK |
+| P2 | Quarantine threats | Selected findings move to the quarantine (never deleted); launch agents unloaded first | `launchctl bootout` | High | `qa_malware::scan_shows_reasons_and_quarantines_the_confirmed_threats`, `qa_malware::an_app_is_quarantined_only_when_ticked_by_hand`, `qa_malware::permission_denied_is_reported_per_item`, `perf_malware::threats_go_to_quarantine_with_agents_stopped_first_and_undo_works` | PARTIAL: user-writable findings move to the quarantine with the agent stopped first and undo; findings in root-owned folders (`/Library/LaunchAgents`, `/Library/LaunchDaemons`, `/Library/StartupItems`) are shown locked 'Needs administrator rights' because the executor moves only as the user |
 | P3 | Privacy: browsers | Per browser: history, cookies, cache, sessions, download list, form values (passwords never preselected); browser must be quit | Safari `~/Library/Safari/{History.db,LastSession.plist,Downloads.plist,Form Values}`, Chrome/Brave/Edge/Vivaldi/Arc `~/Library/Application Support/<vendor>/<Profile>/{History,Cookies,Web Data,Current Session,...}`, Firefox `Profiles/*/{places.sqlite,cookies.sqlite,formhistory.sqlite,sessionstore*}` | Medium | | PLANNED |
 | P4 | Privacy: recent items | Recent documents, apps, servers lists | `~/Library/Application Support/com.apple.sharedfilelist/*.sfl*` | Low | | PLANNED |
 | P5 | Privacy: Wi-Fi networks | List known networks; removal handed to System Settings | `networksetup -listpreferredwirelessnetworks` | Medium | | PLANNED |
@@ -100,26 +100,26 @@ Each task shows what it does, the exact command, whether it needs the administra
 
 | ID | Task | Command | Admin | Risk | Test | Status |
 |---|---|---|---|---|---|---|
-| K1 | Flush DNS cache | `dscacheutil -flushcache; killall -HUP mDNSResponder` | yes | Low | | PLANNED |
-| K2 | Free up RAM | `purge` | yes | Low | | PLANNED |
-| K3 | Free up purgeable space | `tmutil thinlocalsnapshots / 999999999999 4` | no | Low | | PLANNED |
-| K4 | Thin Time Machine snapshots | `tmutil listlocalsnapshots /`, `tmutil deletelocalsnapshots <date>` | yes | Medium | | PLANNED |
-| K5 | Reindex Spotlight | `mdutil -E /` | yes | Low | | PLANNED |
-| K6 | Rebuild Launch Services | `lsregister -kill -r -domain local -domain system -domain user` | no | Low | | PLANNED |
-| K7 | Repair home folder permissions | `diskutil resetUserPermissions / <uid>` | yes | Medium | | PLANNED |
-| K8 | Verify startup disk | `diskutil verifyVolume /` | no | Low | | PLANNED |
-| K9 | Speed up Mail | Mail quit, then `sqlite3 <Envelope Index> "VACUUM;"` | no | Medium | | PLANNED |
-| K10 | Run periodic scripts | `periodic daily weekly monthly` (macOS 13 and earlier) | yes | Low | | PLANNED |
+| K1 | Flush DNS cache | `dscacheutil -flushcache; killall -HUP mDNSResponder` | yes | Low | `qa_perf_tasks::run_two_tasks_with_exact_commands_results_and_free_space`, `perf_tasks::admin_task_runs_through_password_dialog_and_is_logged`, `qa_perf_tasks::cancelled_password_dialog_says_nothing_changed` | MAC-CHECK |
+| K2 | Free up RAM | `purge` | yes | Low | `qa_perf_tasks::cancelled_password_dialog_says_nothing_changed`, `perf_tasks::cancelled_password_dialog_changes_nothing_and_logs_nothing` | MAC-CHECK |
+| K3 | Free up purgeable space | `tmutil thinlocalsnapshots / 999999999999 4` | no | Low | `qa_perf_tasks::run_two_tasks_with_exact_commands_results_and_free_space` (free space before/after), `qa_perf_tasks::failing_command_is_shown_and_logged`, `perf_tasks::purgeable_space_shows_free_space_before_and_after` | MAC-CHECK |
+| K4 | Thin Time Machine snapshots | `tmutil listlocalsnapshots /`, `tmutil deletelocalsnapshots <date>` | yes | Medium | `perf_tasks::thin_snapshots_lists_dates_then_deletes_each`; UI shows the 'cannot run' reason in `qa_perf_tasks::tasks_that_cannot_run_explain_why_and_cancel_runs_nothing` | MAC-CHECK |
+| K5 | Reindex Spotlight | `mdutil -E /` | yes | Low | `perf_tasks::exact_commands_of_the_simple_tasks` (same admin path as K1/K2) | MAC-CHECK |
+| K6 | Rebuild Launch Services | `lsregister -kill -r -domain local -domain system -domain user` | no | Low | `perf_tasks::exact_commands_of_the_simple_tasks`, `perf_tasks::missing_program_is_a_failure_not_a_crash` | MAC-CHECK |
+| K7 | Repair home folder permissions | `diskutil resetUserPermissions / <uid>` | yes | Medium | `perf_tasks::repair_permissions_uses_the_user_id` | MAC-CHECK |
+| K8 | Verify startup disk | `diskutil verifyVolume /` | no | Low | `qa_perf_tasks::tasks_that_cannot_run_explain_why_and_cancel_runs_nothing` (confirmation shows `diskutil verifyVolume /`, Cancel runs nothing) | MAC-CHECK |
+| K9 | Speed up Mail | Mail quit, then `sqlite3 <Envelope Index> "VACUUM;"` | no | Medium | `perf_tasks::speed_up_mail_needs_mail_quit_and_measures_the_index`, `perf_tasks::speed_up_mail_without_full_disk_access`, `qa_perf_tasks::tasks_that_cannot_run_explain_why_and_cancel_runs_nothing` | MAC-CHECK |
+| K10 | Run periodic scripts | `periodic daily weekly monthly` (macOS 13 and earlier) | yes | Low | `perf_tasks::periodic_only_on_macos_13_and_earlier`, `qa_perf_tasks::tasks_that_cannot_run_explain_why_and_cancel_runs_nothing` | MAC-CHECK |
 
 ### 4.2 Startup Items
 
 | ID | Feature | What | Paths / APIs | Risk | Test | Status |
 |---|---|---|---|---|---|---|
-| L1 | List login items | Apps opened at login | `osascript` System Events `login items` | Low | | PLANNED |
-| L2 | List launch agents and daemons | With program, signature, enabled state | `~/Library/LaunchAgents`, `/Library/LaunchAgents`, `/Library/LaunchDaemons`; `launchctl print-disabled gui/<uid>` | Low | | PLANNED |
-| L3 | Disable / enable (undoable) | User agents: `launchctl disable gui/<uid>/<label>` + `bootout`; login items removed via System Events, undo adds them back | Medium | | PLANNED |
-| L4 | Remove | Agent plist moved to Trash after confirmation (undo moves it back) | Medium | | PLANNED |
-| L5 | Hung and heavy apps | Apps not responding or using a lot of CPU; Quit | `ps -axo pid,%cpu,comm` | Medium | | PLANNED |
+| L1 | List login items | Apps opened at login | `osascript` System Events `login items` | Low | `qa_perf_startup::lists_everything_with_signer_state_and_count`, `qa_perf_startup::automation_refusal_is_explained`, `perf_startup::login_items_listed_and_automation_refusal_explained` | MAC-CHECK |
+| L2 | List launch agents and daemons | With program, signature, enabled state | `~/Library/LaunchAgents`, `/Library/LaunchAgents`, `/Library/LaunchDaemons`; `launchctl print-disabled gui/<uid>` | Low | `qa_perf_startup::lists_everything_with_signer_state_and_count`, `perf_startup::lists_agents_and_daemons_with_signature_and_state` | MAC-CHECK |
+| L3 | Disable / enable (undoable) | User agents: `launchctl disable gui/<uid>/<label>` + `bootout`; login items removed via System Events, undo adds them back | Medium | `qa_perf_startup::turn_agents_off_and_on_then_undo_from_history`, `qa_perf_startup::cancelled_password_dialog_and_launchctl_failure`, `qa_perf_startup::login_item_off_and_back_on`, `perf_startup::apple_items_are_never_changed` | MAC-CHECK |
+| L4 | Remove | Agent plist moved to Trash after confirmation (undo moves it back) | Medium | `qa_perf_startup::remove_agent_file_after_confirmation_and_undo`, `qa_perf_startup::remove_agent_file_permission_denied`, `perf_startup::remove_agent_plist_through_the_plan_with_bootout_first_and_undo` | MAC-CHECK |
+| L5 | Hung and heavy apps | Apps not responding or using a lot of CPU; Quit | `ps -axo pid,%cpu,comm` | Medium | `qa_perf_startup::heavy_apps_and_quit_after_confirmation`, `qa_perf_startup::quit_failure_is_shown`, `perf_startup::quit_rechecks_the_pid`, `perf_startup::heavy_apps_are_this_users_and_never_system_or_cleancraft` | PARTIAL: heavy apps (CPU/memory from `ps`) and Quit work; detecting apps that are not responding is not built |
 
 ## 5. Applications
 

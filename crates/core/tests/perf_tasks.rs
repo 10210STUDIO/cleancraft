@@ -90,7 +90,7 @@ fn failure_is_reported_and_logged_as_failed() {
     assert!(r.message.contains("thinning failed"), "{}", r.message);
     let h = executor::history(&m.env);
     assert!(matches!(h[0].kind, ActionKind::Command { ok: false, .. }));
-    assert_eq!(tasks::last_runs(&m.env)["purgeable_space"].1, false);
+    assert!(!tasks::last_runs(&m.env)["purgeable_space"].1);
 }
 
 #[test]
@@ -217,4 +217,32 @@ fn not_offered_outside_macos() {
     let m = mac();
     m.env.fake_sys().unwrap().with(|s| s.macos = false);
     assert!(tasks::prepare(&m.env, "flush_dns").is_err());
+}
+
+#[test]
+fn exact_commands_of_the_simple_tasks() {
+    let m = mac();
+    let cmd = |id: &str| tasks::prepare(&m.env, id).unwrap().commands();
+    assert_eq!(cmd("reindex_spotlight"), vec!["mdutil -E /"]);
+    assert!(
+        tasks::prepare(&m.env, "reindex_spotlight")
+            .unwrap()
+            .needs_admin()
+    );
+    assert_eq!(
+        cmd("rebuild_launch_services"),
+        vec![format!(
+            "{} -kill -r -domain local -domain system -domain user",
+            tasks::LSREGISTER
+        )]
+    );
+    assert_eq!(
+        cmd("verify_disk"),
+        vec!["/usr/sbin/diskutil verifyVolume /"]
+    );
+    assert_eq!(cmd("free_ram"), vec!["purge"]);
+    assert_eq!(
+        cmd("purgeable_space"),
+        vec!["/usr/bin/tmutil thinlocalsnapshots / 999999999999 4"]
+    );
 }
