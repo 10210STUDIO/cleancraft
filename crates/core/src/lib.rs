@@ -16,6 +16,7 @@ pub mod policy;
 pub mod settings;
 pub mod sys;
 pub mod testkit;
+pub mod testkit_cleanup;
 
 pub use env::{Env, Fault};
 pub use executor::{ActionKind, ActionRecord, Method, Report, SkipReason};
