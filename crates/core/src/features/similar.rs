@@ -256,12 +256,11 @@ impl Feature for SimilarImages {
                 };
                 let id = plan.push(f.path.clone(), f.size, "similar", reason, Risk::High, false);
                 plan.items[id].group = Some(key.clone());
-                plan.items[id].modified = f
-                    .md
-                    .modified()
-                    .ok()
-                    .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                    .map(|d| d.as_secs() as i64);
+                plan.items[id].modified =
+                    f.md.modified()
+                        .ok()
+                        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs() as i64);
             }
         }
         apply_keep_rule(env, &mut plan, KeepRule::Smart);

@@ -185,7 +185,11 @@ impl Node {
             if cur.path == parent {
                 break;
             }
-            let Some(i) = cur.children.iter().position(|c| parent.starts_with(&c.path)) else {
+            let Some(i) = cur
+                .children
+                .iter()
+                .position(|c| parent.starts_with(&c.path))
+            else {
                 return false;
             };
             cur = &mut cur.children[i];
@@ -194,9 +198,17 @@ impl Node {
         if let Some(n) = new {
             cur.children.push(n);
         }
-        cur.children
-            .sort_by(|a, b| b.size.cmp(&a.size).then_with(|| a.name.cmp(&b.name)));
+        self.resort_towards(parent);
         true
+    }
+
+    /// Keep "biggest first" on every folder from here down to `p` after sizes changed.
+    fn resort_towards(&mut self, p: &Path) {
+        if let Some(c) = self.children.iter_mut().find(|c| p.starts_with(&c.path)) {
+            c.resort_towards(p);
+        }
+        self.children
+            .sort_by(|a, b| b.size.cmp(&a.size).then_with(|| a.name.cmp(&b.name)));
     }
 }
 
@@ -239,6 +251,21 @@ impl Tree {
             None
         };
         root.put(&target, fresh);
+    }
+
+    /// Measure again what a removal or an undo changed: each item's old and new place, and
+    /// CleanCraft's own folder (the action log grows).
+    pub fn refresh_after(&mut self, env: &Env, records: &[crate::executor::ActionRecord]) {
+        for r in records {
+            if let crate::executor::ActionKind::Moved {
+                original, stored, ..
+            } = &r.kind
+            {
+                self.refresh(original);
+                self.refresh(stored);
+            }
+        }
+        self.refresh(env.data_dir());
     }
 
     /// Mutable access for tests and callers that patch a node.

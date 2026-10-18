@@ -202,11 +202,9 @@ pub fn keeper(env: &Env, plan: &Plan, ids: &[usize], rule: KeepRule) -> Option<u
                 .cmp(&b.modified.unwrap_or(i64::MAX))
                 .then_with(|| a.path.cmp(&b.path))
         }),
-        KeepRule::Largest => items.iter().max_by(|a, b| {
-            a.size
-                .cmp(&b.size)
-                .then_with(|| b.path.cmp(&a.path))
-        }),
+        KeepRule::Largest => items
+            .iter()
+            .max_by(|a, b| a.size.cmp(&b.size).then_with(|| b.path.cmp(&a.path))),
     };
     pick.map(|i| i.id)
 }

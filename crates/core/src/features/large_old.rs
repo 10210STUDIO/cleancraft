@@ -285,14 +285,7 @@ pub const KINDS: &[(&str, &str, &[&str])] = &[
     (
         "disk_images",
         "Disk images",
-        &[
-            "dmg",
-            "iso",
-            "img",
-            "sparseimage",
-            "sparsebundle",
-            "toast",
-        ],
+        &["dmg", "iso", "img", "sparseimage", "sparsebundle", "toast"],
     ),
     ("other", "Other", &[]),
 ];
@@ -429,12 +422,12 @@ fn secs(t: SystemTime) -> i64 {
 /// `(null)` when Spotlight has none. Returns None when the count does not match.
 pub fn parse_mdls_raw(out: &str, count: usize) -> Option<Vec<Option<SystemTime>>> {
     let vals: Vec<&str> = out.split('\0').collect();
-    let vals: Vec<&str> = if vals.len() == count + 1 && vals.last().is_some_and(|v| v.trim().is_empty())
-    {
-        vals[..count].to_vec()
-    } else {
-        vals
-    };
+    let vals: Vec<&str> =
+        if vals.len() == count + 1 && vals.last().is_some_and(|v| v.trim().is_empty()) {
+            vals[..count].to_vec()
+        } else {
+            vals
+        };
     if vals.len() != count {
         return None;
     }
@@ -565,7 +558,9 @@ pub fn scan_location(ctx: &ScanCtx<'_>, loc: &Location) -> anyhow::Result<Plan> 
         if !large && !old {
             continue;
         }
-        let when = opened.map(ago).unwrap_or_else(|| "at an unknown time".into());
+        let when = opened
+            .map(ago)
+            .unwrap_or_else(|| "at an unknown time".into());
         let reason = match (large, old) {
             (true, true) => format!(
                 "Large ({}) and not opened for {} days",

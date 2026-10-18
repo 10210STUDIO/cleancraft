@@ -25,11 +25,7 @@ pub fn plan_for(env: &Env, selected: &[(PathBuf, u64)]) -> Plan {
     );
     let keep = outermost(&selected.iter().map(|s| s.0.clone()).collect::<Vec<_>>());
     for p in keep {
-        let size = selected
-            .iter()
-            .find(|s| s.0 == p)
-            .map(|s| s.1)
-            .unwrap_or(0);
+        let size = selected.iter().find(|s| s.0 == p).map(|s| s.1).unwrap_or(0);
         let reason = if p.is_dir() {
             "Folder you selected in the Disk Map"
         } else {
