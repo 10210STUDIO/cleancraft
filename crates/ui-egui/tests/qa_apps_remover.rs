@@ -159,7 +159,7 @@ fn uninstall_moves_app_and_leftovers_then_undo() {
     }
     assert!(m.sure[1].exists() && m.maybe.exists());
     assert!(m.mac.env.user_trash().join("Editor.app").exists());
-    assert!(has(&h, &format!("{} freed", human_size(size))));
+    assert!(has(&h, &format!("{} moved to the Trash", human_size(size))));
     assert_eq!(executor::history(&m.mac.env).len(), 3);
     click(&mut h, "Undo");
     for p in &moved {
@@ -317,7 +317,7 @@ fn leftovers_and_installers_groups() {
     assert!(has_text(&h, "Move 3 items"));
     click(&mut h, "Move to Trash");
     assert!(!gone.exists() && !pkg.exists() && !pane.exists());
-    assert!(has(&h, &format!("{} freed", human_size(size))));
+    assert!(has(&h, &format!("{} moved to the Trash", human_size(size))));
     click(&mut h, "Done");
     // Refreshed: the groups are empty now.
     assert!(has_text(&h, "Leftovers  0"));

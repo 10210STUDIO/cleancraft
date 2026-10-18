@@ -82,7 +82,7 @@ fn map_drill_select_remove_undo() {
     click(&mut h, "Move to Trash");
     assert!(!target.exists() && !film.exists());
     assert!(env.user_trash().join("target").exists());
-    assert!(has(&h, &format!("{} freed", human_size(sel))));
+    assert!(has(&h, &format!("{} moved to the Trash", human_size(sel))));
     click(&mut h, "Done");
     // The map shows the new sizes.
     click(&mut h, "Go to Home folder");

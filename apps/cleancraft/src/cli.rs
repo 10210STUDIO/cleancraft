@@ -159,9 +159,9 @@ pub fn run_cmd(env: &Env, cmd: Cmd) -> anyhow::Result<()> {
             }
             let rep = features::run_plan(env, &settings, &plan, &plan.digest(), &mut |_, _| {})?;
             println!(
-                "Moved {}, {} freed.",
-                cleancraft_core::fsutil::items(rep.moved.len()),
-                human_size(rep.freed)
+                "{} ({}).",
+                cleancraft_core::features::moved_text([&rep]),
+                cleancraft_core::fsutil::items(rep.moved.len())
             );
             for (p, why) in &rep.skipped {
                 println!("skipped {}: {why}", env.display(p));

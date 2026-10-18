@@ -66,7 +66,10 @@ fn done_and_history_sizes_match_the_disk() {
         &format!("Move {} items ({})", sel.len(), human_size(expect))
     ));
     click(&mut h, "Move to Trash");
-    assert!(has(&h, &format!("{} freed", human_size(expect))));
+    assert!(has(
+        &h,
+        &format!("{} moved to the Trash", human_size(expect))
+    ));
     // The journal records exactly what sits in the Trash now.
     let hist = cleancraft_core::executor::history(&mac.env);
     assert_eq!(hist.len(), sel.len());
@@ -81,7 +84,6 @@ fn done_and_history_sizes_match_the_disk() {
 }
 
 #[test]
-#[ignore = "DAT-10: Done says 'X freed' after moving X into the Trash; free space did not change"]
 fn moving_to_the_trash_is_not_called_freed() {
     let (mac, cache) = one_cache();
     let trash_before = tree_size(&mac.env.user_trash()).0;
@@ -100,6 +102,7 @@ fn moving_to_the_trash_is_not_called_freed() {
         "the Done screen claims {} freed; it is in the Trash until the Trash is emptied",
         human_size(size)
     );
+    assert!(has(&h, &format!("{} moved to the Trash", human_size(size))));
 }
 
 const PMSET_CHARGING_EST: &str = "Now drawing from 'AC Power'

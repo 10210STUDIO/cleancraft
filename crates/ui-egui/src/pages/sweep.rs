@@ -419,16 +419,20 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
         return;
     };
     let runs = runs.clone();
-    let freed: u64 = runs
-        .iter()
-        .filter_map(|r| r.result.as_ref().ok())
-        .map(|r| r.freed)
-        .sum();
+    let headline =
+        cleancraft_core::features::moved_text(runs.iter().filter_map(|r| r.result.as_ref().ok()));
     ui.label(
-        RichText::new(format!("{} freed", human_size(freed)))
+        RichText::new(headline)
             .font(font(30.0, Weight::Bold))
             .color(t.accent),
     );
+    if runs
+        .iter()
+        .filter_map(|r| r.result.as_ref().ok())
+        .any(|r| !r.moved.is_empty())
+    {
+        kit::dim(ui, &t, cleancraft_core::features::SPACE_NOTE);
+    }
     ui.add_space(8.0);
     let mut undo: Option<(FeatureId, String)> = None;
     egui::ScrollArea::vertical()

@@ -845,10 +845,13 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
     };
     let rep = rep.clone();
     ui.label(
-        RichText::new(format!("{} freed", human_size(rep.freed)))
+        RichText::new(cleancraft_core::features::moved_text([&rep]))
             .font(font(30.0, Weight::Bold))
             .color(t.accent),
     );
+    if !rep.moved.is_empty() {
+        kit::dim(ui, &t, cleancraft_core::features::SPACE_NOTE);
+    }
     ui.label(format!(
         "{} moved. {} skipped.",
         cleancraft_core::fsutil::items(rep.moved.len()),

@@ -123,7 +123,10 @@ fn numbers_match_disk_and_default_clean_moves_selected_only() {
         );
     }
     assert!(mac.env.user_trash().join("com.example.Browser").exists());
-    assert!(has(&h, &format!("{} freed", human_size(sel_size))));
+    assert!(has(
+        &h,
+        &format!("{} moved to the Trash", human_size(sel_size))
+    ));
     assert!(has(&h, &format!("{} items moved. 0 skipped.", sel.len())));
     // History lists them, Undo puts everything back.
     click(&mut h, "Undo");
@@ -281,7 +284,10 @@ fn errors_are_shown_per_item_and_log_failure_moves_nothing() {
         .filter(|i| i.path != browser && i.path != editor && i.path != logs)
         .map(|i| i.size)
         .sum();
-    assert!(has(&h, &format!("{} freed", human_size(moved))));
+    assert!(has(
+        &h,
+        &format!("{} moved to the Trash", human_size(moved))
+    ));
     assert!(has(
         &h,
         &format!("{} items moved. 3 skipped.", p.selected_count() - 3)

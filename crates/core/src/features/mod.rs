@@ -131,6 +131,36 @@ pub fn admin_count(plan: &Plan) -> usize {
     }
 }
 
+/// What a cleanup did, in words: "1.20 MB moved to the Trash". Moving to the Trash or the
+/// quarantine frees no space yet (it comes back when the Trash is emptied), so the word
+/// "freed" is never used here. The bytes stay in `Report::freed` for the CLI and MCP.
+pub fn moved_text<'a>(reports: impl IntoIterator<Item = &'a Report>) -> String {
+    let mut bytes = 0;
+    let (mut trash, mut quarantine) = (false, false);
+    for r in reports {
+        bytes += r.freed;
+        for m in &r.moved {
+            if let crate::executor::ActionKind::Moved { method, .. } = &m.kind {
+                match method {
+                    Method::Trash => trash = true,
+                    Method::Quarantine | Method::AdminQuarantine => quarantine = true,
+                }
+            }
+        }
+    }
+    let size = crate::fsutil::human_size(bytes);
+    match (trash, quarantine) {
+        (false, false) => "Nothing moved".into(),
+        (true, false) => format!("{size} moved to the Trash"),
+        (false, true) => format!("{size} moved to the CleanCraft quarantine"),
+        (true, true) => format!("{size} moved to the Trash and the CleanCraft quarantine"),
+    }
+}
+
+/// The line under [`moved_text`]: when the space really comes back.
+pub const SPACE_NOTE: &str =
+    "The space is freed when the Trash is emptied or the quarantine is cleared.";
+
 /// Every plan-based feature, in sidebar order.
 pub fn registry() -> Vec<Box<dyn Feature>> {
     vec![

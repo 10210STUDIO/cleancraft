@@ -98,7 +98,10 @@ fn browsers_numbers_and_clean() {
     ] {
         assert!(mac.env.home_path(&keep).exists(), "{keep}");
     }
-    assert!(has(&h, &format!("{} freed", human_size(sel_size))));
+    assert!(has(
+        &h,
+        &format!("{} moved to the Trash", human_size(sel_size))
+    ));
 }
 
 #[test]

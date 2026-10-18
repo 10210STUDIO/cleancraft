@@ -58,7 +58,10 @@ fn scan_review_clean_undo() {
     for p in &expect_moved {
         assert!(!p.exists(), "{} not moved", p.display());
     }
-    assert!(has(&h, &format!("{} freed", human_size(expect_size))));
+    assert!(has(
+        &h,
+        &format!("{} moved to the Trash", human_size(expect_size))
+    ));
     // Undo puts everything back.
     click(&mut h, "Undo");
     for p in &expect_moved {

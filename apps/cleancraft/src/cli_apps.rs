@@ -108,9 +108,9 @@ pub fn run(env: &Env, cmd: AppsCmd, out: &mut dyn Write) -> anyhow::Result<()> {
             let rep = features::run_plan(env, &settings, &plan, &plan.digest(), &mut |_, _| {})?;
             writeln!(
                 out,
-                "Moved {}, {} freed.",
-                cleancraft_core::fsutil::items(rep.moved.len()),
-                human_size(rep.freed)
+                "{} ({}).",
+                cleancraft_core::features::moved_text([&rep]),
+                cleancraft_core::fsutil::items(rep.moved.len())
             )?;
             for (p, why) in &rep.skipped {
                 writeln!(out, "skipped {}: {why}", env.display(p))?;
@@ -220,7 +220,7 @@ mod tests {
             },
         );
         r.unwrap();
-        assert!(s.contains("Moved 2 items"), "{s}");
+        assert!(s.contains("moved to the Trash (2 items)."), "{s}");
         assert!(!editor.exists() && !cache.exists());
     }
 }

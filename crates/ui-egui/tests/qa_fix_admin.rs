@@ -85,7 +85,10 @@ fn threat_in_a_root_folder_moves_with_the_password_and_comes_back() {
         }
     ));
     assert_eq!(rec.size, size);
-    assert!(has(&h, &format!("{} freed", human_size(size))));
+    assert!(has(
+        &h,
+        &format!("{} moved to the CleanCraft quarantine", human_size(size))
+    ));
     assert!(has(&h, "1 item moved. 0 skipped."));
     click(&mut h, "Undo");
     assert!(daemon.exists(), "put back");
@@ -106,7 +109,7 @@ fn cancelled_password_dialog_moves_nothing_and_is_reported() {
         &h,
         "the administrator password was not given, so it was not moved"
     ));
-    assert!(has(&h, &format!("{} freed", human_size(0))));
+    assert!(has(&h, "Nothing moved"));
     assert!(
         !executor::history(&m.env)
             .iter()
@@ -158,7 +161,13 @@ fn package_installed_app_uninstalls_with_the_password_or_stays_when_cancelled() 
     click(&mut h, "Uninstall");
     click(&mut h, "Move to Trash");
     assert!(!app.exists() && !cache.exists());
-    assert!(has(&h, &format!("{} freed", human_size(size))));
+    assert!(has(
+        &h,
+        &format!(
+            "{} moved to the Trash and the CleanCraft quarantine",
+            human_size(size)
+        )
+    ));
     let stored = executor::history(&m.env)
         .into_iter()
         .rev()

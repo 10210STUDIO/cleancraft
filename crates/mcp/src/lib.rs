@@ -174,6 +174,7 @@ impl CleanCraftMcp {
             .map_err(|e| format!("{e:#}"))?;
         ok(json!({
             "freed": human_size(rep.freed), "freed_bytes": rep.freed,
+            "message": features::moved_text([&rep]),
             "moved": rep.moved.iter().map(|r| json!({"action_id": r.id, "size": r.size, "kind": r.kind})).collect::<Vec<_>>(),
             "skipped": rep.skipped.iter().map(|(p, s)| json!({"path": self.env.display(p), "reason": s.to_string()})).collect::<Vec<_>>(),
             "undo_with": rep.plan_id,
