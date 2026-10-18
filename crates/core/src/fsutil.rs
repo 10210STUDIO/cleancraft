@@ -170,8 +170,18 @@ pub fn count(n: usize, one: &str, many: &str) -> String {
 
 /// Decimal units like Finder: 1 KB = 1000 bytes. "Zero KB" for 0. Three significant digits;
 /// a value that rounds up to the next precision or unit is shown there ("1.00 MB", not
-/// "1000 KB").
+/// "1000 KB"). For files and disks.
 pub fn human_size(bytes: u64) -> String {
+    units(bytes, 1000.0)
+}
+
+/// Memory in binary units like Activity Monitor and About This Mac: 1 GB = 1024^3 bytes, so a
+/// 16 GB Mac reads "16.0 GB". Same rounding as [`human_size`]. For RAM and swap only.
+pub fn memory_size(bytes: u64) -> String {
+    units(bytes, 1024.0)
+}
+
+fn units(bytes: u64, base: f64) -> String {
     const UNITS: [&str; 5] = ["KB", "MB", "GB", "TB", "PB"];
     if bytes == 0 {
         return "Zero KB".into();
@@ -179,14 +189,14 @@ pub fn human_size(bytes: u64) -> String {
     if bytes == 1 {
         return "1 byte".into();
     }
-    if bytes < 1000 {
+    if (bytes as f64) < base {
         return format!("{bytes} bytes");
     }
-    let mut v = bytes as f64 / 1000.0;
+    let mut v = bytes as f64 / base;
     let mut i = 0;
     loop {
         while v >= 1000.0 && i < UNITS.len() - 1 {
-            v /= 1000.0;
+            v /= base;
             i += 1;
         }
         // Kilobytes are whole numbers; otherwise 3 significant digits.
@@ -200,7 +210,7 @@ pub fn human_size(bytes: u64) -> String {
         let round = |v: f64, dec: i32| (v * 10f64.powi(dec)).round() / 10f64.powi(dec);
         let mut r = round(v, dec);
         if r >= 1000.0 && i < UNITS.len() - 1 {
-            v = r / 1000.0;
+            v = r / base;
             i += 1;
             continue;
         }
@@ -230,6 +240,10 @@ mod tests {
         assert_eq!(human_size(99_960_000), "100 MB");
         assert_eq!(human_size(9_994_000), "9.99 MB");
         assert_eq!(count(1, "item", "items"), "1 item");
+        assert_eq!(memory_size(17_179_869_184), "16.0 GB");
+        assert_eq!(memory_size(1_073_741_824), "1.00 GB");
+        assert_eq!(memory_size(8 * 1_073_741_824 + 400_000_000), "8.37 GB");
+        assert_eq!(memory_size(512 * 1_048_576), "512 MB");
         let now = chrono::Local::now().timestamp();
         assert_eq!(calendar_days_ago(now, now), 0);
         // One minute before local midnight is yesterday, whatever the hour now.

@@ -3,7 +3,7 @@
 
 use std::sync::atomic::AtomicBool;
 
-use cleancraft_core::fsutil::human_size;
+use cleancraft_core::fsutil::{human_size, memory_size};
 use cleancraft_core::monitor::{
     self, BatteryReading, Sampler, Snapshot, UNKNOWN, pct, rate_text, uptime_text,
 };
@@ -29,8 +29,8 @@ pub fn status_text(s: &Snapshot) -> String {
         "Memory     {}",
         or_unknown(s.memory.as_ref().map(|m| format!(
             "{} of {} used, pressure {}",
-            human_size(m.used),
-            human_size(m.total),
+            memory_size(m.used),
+            memory_size(m.total),
             m.pressure.map(|p| p.label()).unwrap_or(UNKNOWN)
         )))
     ));

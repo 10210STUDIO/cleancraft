@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::env::{Env, Fault};
 use crate::executor::{self, ActionKind, ActionRecord};
-use crate::fsutil::{human_size, tree_size};
+use crate::fsutil::{human_size, memory_size, tree_size};
 use crate::plan::FeatureId;
 
 /// Free space below this share of the disk raises the low-space alert.
@@ -804,8 +804,8 @@ pub fn alerts(s: &Snapshot) -> Vec<Alert> {
                 kind: AlertKind::HeavyMemory,
                 text: format!(
                     "Memory is heavily used: {} of {}{}.",
-                    human_size(m.used),
-                    human_size(m.total),
+                    memory_size(m.used),
+                    memory_size(m.total),
                     match m.pressure {
                         Some(p) if pressed => format!(", pressure {}", p.label().to_lowercase()),
                         _ => String::new(),
@@ -868,8 +868,8 @@ pub fn menu_bar_entries(s: &Snapshot) -> Vec<String> {
     v.push(match &s.memory {
         Some(m) => format!(
             "Memory: {} of {} used",
-            human_size(m.used),
-            human_size(m.total)
+            memory_size(m.used),
+            memory_size(m.total)
         ),
         None => format!("Memory: {UNKNOWN}"),
     });

@@ -467,7 +467,6 @@ fn network_speed_divides_by_the_real_time_between_readings() {
 }
 
 #[test]
-#[ignore = "DAT-7: memory shown in decimal GB: a 16 GB Mac reads '17.2 GB' (About This Mac and Activity Monitor say 16 GB)"]
 fn memory_total_reads_like_the_mac() {
     let (_m, s) = sampled();
     // hw.memsize 17179869184 = 16 GiB, sold and shown by macOS as 16 GB.
