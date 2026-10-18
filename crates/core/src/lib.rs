@@ -14,6 +14,7 @@ pub mod plan;
 pub mod plans;
 pub mod policy;
 pub mod settings;
+pub mod space;
 pub mod sys;
 pub mod testkit;
 

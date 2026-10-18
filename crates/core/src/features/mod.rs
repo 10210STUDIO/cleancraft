@@ -12,6 +12,11 @@ use crate::plan::{FeatureId, Plan};
 use crate::policy;
 use crate::settings::Settings;
 
+pub mod downloads;
+pub mod duplicates;
+pub mod large_old;
+pub mod similar;
+pub mod space_lens;
 pub mod system_junk;
 
 /// What a scan gets.
@@ -88,7 +93,13 @@ pub fn run_plan(
 
 /// Every plan-based feature, in sidebar order.
 pub fn registry() -> Vec<Box<dyn Feature>> {
-    vec![Box::new(system_junk::SystemJunk)]
+    vec![
+        Box::new(system_junk::SystemJunk),
+        Box::new(large_old::LargeOldFiles),
+        Box::new(duplicates::Duplicates),
+        Box::new(similar::SimilarImages),
+        Box::new(space_lens::SpaceLens),
+    ]
 }
 
 pub fn get(id: FeatureId) -> Option<Box<dyn Feature>> {
