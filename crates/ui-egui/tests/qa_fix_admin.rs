@@ -167,6 +167,7 @@ fn package_installed_app_uninstalls_with_the_password_or_stays_when_cancelled() 
                 original,
                 stored,
                 method: Method::AdminQuarantine,
+                ..
             } if original == app => Some(stored),
             _ => None,
         })

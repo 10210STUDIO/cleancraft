@@ -188,7 +188,6 @@ fn mcp_only_items_cannot_reach_beyond_the_confirmed_selection() {
 /// unrelated file out of the Trash into the original folder, instead of saying the removed copy
 /// is gone.
 #[test]
-#[ignore = "REL-5: Undo moves an unrelated file that now has the stored name in the Trash"]
 fn undo_refuses_a_different_file_at_the_stored_place() {
     let m = FakeMac::sample();
     let editor = m.env.home_path("Library/Caches/com.example.Editor");

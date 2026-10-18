@@ -48,6 +48,11 @@ pub enum ActionKind {
         original: PathBuf,
         stored: PathBuf,
         method: Method,
+        /// What was at `stored` right after the move, so Undo never takes back a different
+        /// thing that later got the same name there (the Trash emptied, then refilled).
+        /// Missing in lines written before it existed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stored_id: Option<StoredId>,
     },
     /// A system command ran (maintenance). There is nothing to put back.
     Command {
@@ -60,6 +65,48 @@ pub enum ActionKind {
         what: String,
         undo_command: Option<String>,
     },
+}
+
+/// Identity of a moved item at its stored place: same volume and inode (a rename keeps both),
+/// same kind, and for a file the same length and modification time.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct StoredId {
+    pub dev: u64,
+    pub ino: u64,
+    pub dir: bool,
+    /// Files only: length in bytes.
+    #[serde(default)]
+    pub len: Option<u64>,
+    /// Files only: modification time, nanoseconds since the epoch.
+    #[serde(default)]
+    pub mtime_ns: Option<i64>,
+}
+
+impl StoredId {
+    /// The identity of what is at `p` now (links are not followed).
+    pub fn of(p: &Path) -> Option<StoredId> {
+        let md = fs::symlink_metadata(p).ok()?;
+        #[cfg(unix)]
+        let (dev, ino) = {
+            use std::os::unix::fs::MetadataExt;
+            (md.dev(), md.ino())
+        };
+        #[cfg(not(unix))]
+        let (dev, ino) = (0, 0);
+        let file = !md.is_dir();
+        let mtime_ns = md
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_nanos() as i64);
+        Some(StoredId {
+            dev,
+            ino,
+            dir: md.is_dir(),
+            len: file.then_some(md.len()),
+            mtime_ns: if file { mtime_ns } else { None },
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -337,6 +384,7 @@ fn moved_record(
         size,
         kind: ActionKind::Moved {
             original: item.path.clone(),
+            stored_id: StoredId::of(&stored),
             stored,
             method,
         },
@@ -718,8 +766,15 @@ impl std::fmt::Display for UndoError {
     }
 }
 
-/// Is a moved item ready to go back: inside the root, its place free, the stored copy there?
-fn check_restore(env: &Env, original: &Path, stored: &Path) -> Result<(), UndoError> {
+/// Is a moved item ready to go back: inside the root, its place free, the stored copy there and
+/// still the very item that was moved (`id`, when the record has it)? Something else with the
+/// stored name counts as the removed copy being gone.
+fn check_restore(
+    env: &Env,
+    original: &Path,
+    stored: &Path,
+    id: Option<&StoredId>,
+) -> Result<(), UndoError> {
     if !env.contains(original) || !env.contains(stored) {
         return Err(UndoError::Io("path outside the allowed root".into()));
     }
@@ -727,6 +782,11 @@ fn check_restore(env: &Env, original: &Path, stored: &Path) -> Result<(), UndoEr
         return Err(UndoError::OriginalTaken(original.to_path_buf()));
     }
     if fs::symlink_metadata(stored).is_err() {
+        return Err(UndoError::StoredMissing(stored.to_path_buf()));
+    }
+    if let Some(id) = id
+        && StoredId::of(stored).as_ref() != Some(id)
+    {
         return Err(UndoError::StoredMissing(stored.to_path_buf()));
     }
     Ok(())
@@ -775,9 +835,12 @@ pub fn undo(env: &Env, action_id: &str) -> Result<ActionRecord, UndoError> {
     }
     match recs[i].kind.clone() {
         ActionKind::Moved {
-            original, stored, ..
+            original,
+            stored,
+            stored_id,
+            ..
         } => {
-            check_restore(env, &original, &stored)?;
+            check_restore(env, &original, &stored, stored_id.as_ref())?;
             if let Some(parent) = original.parent() {
                 fs::create_dir_all(parent).map_err(|e| UndoError::Io(e.to_string()))?;
             }
@@ -819,13 +882,16 @@ fn undo_admin(env: &Env, ids: &[String]) -> (usize, Vec<(String, UndoError)>) {
             continue;
         }
         let ActionKind::Moved {
-            original, stored, ..
+            original,
+            stored,
+            stored_id,
+            ..
         } = recs[i].kind.clone()
         else {
             errs.push((id.clone(), UndoError::NotUndoable));
             continue;
         };
-        if let Err(e) = check_restore(env, &original, &stored) {
+        if let Err(e) = check_restore(env, &original, &stored, stored_id.as_ref()) {
             errs.push((id.clone(), e));
             continue;
         }
