@@ -5,11 +5,43 @@
 //! [`RealSys`] runs the real tools. [`FakeSys`] answers from data the test set up and records
 //! every command, so tests can check what would have run without running anything.
 
-use std::collections::{BTreeMap, HashSet};
-use std::io;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::Mutex;
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
+
+/// How long a system command may run before CleanCraft stops it ([`Sys::run`]).
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
+/// How long an administrator command may take, the password dialog included.
+pub const ADMIN_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+
+/// The error a command that ran past its time limit gives: kind `TimedOut`, and words the
+/// user understands.
+pub fn timed_out(program: &str, limit: Duration) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::TimedOut,
+        format!(
+            "{program} did not finish within {} and was stopped",
+            limit_text(limit)
+        ),
+    )
+}
+
+fn limit_text(d: Duration) -> String {
+    let s = d.as_secs();
+    if s >= 120 && s.is_multiple_of(60) {
+        format!("{} minutes", s / 60)
+    } else if s == 1 {
+        "1 second".into()
+    } else if s == 0 {
+        format!("{} ms", d.as_millis())
+    } else {
+        format!("{s} seconds")
+    }
+}
 
 /// Quote `s` for `/bin/sh` so it is one word, taken literally: wrapped in single quotes, each
 /// single quote written as `'\''`. Spaces, `$`, backticks, backslashes and newlines need
@@ -97,8 +129,14 @@ pub struct RunningApp {
 }
 
 pub trait Sys: Send + Sync {
-    /// Run a program and wait for it.
+    /// Run a program and wait for it, at most [`DEFAULT_TIMEOUT`]; a program still running
+    /// then is stopped and the call fails with `io::ErrorKind::TimedOut`.
     fn run(&self, program: &str, args: &[&str]) -> io::Result<CmdOut>;
+    /// [`Sys::run`] with its own time limit, for work known to take long (tune-up tasks).
+    fn run_timeout(&self, program: &str, args: &[&str], limit: Duration) -> io::Result<CmdOut> {
+        let _ = limit;
+        self.run(program, args)
+    }
     /// Run a shell command as administrator. On macOS this is
     /// `osascript -e 'do shell script "..." with administrator privileges'`, which shows the
     /// system password dialog. The user can cancel it.
@@ -119,14 +157,77 @@ pub trait Sys: Send + Sync {
 #[derive(Debug, Default)]
 pub struct RealSys;
 
+/// Run `cmd` and wait at most `limit`. Output is read on two threads so a chatty program
+/// cannot block on a full pipe. On time out the child CleanCraft started is killed (and
+/// reaped) and the error is [`timed_out`].
+pub fn run_with_limit(mut cmd: Command, program: &str, limit: Duration) -> io::Result<CmdOut> {
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let reader = |pipe: Option<Box<dyn Read + Send>>| {
+        let (tx, rx) = mpsc::channel();
+        if let Some(mut p) = pipe {
+            std::thread::spawn(move || {
+                let mut buf = Vec::new();
+                let _ = p.read_to_end(&mut buf);
+                let _ = tx.send(buf);
+            });
+        }
+        rx
+    };
+    let out_rx = reader(
+        child
+            .stdout
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
+    );
+    let err_rx = reader(
+        child
+            .stderr
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
+    );
+    let deadline = Instant::now() + limit;
+    let status = loop {
+        if let Some(st) = child.try_wait()? {
+            break st;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(timed_out(program, limit));
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    // A program can leave a helper running that keeps the pipes open: wait for the output only
+    // until the deadline (and at least a moment).
+    let left = deadline
+        .saturating_duration_since(Instant::now())
+        .max(Duration::from_millis(200));
+    let stdout = out_rx.recv_timeout(left).unwrap_or_default();
+    let stderr = err_rx
+        .recv_timeout(
+            Duration::from_millis(200).max(deadline.saturating_duration_since(Instant::now())),
+        )
+        .unwrap_or_default();
+    Ok(CmdOut {
+        status: status.code().unwrap_or(-1),
+        stdout: String::from_utf8_lossy(&stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&stderr).into_owned(),
+    })
+}
+
 impl Sys for RealSys {
     fn run(&self, program: &str, args: &[&str]) -> io::Result<CmdOut> {
-        let out = Command::new(program).args(args).output()?;
-        Ok(CmdOut {
-            status: out.status.code().unwrap_or(-1),
-            stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
-        })
+        self.run_timeout(program, args, DEFAULT_TIMEOUT)
+    }
+
+    fn run_timeout(&self, program: &str, args: &[&str], limit: Duration) -> io::Result<CmdOut> {
+        let mut cmd = Command::new(program);
+        cmd.args(args);
+        run_with_limit(cmd, program, limit)
     }
 
     fn run_admin(&self, shell_command: &str) -> io::Result<CmdOut> {
@@ -143,7 +244,7 @@ impl Sys for RealSys {
             .replace('\n', "\\n")
             .replace('\r', "\\r");
         let script = format!("do shell script \"{escaped}\" with administrator privileges");
-        self.run("/usr/bin/osascript", &["-e", &script])
+        self.run_timeout("/usr/bin/osascript", &["-e", &script], ADMIN_TIMEOUT)
     }
 
     fn open_files(&self) -> io::Result<HashSet<PathBuf>> {
@@ -280,6 +381,10 @@ pub struct FakeState {
     pub macos: bool,
     /// The fake Mac's folder. Administrator moves must stay inside it.
     pub root: Option<PathBuf>,
+    /// Commands (same keys as `answers`) that run past their time limit.
+    pub timeouts: BTreeSet<String>,
+    /// Time limits asked for with `run_timeout`, as ("program arg arg", limit).
+    pub limits: Vec<(String, Duration)>,
     /// Sources an administrator `mv` fails on ("Operation not permitted").
     pub admin_move_fails: HashSet<PathBuf>,
 }
@@ -332,6 +437,11 @@ impl FakeSys {
         self.with(|s| s.open_files.insert(path.to_path_buf()));
     }
 
+    /// Make a command (exact line, short line or program) run past its time limit.
+    pub fn time_out(&self, key: &str) {
+        self.with(|s| s.timeouts.insert(key.to_string()));
+    }
+
     /// Make the administrator `mv` of `src` fail.
     pub fn fail_admin_move(&self, src: &Path) {
         self.with(|s| s.admin_move_fails.insert(src.to_path_buf()));
@@ -376,8 +486,8 @@ impl FakeSys {
 }
 
 impl FakeSys {
-    /// The recorded, scripted answer to a command.
-    fn run_limited(&self, program: &str, args: &[&str]) -> io::Result<CmdOut> {
+    /// The recorded, scripted answer to a command, or a time out when the test asked for one.
+    fn run_limited(&self, program: &str, args: &[&str], limit: Duration) -> io::Result<CmdOut> {
         let line = std::iter::once(program)
             .chain(args.iter().copied())
             .collect::<Vec<_>>()
@@ -392,6 +502,12 @@ impl FakeSys {
                 .chain(args.iter().copied())
                 .collect::<Vec<_>>()
                 .join(" ");
+            if [&line, &short_line, &program.to_string(), &short]
+                .iter()
+                .any(|k| s.timeouts.contains(*k))
+            {
+                return Err(timed_out(program, limit));
+            }
             s.answers
                 .get(&line)
                 .or_else(|| s.answers.get(&short_line))
@@ -409,8 +525,17 @@ impl FakeSys {
 }
 
 impl Sys for FakeSys {
+    fn run_timeout(&self, program: &str, args: &[&str], limit: Duration) -> io::Result<CmdOut> {
+        let line = std::iter::once(program)
+            .chain(args.iter().copied())
+            .collect::<Vec<_>>()
+            .join(" ");
+        self.with(|s| s.limits.push((line, limit)));
+        self.run_limited(program, args, limit)
+    }
+
     fn run(&self, program: &str, args: &[&str]) -> io::Result<CmdOut> {
-        self.run_limited(program, args)
+        self.run_limited(program, args, DEFAULT_TIMEOUT)
     }
 
     fn run_admin(&self, shell_command: &str) -> io::Result<CmdOut> {
@@ -557,11 +682,53 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
-    fn fake_admin_moves() {
+    fn a_command_past_its_limit_is_stopped() {
+        // Harmless: `sleep`, started and killed by this test.
+        let start = Instant::now();
+        let err = RealSys
+            .run_timeout("/bin/sleep", &["30"], Duration::from_millis(300))
+            .unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::TimedOut);
+        assert!(err.to_string().contains("did not finish within"), "{err}");
+        assert!(start.elapsed() < Duration::from_secs(10));
+        // A quick command still answers, with its output and status.
+        let out = RealSys
+            .run_timeout(
+                "/bin/sh",
+                &["-c", "echo hi; echo err >&2; exit 3"],
+                Duration::from_secs(20),
+            )
+            .unwrap();
+        assert_eq!(
+            (out.status, out.stdout.as_str(), out.stderr.as_str()),
+            (3, "hi\n", "err\n")
+        );
+    }
+
+    #[test]
+    fn fake_time_out_and_admin_moves() {
         let d = tempfile::tempdir().unwrap();
         let f = FakeSys::new();
         f.with(|s| s.root = Some(d.path().to_path_buf()));
+        f.answer("tmutil", "ok");
+        f.time_out("tmutil thinlocalsnapshots /");
+        let e = f
+            .run("/usr/bin/tmutil", &["thinlocalsnapshots", "/"])
+            .unwrap_err();
+        assert_eq!(e.kind(), io::ErrorKind::TimedOut);
+        assert!(
+            f.run("/usr/bin/tmutil", &["listlocalsnapshots", "/"])
+                .is_ok()
+        );
+        let _ = f.run_timeout("/usr/bin/mdutil", &["-E", "/"], Duration::from_secs(600));
+        assert!(f.with(|s| {
+            s.limits
+                .iter()
+                .any(|(l, t)| l == "/usr/bin/mdutil -E /" && t.as_secs() == 600)
+        }));
+
         let a = d.path().join("it's a");
         std::fs::write(&a, "x").unwrap();
         let b = d.path().join("b");

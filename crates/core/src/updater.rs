@@ -626,6 +626,19 @@ pub fn check_app(env: &Env, app: &AppInfo) -> Option<UpdateInfo> {
     Some(u)
 }
 
+/// Quick Sweep's app updates tile: how many apps have a newer version, by the same checks as
+/// the App Updates page (macOS updates are not counted here). When no app could be checked
+/// at all, the error says why instead of a zero.
+pub fn available_count(env: &Env, _settings: &crate::settings::Settings) -> anyhow::Result<usize> {
+    let apps = crate::apps::inventory(env, false, &|_| {});
+    let checked: Vec<UpdateInfo> = apps.iter().filter_map(|a| check_app(env, a)).collect();
+    if !checked.is_empty() && checked.iter().all(|u| u.error.is_some()) {
+        let why = checked[0].error.clone().unwrap_or_default();
+        anyhow::bail!("no app could be checked: {why}");
+    }
+    Ok(checked.iter().filter(|u| u.available).count())
+}
+
 /// Check every app and macOS.
 pub fn check_all(env: &Env, apps: &[AppInfo], progress: &dyn Fn(&str)) -> UpdatesReport {
     let mut r = UpdatesReport::default();
