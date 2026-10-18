@@ -597,7 +597,7 @@ mod tests {
 
     #[test]
     fn mdls_values() {
-        let out = "2024-03-01 10:22:33 +0000\0(null)\02020-01-01 00:00:00 +0100";
+        let out = "2024-03-01 10:22:33 +0000\0(null)\x002020-01-01 00:00:00 +0100";
         let v = parse_mdls_raw(out, 3).unwrap();
         assert!(v[0].is_some() && v[1].is_none() && v[2].is_some());
         assert!(parse_mdls_raw(out, 2).is_none());

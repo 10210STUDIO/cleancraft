@@ -108,7 +108,7 @@ impl Walker<'_> {
         } else {
             n.files = 1;
             self.files += 1;
-            if self.files % 500 == 0 {
+            if self.files.is_multiple_of(500) {
                 (self.progress)(self.files, p);
             }
             if nlink > 1 && !md.is_dir() && !self.seen.insert((dev, ino)) {
