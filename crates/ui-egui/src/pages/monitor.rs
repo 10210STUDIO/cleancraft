@@ -364,7 +364,7 @@ fn battery_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
             row(
                 app,
                 ui,
-                "Time left",
+                b.estimate_label(),
                 &b.remaining_minutes
                     .map(|m| uptime_text(u64::from(m) * 60))
                     .unwrap_or_else(|| "No estimate".into()),

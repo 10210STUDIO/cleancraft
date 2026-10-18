@@ -143,6 +143,24 @@ pub struct Battery {
     pub health: Option<u8>,
 }
 
+impl Battery {
+    /// While charging, pmset's estimate is the time until full, otherwise the time left on
+    /// the battery.
+    pub fn charging(&self) -> bool {
+        let st = self.state.to_lowercase();
+        st == "charging" || st.starts_with("finishing charge")
+    }
+
+    /// What `remaining_minutes` means: "Time to full" or "Time left".
+    pub fn estimate_label(&self) -> &'static str {
+        if self.charging() {
+            "Time to full"
+        } else {
+            "Time left"
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum BatteryReading {

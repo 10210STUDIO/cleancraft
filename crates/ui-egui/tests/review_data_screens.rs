@@ -110,7 +110,6 @@ const PMSET_CHARGING_EST: &str = "Now drawing from 'AC Power'
 ";
 
 #[test]
-#[ignore = "DAT-11: while charging, pmset's estimate is time until full but the card calls it 'Time left'"]
 fn charging_estimate_is_time_until_full() {
     let mac = FakeMac::new();
     let f = mac.env.fake_sys().unwrap();
@@ -126,4 +125,5 @@ fn charging_estimate_is_time_until_full() {
         !has(&h, "Time left"),
         "87% and charging: 1:30 is the time until full, shown as 'Time left'"
     );
+    assert!(has(&h, "Time to full"));
 }

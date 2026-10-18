@@ -285,3 +285,22 @@ fn free_up_ram_with_unwritable_log() {
     }
     assert!(m.env.fake_sys().unwrap().admin_calls().is_empty());
 }
+
+#[test]
+fn battery_estimate_label_follows_charging() {
+    let mut b = Battery {
+        percent: 87,
+        state: "charging".into(),
+        on_ac: true,
+        remaining_minutes: Some(90),
+        cycles: None,
+        health: None,
+    };
+    assert_eq!(b.estimate_label(), "Time to full");
+    b.state = "finishing charge".into();
+    assert_eq!(b.estimate_label(), "Time to full");
+    b.state = "discharging".into();
+    assert_eq!(b.estimate_label(), "Time left");
+    b.state = "AC attached".into();
+    assert_eq!(b.estimate_label(), "Time left");
+}
