@@ -9,13 +9,17 @@ pub mod env;
 pub mod executor;
 pub mod features;
 pub mod fsutil;
+pub mod malware_rules;
 pub mod permissions;
 pub mod plan;
 pub mod plans;
 pub mod policy;
 pub mod settings;
+pub mod startup;
 pub mod sys;
+pub mod tasks;
 pub mod testkit;
+pub mod testkit_perf;
 
 pub use env::{Env, Fault};
 pub use executor::{ActionKind, ActionRecord, Method, Report, SkipReason};
