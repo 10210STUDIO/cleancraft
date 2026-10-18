@@ -12,7 +12,9 @@ use crate::plan::{FeatureId, Plan};
 use crate::policy;
 use crate::settings::Settings;
 
+pub mod leftovers;
 pub mod system_junk;
+pub mod uninstaller;
 
 /// What a scan gets.
 pub struct ScanCtx<'a> {
@@ -104,7 +106,10 @@ pub fn run_plan_with(
 
 /// Every plan-based feature, in sidebar order.
 pub fn registry() -> Vec<Box<dyn Feature>> {
-    vec![Box::new(system_junk::SystemJunk)]
+    vec![
+        Box::new(system_junk::SystemJunk),
+        Box::new(uninstaller::Uninstaller),
+    ]
 }
 
 pub fn get(id: FeatureId) -> Option<Box<dyn Feature>> {

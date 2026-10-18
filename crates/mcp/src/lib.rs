@@ -21,6 +21,7 @@ use cleancraft_core::permissions;
 use cleancraft_core::plans;
 use cleancraft_core::{Env, FeatureId, Settings};
 
+pub mod apps;
 pub mod monitor;
 
 pub type ToolResult = Result<String, String>;
@@ -77,7 +78,7 @@ impl CleanCraftMcp {
     pub fn new(env: Env) -> Self {
         Self {
             env,
-            tool_router: Self::tool_router() + Self::monitor_router(),
+            tool_router: Self::tool_router() + Self::monitor_router() + Self::apps_router(),
         }
     }
 

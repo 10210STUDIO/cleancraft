@@ -125,17 +125,17 @@ Each task shows what it does, the exact command, whether it needs the administra
 
 | ID | Feature | What | Paths / APIs | Risk | Test | Status |
 |---|---|---|---|---|---|---|
-| A1 | App list | Every app in `/Applications` and `~/Applications` with size, version, last opened, store (App Store, Setapp, other), vendor | `Info.plist`, `_MASReceipt`, `mdls -name kMDItemLastUsedDate` | Low | | PLANNED |
-| A2 | Uninstall with leftovers | App plus its files found by bundle id and name: Application Support, Caches, Preferences, Containers, Group Containers, Saved Application State, HTTPStorages, WebKit, Cookies, Logs, LaunchAgents | listed paths | High | | PLANNED |
-| A3 | Apple apps protected | Apps signed by Apple and system apps are never removable | `/System/Applications`, `codesign -dv` authority | | | PLANNED |
-| A4 | Reset an app | Remove its data, keep the app | same leftovers without the bundle | High | | PLANNED |
-| A5 | Leftovers of removed apps | Files whose app is gone | leftover folders whose bundle id matches no installed app | Medium | | PLANNED |
-| A6 | Installer packages | `.pkg` and `.dmg` installers in Downloads | `~/Downloads` | Medium | | PLANNED |
-| A7 | Unused apps group | Not opened in six months | `kMDItemLastUsedDate` | | | PLANNED |
-| A8 | App updates (Sparkle) | Compare installed version with the app's appcast; show release notes; Update opens the app's own updater or download page | `SUFeedURL` in Info.plist, HTTP GET of the appcast | Low | | PLANNED |
-| A9 | App updates (App Store) | Look up App Store version, open the App Store updates page | `https://itunes.apple.com/lookup?bundleId=`, `macappstore://showUpdatesPage` | Low | | PLANNED |
-| A10 | macOS updates | List from `softwareupdate --list`, open Software Update | | Low | | PLANNED |
-| A11 | Extensions | Preference panes, internet plug-ins, Spotlight and Quick Look plug-ins, screen savers, Safari extensions list | `~/Library/{PreferencePanes,Internet Plug-Ins,Spotlight,QuickLook,Screen Savers}`, `/Library/...`; `pluginkit -mA` | Medium | | PLANNED |
+| A1 | App list | Every app in `/Applications` and `~/Applications` with size, version, last opened, store (App Store, Setapp, other), vendor | `Info.plist`, `_MASReceipt`, `mdls -name kMDItemLastUsedDate` | Low | core apps_inventory::lists_every_kind_of_app, apps_inventory::find_by_name_id_or_path; ui qa_apps_remover::list_groups_and_numbers_match_the_disk | MAC-CHECK |
+| A2 | Uninstall with leftovers | App plus its files found by bundle id and name: Application Support, Caches, Preferences, Containers, Group Containers, Saved Application State, HTTPStorages, WebKit, Cookies, Logs, LaunchAgents | listed paths | High | core apps_uninstall::plan_finds_leftovers_with_confidence, ::uninstall_moves_bundle_and_selected_leftovers_and_undo_restores, ::ignore_list_and_errors; ui qa_apps_remover::uninstall_moves_app_and_leftovers_then_undo, ::file_errors_are_listed_per_file, ::cancel_and_escape_move_nothing | MAC-CHECK |
+| A3 | Apple apps protected | Apps signed by Apple and system apps are never removable | `/System/Applications`, `codesign -dv` authority | | core apps_uninstall::apple_apps_are_locked_and_refused, apps_inventory::apple_signature_marks_app_as_apple; ui qa_apps_remover::apple_app_is_locked, ::running_app_is_refused | MAC-CHECK |
+| A4 | Reset an app | Remove its data, keep the app | same leftovers without the bundle | High | core apps_uninstall::reset_keeps_the_app; ui qa_apps_remover::reset_keeps_the_app | MAC-CHECK |
+| A5 | Leftovers of removed apps | Files whose app is gone | leftover folders whose bundle id matches no installed app | Medium | core apps_leftovers::leftovers_of_removed_apps_are_conservative, ::app_found_elsewhere_or_spotlight_failure_proposes_nothing; ui qa_apps_remover::leftovers_and_installers_groups | MAC-CHECK |
+| A6 | Installer packages | `.pkg` and `.dmg` installers in Downloads | `~/Downloads` | Medium | core apps_leftovers::installers_and_extensions_are_listed_and_removable; ui qa_apps_remover::leftovers_and_installers_groups | WORKS |
+| A7 | Unused apps group | Not opened in six months | `kMDItemLastUsedDate` | | core apps_inventory::lists_every_kind_of_app; ui qa_apps_remover::list_groups_and_numbers_match_the_disk | MAC-CHECK |
+| A8 | App updates (Sparkle) | Compare installed version with the app's appcast; show release notes; Update opens the app's own updater or download page | `SUFeedURL` in Info.plist, HTTP GET of the appcast | Low | core updater::tests::{version_table,appcast,html_notes}, apps_updates::sparkle_app_store_and_failures, ::release_notes_link_is_fetched; ui qa_apps_updates::check_show_and_hand_off, ::everything_offline | MAC-CHECK |
+| A9 | App updates (App Store) | Look up App Store version, open the App Store updates page | `https://itunes.apple.com/lookup?bundleId=`, `macappstore://showUpdatesPage` | Low | core updater::tests::lookup, apps_updates::sparkle_app_store_and_failures; ui qa_apps_updates::check_show_and_hand_off | MAC-CHECK |
+| A10 | macOS updates | List from `softwareupdate --list`, open Software Update | | Low | core updater::tests::softwareupdate_list, apps_updates::up_to_date_and_bad_answers; ui qa_apps_updates::check_show_and_hand_off, ::everything_offline | MAC-CHECK |
+| A11 | Extensions | Preference panes, internet plug-ins, Spotlight and Quick Look plug-ins, screen savers, Safari extensions list | `~/Library/{PreferencePanes,Internet Plug-Ins,Spotlight,QuickLook,Screen Savers}`, `/Library/...`; `pluginkit -mA` | Medium | core extensions::tests::pluginkit_lines, apps_leftovers::installers_and_extensions_are_listed_and_removable, ::pluginkit_failure_is_a_note; ui qa_apps_remover::leftovers_and_installers_groups | MAC-CHECK |
 
 ## 6. My Clutter
 
