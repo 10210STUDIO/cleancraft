@@ -1336,37 +1336,6 @@ fn every_page_text_follows_the_rules() {
     assert!(bad.is_empty(), "{}", bad.join("\n"));
 }
 
-#[test]
-#[ignore]
-fn timing() {
-    let pages: &[(&str, fn() -> FakeMac)] = &[
-        ("Quick Sweep", mac_sweep),
-        ("System Junk", mac_junk),
-        ("Mail Downloads", mac_mail),
-        ("Privacy Traces", mac_privacy),
-        ("Disk Map", mac_files),
-        ("Duplicates", mac_files),
-        ("History", mac_history),
-    ];
-    for (t, f) in pages {
-        let tpl = Template::new(&PageSpec {
-            title: t,
-            mac: *f,
-            post: no_post,
-        });
-        let t0 = Instant::now();
-        let m = tpl.copy();
-        let t1 = t0.elapsed();
-        let mut h = harness(&m);
-        let t2 = t0.elapsed();
-        nav(&mut h, t).unwrap();
-        let t3 = t0.elapsed();
-        steps(&mut h);
-        let t4 = t0.elapsed();
-        println!("{t}: mac {t1:?} harness {t2:?} nav {t3:?} 4 steps {t4:?}");
-    }
-}
-
 /// PAR-1 (fixed): Privacy Traces adds its own buttons to the results toolbar; the toolbar used
 /// to grow past the right edge of the window and push Select None and every row's Ignore and
 /// Reveal buttons out of reach. It now wraps.
