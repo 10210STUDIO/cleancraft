@@ -92,27 +92,56 @@ pub fn accessed_days_ago(md: &Metadata, now: SystemTime) -> Option<u64> {
     now.duration_since(m).ok().map(|d| d.as_secs() / 86_400)
 }
 
-/// Decimal units like Finder: 1 KB = 1000 bytes. "Zero KB" for 0.
+/// "1 item", "2 items": a count with its noun in the right number.
+pub fn count(n: usize, one: &str, many: &str) -> String {
+    if n == 1 {
+        format!("1 {one}")
+    } else {
+        format!("{n} {many}")
+    }
+}
+
+/// Decimal units like Finder: 1 KB = 1000 bytes. "Zero KB" for 0. Three significant digits;
+/// a value that rounds up to the next precision or unit is shown there ("1.00 MB", not
+/// "1000 KB").
 pub fn human_size(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["KB", "MB", "GB", "TB", "PB"];
     if bytes == 0 {
         return "Zero KB".into();
+    }
+    if bytes == 1 {
+        return "1 byte".into();
     }
     if bytes < 1000 {
         return format!("{bytes} bytes");
     }
     let mut v = bytes as f64 / 1000.0;
     let mut i = 0;
-    while v >= 1000.0 && i < UNITS.len() - 1 {
-        v /= 1000.0;
-        i += 1;
-    }
-    if v >= 100.0 || i == 0 {
-        format!("{:.0} {}", v, UNITS[i])
-    } else if v >= 10.0 {
-        format!("{:.1} {}", v, UNITS[i])
-    } else {
-        format!("{:.2} {}", v, UNITS[i])
+    loop {
+        while v >= 1000.0 && i < UNITS.len() - 1 {
+            v /= 1000.0;
+            i += 1;
+        }
+        // Kilobytes are whole numbers; otherwise 3 significant digits.
+        let mut dec: i32 = if i == 0 || v >= 100.0 {
+            0
+        } else if v >= 10.0 {
+            1
+        } else {
+            2
+        };
+        let round = |v: f64, dec: i32| (v * 10f64.powi(dec)).round() / 10f64.powi(dec);
+        let mut r = round(v, dec);
+        if r >= 1000.0 && i < UNITS.len() - 1 {
+            v = r / 1000.0;
+            i += 1;
+            continue;
+        }
+        while dec > 0 && r >= 10f64.powi(3 - dec) {
+            dec -= 1;
+            r = round(v, dec);
+        }
+        return format!("{:.*} {}", dec as usize, r, UNITS[i]);
     }
 }
 
@@ -128,6 +157,13 @@ mod tests {
         assert_eq!(human_size(1_500_000), "1.50 MB");
         assert_eq!(human_size(25_300_000_000), "25.3 GB");
         assert_eq!(human_size(250_000_000_000), "250 GB");
+        assert_eq!(human_size(1), "1 byte");
+        assert_eq!(human_size(999_500), "1.00 MB");
+        assert_eq!(human_size(9_996_000), "10.0 MB");
+        assert_eq!(human_size(99_960_000), "100 MB");
+        assert_eq!(human_size(9_994_000), "9.99 MB");
+        assert_eq!(count(1, "item", "items"), "1 item");
+        assert_eq!(count(0, "item", "items"), "0 items");
     }
 
     #[test]

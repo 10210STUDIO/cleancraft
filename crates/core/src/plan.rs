@@ -312,8 +312,8 @@ impl Plan {
 
     pub fn summary(&self) -> String {
         format!(
-            "{} items, {} selected ({})",
-            self.items.len(),
+            "{}, {} selected ({})",
+            crate::fsutil::count(self.items.len(), "item", "items"),
             self.selected_count(),
             human_size(self.selected_size())
         )
