@@ -563,35 +563,74 @@ fn ensure_journal(env: &Env) -> io::Result<()> {
     Ok(())
 }
 
+/// Add one line to the journal. When the last line was cut short (a crash while it was being
+/// written, no newline at the end), the new record starts on a line of its own so it stays
+/// readable; the damaged line is left as it is.
 pub fn append_journal(env: &Env, rec: &ActionRecord) -> io::Result<()> {
     ensure_journal(env)?;
-    let mut f = OpenOptions::new().append(true).open(journal_path(env))?;
+    let path = journal_path(env);
     let mut line = serde_json::to_string(rec).map_err(io::Error::other)?;
     line.push('\n');
+    if !ends_with_newline(&path)? {
+        line.insert(0, '\n');
+    }
+    let mut f = OpenOptions::new().append(true).open(&path)?;
     f.write_all(line.as_bytes())?;
     f.sync_data()
 }
 
-/// Every recorded action, oldest first. Damaged lines are skipped.
-pub fn history(env: &Env) -> Vec<ActionRecord> {
-    fs::read_to_string(journal_path(env))
-        .map(|s| {
-            s.lines()
-                .filter_map(|l| serde_json::from_str(l).ok())
+/// True for an empty file or one whose last byte is a newline.
+fn ends_with_newline(path: &Path) -> io::Result<bool> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = fs::File::open(path)?;
+    let len = f.metadata()?.len();
+    if len == 0 {
+        return Ok(true);
+    }
+    f.seek(SeekFrom::Start(len - 1))?;
+    let mut b = [0u8; 1];
+    f.read_exact(&mut b)?;
+    Ok(b[0] == b'\n')
+}
+
+/// Every journal line, oldest first, with its record when it can be read.
+fn journal_lines(env: &Env) -> Vec<(Vec<u8>, Option<ActionRecord>)> {
+    fs::read(journal_path(env))
+        .map(|b| {
+            b.split(|c| *c == b'\n')
+                .filter(|l| !l.is_empty())
+                .map(|l| (l.to_vec(), serde_json::from_slice(l).ok()))
                 .collect()
         })
         .unwrap_or_default()
 }
 
+/// Every recorded action, oldest first. Damaged lines are skipped.
+pub fn history(env: &Env) -> Vec<ActionRecord> {
+    journal_lines(env)
+        .into_iter()
+        .filter_map(|(_, r)| r)
+        .collect()
+}
+
+/// Write the journal again with the records `recs` (from [`history`], same order) in place of
+/// the lines they came from. Lines CleanCraft cannot read (damaged, or written by a newer
+/// version) are kept exactly as they were.
 fn rewrite_journal(env: &Env, recs: &[ActionRecord]) -> io::Result<()> {
     let path = journal_path(env);
+    let raw = fs::read(&path)?;
     let tmp = path.with_extension("jsonl.tmp");
-    let mut s = String::new();
-    for r in recs {
-        s.push_str(&serde_json::to_string(r).map_err(io::Error::other)?);
-        s.push('\n');
+    let mut out: Vec<u8> = Vec::with_capacity(raw.len());
+    let mut next = recs.iter();
+    for l in raw.split(|b| *b == b'\n').filter(|l| !l.is_empty()) {
+        let readable = serde_json::from_slice::<ActionRecord>(l).is_ok();
+        match readable.then(|| next.next()).flatten() {
+            Some(r) => out.extend(serde_json::to_vec(r).map_err(io::Error::other)?),
+            None => out.extend_from_slice(l),
+        }
+        out.push(b'\n');
     }
-    fs::write(&tmp, s)?;
+    fs::write(&tmp, out)?;
     fs::rename(tmp, path)
 }
 

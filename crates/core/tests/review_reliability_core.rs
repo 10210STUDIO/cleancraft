@@ -60,7 +60,6 @@ fn stored_of(rec: &cleancraft_core::ActionRecord) -> PathBuf {
 /// the damaged line and can no longer be read: the item sits in the Trash with no History entry
 /// and no Undo.
 #[test]
-#[ignore = "REL-1: a truncated last journal line swallows the next move's record (no History, no Undo)"]
 fn truncated_journal_line_does_not_swallow_the_next_move() {
     let m = FakeMac::sample();
     fs::create_dir_all(m.env.data_dir()).unwrap();
@@ -90,7 +89,6 @@ fn truncated_journal_line_does_not_swallow_the_next_move() {
 /// (a damaged line, or a record from a newer CleanCraft) are dropped for good, so one Undo erases
 /// part of the action log that History and support would need.
 #[test]
-#[ignore = "REL-2: Undo rewrites the journal and permanently drops every line it cannot parse"]
 fn undo_keeps_journal_lines_it_cannot_read() {
     let m = FakeMac::sample();
     fs::create_dir_all(m.env.data_dir()).unwrap();
