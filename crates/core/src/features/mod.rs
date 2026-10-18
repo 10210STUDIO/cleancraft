@@ -72,6 +72,12 @@ pub trait Feature: Send + Sync {
     fn prepare(&self, _env: &Env, _plan: &Plan) -> anyhow::Result<()> {
         Ok(())
     }
+    /// Work for what really moved, right after the executor (stopping a launch agent whose
+    /// property list moved). Items that were skipped are left untouched. Must log what it
+    /// does; a failure here is in the journal, the move itself stands.
+    fn finish(&self, _env: &Env, _plan: &Plan, _report: &Report) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 /// Carry out a confirmed plan the one way every front end uses: the feature's allow-list,
@@ -109,7 +115,7 @@ pub fn run_plan_with(
     let allow = f.allow_roots(env);
     let method = f.method_override().unwrap_or(settings.method);
     f.prepare(env, plan)?;
-    Ok(executor::execute_with(
+    let report = executor::execute_with(
         env,
         plan,
         &allow,
@@ -117,7 +123,10 @@ pub fn run_plan_with(
         method,
         f.allows_admin(),
         progress,
-    )?)
+    )?;
+    // The files moved; what finish could not do is logged in the journal by finish itself.
+    let _ = f.finish(env, plan, &report);
+    Ok(report)
 }
 
 /// How many selected items of `plan` will move with the administrator password (its feature
