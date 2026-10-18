@@ -215,9 +215,11 @@ impl CleanApp {
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
+                // Compact rows: every entry fits a 680 pt tall window without scrolling.
+                ui.spacing_mut().item_spacing.y = 2.0;
                 for (group, feats) in GROUPS {
                     if !group.is_empty() {
-                        ui.add_space(6.0);
+                        ui.add_space(5.0);
                         ui.label(
                             RichText::new(group.to_uppercase())
                                 .font(font(10.5, Weight::SemiBold))
@@ -248,7 +250,7 @@ impl CleanApp {
 
     fn nav_row(&self, ui: &mut Ui, glyph: &str, color: Color32, label: &str, active: bool) -> bool {
         let t = self.t;
-        let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::click());
+        let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 28.0), Sense::click());
         resp.widget_info(|| {
             egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, label)
         });
