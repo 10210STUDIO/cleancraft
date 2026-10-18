@@ -59,3 +59,52 @@ fn two_items_sharing_a_file_count_it_once_in_the_plan_and_the_report() {
     assert_eq!(rep.moved.len(), 2);
     assert_eq!(rep.freed, shown, "Done says what the confirmation said");
 }
+
+fn flat(t: &cleancraft_core::space::Tree) -> Vec<(std::path::PathBuf, u64, u64)> {
+    fn walk(n: &cleancraft_core::space::Node, out: &mut Vec<(std::path::PathBuf, u64, u64)>) {
+        out.push((n.path.clone(), n.size, n.files));
+        for c in &n.children {
+            walk(c, out);
+        }
+    }
+    let mut v = Vec::new();
+    if let Some(r) = &t.root {
+        walk(r, &mut v);
+    }
+    v.sort();
+    v
+}
+
+fn build(p: &std::path::Path) -> cleancraft_core::space::Tree {
+    cleancraft_core::space::build(p, &std::sync::atomic::AtomicBool::new(false), &|_, _| {})
+}
+
+/// DAT-4: after moving a folder holding the second link, every node of the patched map equals
+/// a new scan (the link now met first, in the Trash, carries the size), and undo too.
+#[test]
+fn disk_map_refresh_equals_a_new_scan_node_by_node() {
+    use cleancraft_core::features::{self, space_lens::plan_for};
+    let mac = FakeMac::new();
+    let a = mac.home_file("Alpha/data.bin", 400_000);
+    let beta = mac.env.home_path("Beta");
+    fs::create_dir_all(&beta).unwrap();
+    fs::hard_link(&a, beta.join("data link.bin")).unwrap();
+    mac.home_file("Beta/notes.txt", 20_000);
+    let mut t = build(mac.env.home());
+    let plan = plan_for(&mac.env, &[(beta.clone(), t.find(&beta).unwrap().size)]);
+    let s = cleancraft_core::Settings::default();
+    let rep = features::run_plan(&mac.env, &s, &plan, &plan.digest(), &mut |_, _| {}).unwrap();
+    t.refresh_after(&mac.env, &rep.moved);
+    assert_eq!(flat(&t), flat(&build(mac.env.home())));
+    let undone = executor::undo_plan(&mac.env, &rep.plan_id);
+    assert_eq!(undone.0, 1);
+    let recs: Vec<_> = executor::history(&mac.env)
+        .into_iter()
+        .filter(|r| r.plan_id == rep.plan_id)
+        .collect();
+    t.refresh_after(&mac.env, &recs);
+    assert_eq!(flat(&t), flat(&build(mac.env.home())));
+    // A subtree opened from the map keeps its link paths.
+    let sub = t.subtree(&beta).unwrap();
+    assert_eq!(sub.root.as_ref().unwrap().size, t.find(&beta).unwrap().size);
+}

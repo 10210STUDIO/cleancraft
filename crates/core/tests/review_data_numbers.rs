@@ -212,7 +212,6 @@ fn disk_map_freed_matches_the_map_for_hard_links() {
 }
 
 #[test]
-#[ignore = "DAT-4: Disk Map refresh after a removal counts a hard link a second time"]
 fn disk_map_refresh_counts_hard_links_once() {
     let mac = FakeMac::new();
     let a = mac.home_file("Alpha/data.bin", 400_000);

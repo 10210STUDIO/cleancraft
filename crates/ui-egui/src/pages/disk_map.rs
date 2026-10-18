@@ -99,17 +99,13 @@ fn start_map(app: &mut CleanApp, root: PathBuf, fresh: bool) {
             st.phase = Phase::Map;
             return;
         }
-        let from_parent = st.trees.values().find_map(|t| t.find(&root).cloned());
-        if let Some(node) = from_parent
-            && node.is_dir
-        {
-            st.trees.insert(
-                root.clone(),
-                Tree {
-                    root: Some(node),
-                    ..Default::default()
-                },
-            );
+        let from_parent = st
+            .trees
+            .values()
+            .find(|t| t.find(&root).is_some_and(|n| n.is_dir))
+            .and_then(|t| t.subtree(&root));
+        if let Some(sub) = from_parent {
+            st.trees.insert(root.clone(), sub);
             st.root = Some(root.clone());
             st.current = Some(root);
             st.phase = Phase::Map;
