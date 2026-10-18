@@ -495,15 +495,15 @@ pub fn rows(st: &PlanState) -> Vec<Row> {
             None => loose.push(id),
         }
     }
+    // Sets of copies always get a header; other groupings only when it groups something.
+    let copies = plan.feature.is_some_and(keeps_a_copy);
     let mut out = Vec::new();
     for g in order {
-        out.push(Row::Group(g.clone()));
-        out.extend(
-            sets.remove(&g)
-                .unwrap_or_default()
-                .into_iter()
-                .map(Row::Item),
-        );
+        let ids = sets.remove(&g).unwrap_or_default();
+        if copies || ids.len() > 1 {
+            out.push(Row::Group(g.clone()));
+        }
+        out.extend(ids.into_iter().map(Row::Item));
     }
     out.extend(loose.into_iter().map(Row::Item));
     out

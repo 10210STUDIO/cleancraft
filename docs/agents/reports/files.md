@@ -49,7 +49,8 @@ Core tests are in `crates/core/tests/files_*.rs`, UI tests (egui_kittest, clicks
 
 - `crates/core/src/lib.rs`: `pub mod space;`, `pub mod testkit_files;` (my test helper for generated pictures, re-exports `image::ImageFormat`).
 - `crates/core/src/features/mod.rs`: `pub mod downloads; duplicates; large_old; similar; space_lens;` and registry lines LargeOldFiles, Duplicates, SimilarImages, SpaceLens.
-- `crates/ui-egui/src/pages/plan_page.rs` (I own the group display): `Row` and `rows()` (set headers when items have `group`), `group_row()`, `keep_a_copy()` after Select All and category select, keep-one-copy guard on the item checkbox. Confirm dialog untouched. `qa_system_junk` stays green.
+- `crates/ui-egui/src/pages/plan_page.rs` (I own the group display): `Row` and `rows()` (set headers: always for Duplicates and Similar Images, for other features only when a group has two or more visible items, so single-item groups such as Privacy's per-file groups add no rows; Duplicates and Similar Images say "N identical files / similar pictures: K kept, X to remove", other features "<group>: N items, X selected"), `group_row()`, `keeps_a_copy(f)` (true only for Duplicates and Similar Images), `keep_a_copy()` after Select All and category select, keep-one-copy guard on the item checkbox, both active only when `keeps_a_copy(f)`. Confirm dialog untouched.
+- Merged `main` (cleanup, apps, perf, monitor) into `agent/files`: kept both sides in `features/mod.rs` and `lib.rs`.
 - `crates/core/src/policy.rs`: test-only clippy fix (`std::slice::from_ref`, lines 195/198), identical to monitor's.
 - No `Cargo.toml` change (`blake3` and `image` were already core dependencies).
 
