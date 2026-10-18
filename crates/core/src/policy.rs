@@ -8,12 +8,59 @@
 //!
 //! Scanners use the same function to skip what they must not even propose.
 
+use std::ffi::OsStr;
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use unicode_normalization::UnicodeNormalization;
+
 use crate::env::{Env, has_parent_component};
+
+/// One file name the way a default Mac volume (APFS, case-insensitive) compares it: letter case
+/// and Unicode composition do not matter ("Résumé" typed with a combining accent, "résumé",
+/// "RÉSUMÉ" are one name).
+pub fn fold_name(s: &str) -> String {
+    s.nfd().flat_map(char::to_lowercase).nfd().collect()
+}
+
+/// Are two file names the same name on a default Mac volume?
+pub fn same_name(a: &OsStr, b: &OsStr) -> bool {
+    if a == b {
+        return true;
+    }
+    match (a.to_str(), b.to_str()) {
+        (Some(a), Some(b)) if a.is_ascii() && b.is_ascii() => a.eq_ignore_ascii_case(b),
+        (Some(a), Some(b)) => fold_name(a) == fold_name(b),
+        _ => false,
+    }
+}
+
+fn same_component(a: Component<'_>, b: Component<'_>) -> bool {
+    match (a, b) {
+        (Component::Normal(x), Component::Normal(y)) => same_name(x, y),
+        (x, y) => x == y,
+    }
+}
+
+/// `p.starts_with(base)`, comparing names like a default Mac volume (see [`fold_name`]).
+/// Protected places and the ignore list use it, so `~/documents` is `~/Documents`.
+pub fn starts_with_ci(p: &Path, base: &Path) -> bool {
+    let mut pc = p.components();
+    for b in base.components() {
+        match pc.next() {
+            Some(c) if same_component(c, b) => {}
+            _ => return false,
+        }
+    }
+    true
+}
+
+/// `a == b`, comparing names like a default Mac volume.
+pub fn same_path_ci(a: &Path, b: &Path) -> bool {
+    a.components().count() == b.components().count() && starts_with_ci(a, b)
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Refusal {
@@ -82,28 +129,90 @@ pub const PROTECTED_HOME: &[(&str, &str)] = &[
 /// Why `p` is protected, if it is.
 pub fn protected_reason(env: &Env, p: &Path) -> Option<String> {
     for (abs, why) in PROTECTED_SYSTEM {
-        if p.starts_with(env.sys_path(abs)) {
+        if starts_with_ci(p, &env.sys_path(abs)) {
             return Some((*why).to_string());
         }
     }
     for (rel, why) in PROTECTED_HOME {
-        if p.starts_with(env.home().join(rel)) {
+        if starts_with_ci(p, &env.home().join(rel)) {
             return Some((*why).to_string());
         }
     }
-    for c in p.components() {
-        let s = c.as_os_str().to_string_lossy().to_lowercase();
-        if s.ends_with(".photoslibrary")
-            || s.ends_with(".photolibrary")
-            || s.ends_with(".aplibrary")
-        {
-            return Some("a Photos library".into());
-        }
+    if starts_with_ci(p, env.data_dir()) {
+        return Some("CleanCraft's own data".into());
     }
-    if p == env.home() || p == env.root() {
+    if p.components().any(|c| is_photos_library(c.as_os_str())) {
+        return Some("a Photos library".into());
+    }
+    if same_path_ci(p, env.home()) || same_path_ci(p, env.root()) {
         return Some("a top level folder".into());
     }
     None
+}
+
+/// Photos, iPhoto and Aperture libraries, by name.
+pub fn is_photos_library(name: &OsStr) -> bool {
+    let s = name.to_string_lossy().to_lowercase();
+    s.ends_with(".photoslibrary") || s.ends_with(".photolibrary") || s.ends_with(".aplibrary")
+}
+
+/// How deep [`protected_inside`] looks below a folder. Deeper than any real layout of a Photos
+/// library, kept finite so a link loop or a pathological tree cannot stall a removal.
+pub const INSIDE_DEPTH: usize = 24;
+
+/// Why the folder `p` must not move as a whole, if it holds a protected place: a known
+/// protected folder (Documents, iCloud Drive, keychains, CleanCraft's data, the home folder...)
+/// lies inside it, or a Photos library is found below it. Symbolic links are not followed
+/// (moving a link never moves what it points to). Files and links return `None`.
+pub fn protected_inside(env: &Env, p: &Path) -> Option<String> {
+    match std::fs::symlink_metadata(p) {
+        Ok(md) if md.is_dir() => {}
+        _ => return None,
+    }
+    let shown = |why: &str| format!("it holds {why}");
+    let below = |base: &Path| starts_with_ci(base, p) && !same_path_ci(base, p);
+    for (abs, why) in PROTECTED_SYSTEM {
+        if below(&env.sys_path(abs)) {
+            return Some(shown(why));
+        }
+    }
+    for (rel, why) in PROTECTED_HOME {
+        if below(&env.home().join(rel)) {
+            return Some(shown(why));
+        }
+    }
+    if below(env.data_dir()) {
+        return Some(shown("CleanCraft's own data"));
+    }
+    if below(env.home()) {
+        return Some(shown("your home folder"));
+    }
+    let mut stack = vec![(p.to_path_buf(), 0usize)];
+    while let Some((dir, depth)) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for e in rd.flatten() {
+            let name = e.file_name();
+            if is_photos_library(&name) {
+                return Some(shown("a Photos library"));
+            }
+            if depth + 1 < INSIDE_DEPTH && e.file_type().is_ok_and(|t| t.is_dir()) {
+                stack.push((e.path(), depth + 1));
+            }
+        }
+    }
+    None
+}
+
+/// [`check`] for an item about to move: also refuses a folder holding a protected place
+/// ([`protected_inside`]). The executor runs it right before each move.
+pub fn check_move(env: &Env, allow: &[PathBuf], p: &Path) -> Result<(), Refusal> {
+    check(env, allow, p)?;
+    if let Some(why) = protected_inside(env, p) {
+        return Err(Refusal::Protected(why));
+    }
+    Ok(())
 }
 
 /// The fence every removal passes. `allow` are the feature's allow-list folders.
@@ -178,6 +287,41 @@ mod tests {
         let lib = env.home_path("Pictures/Photos Library.photoslibrary/x");
         assert!(matches!(
             check(&env, &[env.home_path("Pictures")], &lib),
+            Err(Refusal::Protected(_))
+        ));
+    }
+
+    #[test]
+    fn names_compare_like_apfs() {
+        // "Résumé" precomposed, decomposed and in capitals are one name on a default Mac.
+        let nfc = "R\u{e9}sum\u{e9}";
+        let nfd = "Re\u{301}sume\u{301}";
+        assert!(same_name(OsStr::new(nfc), OsStr::new(nfd)));
+        assert!(same_name(OsStr::new("R\u{c9}SUM\u{c9}"), OsStr::new(nfd)));
+        assert!(!same_name(OsStr::new("Resume"), OsStr::new(nfc)));
+        let d = tempfile::tempdir().unwrap();
+        let env = Env::fake(d.path());
+        let docs = env.home().join(format!("Documents/{nfd}.pdf"));
+        assert!(starts_with_ci(&docs, &env.home_path("DOCUMENTS")));
+        assert!(protected_reason(&env, &env.home_path("dEsKtOp/x")).is_some());
+        assert!(protected_reason(&env, &env.home_path("Downloads/x")).is_none());
+    }
+
+    #[test]
+    fn folder_holding_a_protected_place() {
+        let d = tempfile::tempdir().unwrap();
+        let env = Env::fake(d.path());
+        let lib = env.home_path("Pictures/Trips/Old.photoslibrary/db");
+        std::fs::create_dir_all(&lib).unwrap();
+        std::fs::create_dir_all(env.home_path("Library/Keychains")).unwrap();
+        std::fs::create_dir_all(env.home_path("Projects/a")).unwrap();
+        assert!(protected_inside(&env, &env.home_path("Pictures")).is_some());
+        assert!(protected_inside(&env, &env.home_path("Library")).is_some());
+        assert!(protected_inside(&env, &env.home_path("Projects")).is_none());
+        let home = vec![env.home().to_path_buf()];
+        assert!(check(&env, &home, &env.home_path("Pictures")).is_ok());
+        assert!(matches!(
+            check_move(&env, &home, &env.home_path("Pictures")),
             Err(Refusal::Protected(_))
         ));
     }

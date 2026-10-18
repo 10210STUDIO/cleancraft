@@ -1,13 +1,14 @@
 //! Disk Map removal: the items the user ticked in the map, as a plan for the executor.
 //! Allow-list: the home folder. Protected places, Library, hidden items and apps are locked
-//! ([`crate::space::lock_reason`]); [`Feature::prepare`] refuses a plan that still selects one.
+//! ([`crate::space::lock_reason_deep`]: also folders holding a Photos library or another protected
+//! place); [`Feature::prepare`] refuses a plan that still selects one.
 
 use std::path::PathBuf;
 
 use crate::env::Env;
 use crate::features::{Feature, ScanCtx};
 use crate::plan::{FeatureId, Plan, Risk};
-use crate::space::{self, lock_reason, outermost};
+use crate::space::{self, lock_reason_deep, outermost};
 
 pub struct SpaceLens;
 
@@ -32,7 +33,7 @@ pub fn plan_for(env: &Env, selected: &[(PathBuf, u64)]) -> Plan {
             "File you selected in the Disk Map"
         };
         let id = plan.push(p.clone(), size, CATEGORY, reason, Risk::High, true);
-        if let Some(why) = lock_reason(env, &p) {
+        if let Some(why) = lock_reason_deep(env, &p) {
             plan.lock(id, why);
         }
     }
@@ -74,7 +75,7 @@ impl Feature for SpaceLens {
                     Risk::High,
                     false,
                 );
-                if let Some(why) = lock_reason(env, &c.path) {
+                if let Some(why) = space::node_lock_reason(env, c) {
                     plan.lock(id, why);
                 }
             }
@@ -90,7 +91,7 @@ impl Feature for SpaceLens {
 
     fn prepare(&self, env: &Env, plan: &Plan) -> anyhow::Result<()> {
         for it in plan.selected() {
-            if let Some(why) = lock_reason(env, &it.path) {
+            if let Some(why) = lock_reason_deep(env, &it.path) {
                 anyhow::bail!(
                     "{} cannot be removed ({why}); nothing was moved.",
                     env.display(&it.path)

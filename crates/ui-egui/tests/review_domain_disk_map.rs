@@ -17,7 +17,6 @@ fn mac() -> FakeMac {
 }
 
 #[test]
-#[ignore = "DOM-2: Disk Map lets the user tick Pictures and Move to Trash takes the Photos library inside it"]
 fn dom2_ticking_pictures_moves_the_photos_library() {
     let mac = mac();
     let library = mac.home_file(
@@ -40,7 +39,6 @@ fn dom2_ticking_pictures_moves_the_photos_library() {
 }
 
 #[test]
-#[ignore = "DOM-1: Disk Map maps a typed ~/documents (Documents on a default Mac) and removes a file in it"]
 fn dom1_typed_lowercase_documents_can_be_emptied() {
     let mac = mac();
     // Stands for ~/Documents: macOS volumes are case-insensitive by default.

@@ -69,7 +69,11 @@ impl Settings {
         std::fs::rename(tmp, Self::path(env))
     }
 
+    /// Is `p` on the ignore list (or inside an entry)? Names compare like a default Mac volume
+    /// (letter case and Unicode composition do not matter): `~/downloads/x` is `~/Downloads/x`.
     pub fn is_ignored(&self, p: &Path) -> bool {
-        self.ignore.iter().any(|i| p.starts_with(i))
+        self.ignore
+            .iter()
+            .any(|i| p.starts_with(i) || crate::policy::starts_with_ci(p, i))
     }
 }

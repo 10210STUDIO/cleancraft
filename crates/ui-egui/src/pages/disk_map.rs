@@ -15,7 +15,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use cleancraft_core::executor::{self, Method, Report};
 use cleancraft_core::features::{self, space_lens};
 use cleancraft_core::fsutil::human_size;
-use cleancraft_core::space::{self, DiskUse, Node, Tree, lock_reason, outermost};
+use cleancraft_core::space::{
+    self, DiskUse, Node, Tree, lock_reason_deep, node_lock_reason, outermost,
+};
 use egui::{Align, Color32, CornerRadius, Layout, RichText, Sense, Stroke, Ui, vec2};
 
 use crate::app::CleanApp;
@@ -443,7 +445,7 @@ fn open_folder(app: &mut CleanApp, p: PathBuf) {
 
 fn toggle(app: &mut CleanApp, p: &Path, on: bool) {
     app.act();
-    if let Some(why) = lock_reason(&app.env, p) {
+    if let Some(why) = lock_reason_deep(&app.env, p) {
         app.warn(format!("{} cannot be selected: {why}.", app.env.display(p)));
         return;
     }
@@ -727,7 +729,7 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
             .max_height(h - 30.0)
             .show_rows(ui, 34.0, kids.len(), |ui, range| {
                 for c in &kids[range] {
-                    let locked = lock_reason(&app.env, &c.path);
+                    let locked = node_lock_reason(&app.env, c);
                     ui.horizontal(|ui| {
                         ui.set_height(30.0);
                         let was = app.disk_map.selected.contains(&c.path);

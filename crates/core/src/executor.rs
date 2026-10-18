@@ -256,7 +256,7 @@ fn check_item(
     running: &[RunningApp],
     by_admin: bool,
 ) -> Result<(), SkipReason> {
-    if let Err(r) = policy::check(env, allow, p) {
+    if let Err(r) = policy::check_move(env, allow, p) {
         return Err(SkipReason::Refused(r.to_string()));
     }
     if fs::symlink_metadata(p).is_err() {
@@ -445,8 +445,10 @@ fn admin_move(env: &Env, plan: &Plan, batch: &[(&Item, u64)], report: &mut Repor
     }
 }
 
+/// Is `p` (or something inside it) open? Names compare like a default Mac volume: an edited
+/// plan may spell the path in another letter case than lsof reports it.
 fn is_open(set: &HashSet<PathBuf>, p: &Path) -> bool {
-    set.contains(p) || set.iter().any(|o| o.starts_with(p))
+    set.contains(p) || set.iter().any(|o| policy::starts_with_ci(o, p))
 }
 
 /// The Trash folder for `p`: the user's Trash on the startup disk, `/Volumes/X/.Trashes/<uid>`

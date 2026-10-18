@@ -108,7 +108,6 @@ fn shown(env: &Env, ps: &[&PathBuf]) -> Vec<String> {
 // DOM-1: the protected list compares paths letter case by letter case.
 
 #[test]
-#[ignore = "DOM-1: ~/documents (Documents on a case-insensitive Mac) is accepted by Large & Old Files and Disk Map and its files are moved"]
 fn dom1_case_variant_of_documents_is_still_documents() {
     // macOS volumes are case-insensitive by default: ~/documents IS ~/Documents. The fake
     // home is on a case-sensitive disk, so a folder spelled "documents" stands for the same
@@ -159,12 +158,13 @@ fn dom1_case_variant_of_documents_is_still_documents() {
 // DOM-2: a folder that CONTAINS a protected place passes the fence.
 
 #[test]
-#[ignore = "DOM-2: Disk Map can tick ~/Pictures and moves the Photos library inside it; an edited Large & Old plan moves all of ~/Library"]
 fn dom2_folder_holding_a_protected_place_is_not_protected() {
     let m = FakeMac::new();
     let env = &m.env;
-    let library =
-        m.home_file("Pictures/Photos Library.photoslibrary/database/Photos.sqlite", 300_000);
+    let library = m.home_file(
+        "Pictures/Photos Library.photoslibrary/database/Photos.sqlite",
+        300_000,
+    );
     m.home_file("Pictures/holiday.jpg", 100_000);
     let pictures = env.home_path("Pictures");
     let s = Settings::default();
@@ -177,7 +177,10 @@ fn dom2_folder_holding_a_protected_place_is_not_protected() {
     // Large & Old Files, edited plan: the whole ~/Library (keychains, iCloud Drive,
     // CleanCraft's own journal are inside it).
     let keychain = m.home_file("Library/Keychains/login.keychain-db", 10_000);
-    let icloud = m.home_file("Library/Mobile Documents/com~apple~CloudDocs/cv.pdf", 10_000);
+    let icloud = m.home_file(
+        "Library/Mobile Documents/com~apple~CloudDocs/cv.pdf",
+        10_000,
+    );
     let base = ctx_scan(env, &small_files(), |c| {
         large_old::scan_location(c, &Location::Downloads)
     });
@@ -426,7 +429,6 @@ fn dom10_ignored_app_is_still_offered_for_removal() {
 }
 
 #[test]
-#[ignore = "DOM-11: an ignore entry typed in other letter case (~/downloads/...) does not match on a case-insensitive Mac"]
 fn dom11_ignore_entry_in_other_case_is_not_honoured() {
     let m = FakeMac::new();
     let env = &m.env;
@@ -536,7 +538,12 @@ fn symlink_and_hard_link_into_documents_never_reach_documents() {
     let (n, errs) = executor::undo_plan(env, &plan.id);
     assert!(errs.is_empty(), "{errs:?}");
     assert!(n >= 2);
-    assert!(fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+    assert!(
+        fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
     assert!(hard.exists());
 }
 
@@ -587,7 +594,9 @@ fn privacy_never_preselects_passwords_bookmarks_or_autofill() {
     for it in &plan.items {
         let p = it.path.to_string_lossy();
         assert!(
-            !p.ends_with("Bookmarks") && !p.ends_with("Bookmarks.plist") && !p.ends_with("Preferences"),
+            !p.ends_with("Bookmarks")
+                && !p.ends_with("Bookmarks.plist")
+                && !p.ends_with("Preferences"),
             "{p} listed"
         );
     }
@@ -675,7 +684,11 @@ fn trash_bins_and_feature_less_plans_never_move() {
     let m = FakeMac::new();
     let env = &m.env;
     let t = m.home_file(".Trash/old.zip", 10_000);
-    for f in [FeatureId::TrashBins, FeatureId::Maintenance, FeatureId::Monitor] {
+    for f in [
+        FeatureId::TrashBins,
+        FeatureId::Maintenance,
+        FeatureId::Monitor,
+    ] {
         let mut p = Plan::new(f);
         push(&mut p, &t, "x");
         let _ = features::run_plan(env, &Settings::default(), &p, &p.digest(), &mut |_, _| {});

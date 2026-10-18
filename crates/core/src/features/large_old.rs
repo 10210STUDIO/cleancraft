@@ -172,7 +172,7 @@ pub fn parse_folder(env: &Env, input: &str) -> Result<PathBuf, String> {
             "{shown} is protected ({why}). CleanCraft never proposes files there."
         ));
     }
-    if p.starts_with(env.home_path("Library")) {
+    if policy::starts_with_ci(&p, &env.home_path("Library")) {
         return Err(format!(
             "{shown} is in your Library, which holds app data. Use System Junk or App Remover for it."
         ));
@@ -334,7 +334,10 @@ pub fn skipped(env: &Env, p: &Path) -> bool {
     if name.starts_with('.') {
         return true;
     }
-    if SKIP_HOME.iter().any(|rel| p == env.home_path(rel)) {
+    if SKIP_HOME
+        .iter()
+        .any(|rel| policy::same_path_ci(p, &env.home_path(rel)))
+    {
         return true;
     }
     if ext_in(p, SKIP_EXTS) {

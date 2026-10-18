@@ -30,6 +30,8 @@ pub struct Node {
     pub children: Vec<Node>,
     /// Files below (1 for a file).
     pub files: u64,
+    /// A Photos library is somewhere below this folder: it can be viewed, never removed whole.
+    pub holds_library: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -79,6 +81,7 @@ impl Walker<'_> {
             is_dir: md.is_dir(),
             children: Vec::new(),
             files: 0,
+            holds_library: false,
         };
         if md.is_dir() {
             if self.dev.is_some_and(|d| d != dev) {
@@ -97,6 +100,8 @@ impl Walker<'_> {
                         if let Some(c) = self.node(&k) {
                             n.size += c.size;
                             n.files += c.files;
+                            n.holds_library |= c.holds_library
+                                || policy::is_photos_library(std::ffi::OsStr::new(&c.name));
                             n.children.push(c);
                         }
                     }
@@ -209,6 +214,10 @@ impl Node {
         }
         self.children
             .sort_by(|a, b| b.size.cmp(&a.size).then_with(|| a.name.cmp(&b.name)));
+        self.holds_library = self
+            .children
+            .iter()
+            .any(|c| c.holds_library || policy::is_photos_library(std::ffi::OsStr::new(&c.name)));
     }
 }
 
@@ -284,7 +293,7 @@ pub fn lock_reason(env: &Env, p: &Path) -> Option<String> {
         return Some(format!("protected: {why}"));
     }
     let lib = env.home_path("Library");
-    if p.starts_with(&lib) {
+    if policy::starts_with_ci(p, &lib) {
         return Some("app data in Library (use System Junk or App Remover)".into());
     }
     if let Ok(rel) = p.strip_prefix(home)
@@ -309,6 +318,26 @@ pub fn lock_reason(env: &Env, p: &Path) -> Option<String> {
         return Some(r.to_string());
     }
     None
+}
+
+/// Why the map row `node` cannot be selected: [`lock_reason`], or a protected place inside the
+/// folder (a Photos library found while measuring it, or a known protected folder below it).
+/// Uses the measured tree, no disk access, so it is cheap enough for every drawn row.
+pub fn node_lock_reason(env: &Env, node: &Node) -> Option<String> {
+    if let Some(why) = lock_reason(env, &node.path) {
+        return Some(why);
+    }
+    if node.holds_library {
+        return Some("protected: it holds a Photos library".into());
+    }
+    None
+}
+
+/// [`lock_reason`] plus a look inside a folder for protected places
+/// ([`policy::protected_inside`]); reads the disk, for one-off checks such as a click.
+pub fn lock_reason_deep(env: &Env, p: &Path) -> Option<String> {
+    lock_reason(env, p)
+        .or_else(|| policy::protected_inside(env, p).map(|w| format!("protected: {w}")))
 }
 
 /// Check a folder typed for the map: inside the home folder, existing, a real folder. Protected
