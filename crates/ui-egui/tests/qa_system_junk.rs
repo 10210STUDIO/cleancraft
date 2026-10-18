@@ -98,3 +98,22 @@ fn cancel_moves_nothing() {
     assert!(plan.items.iter().all(|i| i.path.exists()));
     assert!(has(&h, "Review and Clean"));
 }
+
+#[test]
+fn every_sidebar_entry_is_inside_the_window() {
+    let mac = FakeMac::sample();
+    let h = harness(&mac);
+    let mut labels: Vec<&str> = cleancraft_core::FeatureId::ALL
+        .iter()
+        .map(|f| f.title())
+        .collect();
+    labels.extend(["History", "Settings"]);
+    for l in labels {
+        let r = h
+            .get_all_by_label(l)
+            .next()
+            .unwrap_or_else(|| panic!("{l} missing"))
+            .rect();
+        assert!(r.max.y <= HGT && r.min.y >= 0.0, "{l} at {r:?}");
+    }
+}

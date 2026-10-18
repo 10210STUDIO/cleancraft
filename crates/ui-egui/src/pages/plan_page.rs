@@ -556,15 +556,18 @@ fn group_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, g: &str) {
         .sum();
     let text = match f {
         FeatureId::SimilarPhotos => {
-            format!("{n} similar pictures: {kept} kept, {} to remove", human_size(freed))
+            format!(
+                "{n} similar pictures: {kept} kept, {} to remove",
+                human_size(freed)
+            )
         }
         FeatureId::Duplicates => {
-            format!("{n} identical files: {kept} kept, {} to remove", human_size(freed))
+            format!(
+                "{n} identical files: {kept} kept, {} to remove",
+                human_size(freed)
+            )
         }
-        _ => format!(
-            "{g}: {n} items, {} selected",
-            human_size(freed)
-        ),
+        _ => format!("{g}: {n} items, {} selected", human_size(freed)),
     };
     ui.horizontal(|ui| {
         ui.set_height(40.0);
@@ -659,7 +662,11 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     let Some(plan) = app.plan_state(f).plan.clone() else {
         return;
     };
-    let dest = match app.settings.method {
+    // A feature can insist on the quarantine (Threat Check); say where items really go.
+    let method = features::get(f)
+        .and_then(|x| x.method_override())
+        .unwrap_or(app.settings.method);
+    let dest = match method {
         executor::Method::Trash => "the Trash",
         executor::Method::Quarantine => "the CleanCraft quarantine",
     };
@@ -680,7 +687,8 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             &t,
             "These exact files will be moved. You can put them back from History.",
         );
-        egui::ScrollArea::vertical()
+        egui::ScrollArea::both()
+            .max_width(640.0)
             .max_height(360.0)
             .show(ui, |ui| {
                 egui::Grid::new("confirm-list")
@@ -697,7 +705,7 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             });
         ui.add_space(8.0);
         ui.horizontal(|ui| {
-            let label = match app.settings.method {
+            let label = match method {
                 executor::Method::Trash => "Move to Trash",
                 executor::Method::Quarantine => "Move to Quarantine",
             };

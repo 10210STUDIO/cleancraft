@@ -5,19 +5,31 @@
 //! confirms, [`executor`] moves confirmed items to the Trash or quarantine and logs each move
 //! with an undo.
 
+pub mod apps;
 pub mod env;
 pub mod executor;
+pub mod extensions;
 pub mod features;
 pub mod fsutil;
+pub mod malware_rules;
+pub mod monitor;
 pub mod permissions;
 pub mod plan;
 pub mod plans;
 pub mod policy;
 pub mod settings;
 pub mod space;
+pub mod startup;
+pub mod sweep;
 pub mod sys;
+pub mod tasks;
 pub mod testkit;
+pub mod testkit_apps;
+pub mod testkit_cleanup;
 pub mod testkit_files;
+pub mod testkit_monitor;
+pub mod testkit_perf;
+pub mod updater;
 
 pub use env::{Env, Fault};
 pub use executor::{ActionKind, ActionRecord, Method, Report, SkipReason};

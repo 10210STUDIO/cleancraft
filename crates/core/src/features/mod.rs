@@ -15,9 +15,15 @@ use crate::settings::Settings;
 pub mod downloads;
 pub mod duplicates;
 pub mod large_old;
+pub mod leftovers;
+pub mod mail;
+pub mod malware;
+pub mod privacy;
 pub mod similar;
 pub mod space_lens;
 pub mod system_junk;
+pub mod trash;
+pub mod uninstaller;
 
 /// What a scan gets.
 pub struct ScanCtx<'a> {
@@ -75,6 +81,22 @@ pub fn run_plan(
         .feature
         .ok_or_else(|| anyhow::anyhow!("the plan has no feature"))?;
     let f = get(fid).ok_or_else(|| anyhow::anyhow!("{} has no cleanup", fid.title()))?;
+    run_plan_with(f.as_ref(), env, settings, plan, confirmed_digest, progress)
+}
+
+/// [`run_plan`] with the feature already looked up (Quick Sweep runs several in a row).
+/// Same checks: the plan must belong to `f` and match the confirmed digest.
+pub fn run_plan_with(
+    f: &dyn Feature,
+    env: &Env,
+    settings: &Settings,
+    plan: &Plan,
+    confirmed_digest: &str,
+    progress: &mut dyn FnMut(usize, usize),
+) -> anyhow::Result<Report> {
+    if plan.feature != Some(f.id()) {
+        anyhow::bail!("this plan does not belong to {}", f.id().title());
+    }
     if plan.digest() != confirmed_digest {
         return Err(ExecError::DigestMismatch.into());
     }
@@ -99,6 +121,12 @@ pub fn registry() -> Vec<Box<dyn Feature>> {
         Box::new(duplicates::Duplicates),
         Box::new(similar::SimilarImages),
         Box::new(space_lens::SpaceLens),
+        Box::new(uninstaller::Uninstaller),
+        Box::new(malware::Malware),
+        Box::new(crate::startup::StartupFeature),
+        Box::new(mail::MailDownloads),
+        Box::new(trash::TrashBins),
+        Box::new(privacy::Privacy),
     ]
 }
 
