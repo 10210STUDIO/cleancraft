@@ -509,8 +509,17 @@ pub fn rows(st: &PlanState) -> Vec<Row> {
     out
 }
 
+/// Features whose sets are copies of one another: one item per set must always stay.
+/// Other features may use `group` only to show headers (e.g. one set per app).
+pub fn keeps_a_copy(f: FeatureId) -> bool {
+    matches!(f, FeatureId::Duplicates | FeatureId::SimilarPhotos)
+}
+
 /// After a bulk selection: every set keeps one copy (the suggested one).
 fn keep_a_copy(app: &mut CleanApp, f: FeatureId) {
+    if !keeps_a_copy(f) {
+        return;
+    }
     let env = app.env.clone();
     let fixed = app
         .plan_state(f)
@@ -545,12 +554,18 @@ fn group_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, g: &str) {
         .filter(|i| i.selected && i.locked.is_none())
         .map(|i| i.size)
         .sum();
-    let what = if f == FeatureId::SimilarPhotos {
-        format!("{n} similar pictures")
-    } else {
-        format!("{n} identical files")
+    let text = match f {
+        FeatureId::SimilarPhotos => {
+            format!("{n} similar pictures: {kept} kept, {} to remove", human_size(freed))
+        }
+        FeatureId::Duplicates => {
+            format!("{n} identical files: {kept} kept, {} to remove", human_size(freed))
+        }
+        _ => format!(
+            "{g}: {n} items, {} selected",
+            human_size(freed)
+        ),
     };
-    let text = format!("{what}: {kept} kept, {} to remove", human_size(freed));
     ui.horizontal(|ui| {
         ui.set_height(40.0);
         ui.add_space(2.0);
@@ -583,6 +598,7 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
         if cb.changed() {
             app.act();
             let every_copy = on
+                && keeps_a_copy(f)
                 && app
                     .plan_state(f)
                     .plan
