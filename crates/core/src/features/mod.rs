@@ -13,6 +13,7 @@ use crate::policy;
 use crate::settings::Settings;
 
 pub mod leftovers;
+pub mod malware;
 pub mod system_junk;
 pub mod uninstaller;
 
@@ -109,6 +110,8 @@ pub fn registry() -> Vec<Box<dyn Feature>> {
     vec![
         Box::new(system_junk::SystemJunk),
         Box::new(uninstaller::Uninstaller),
+        Box::new(malware::Malware),
+        Box::new(crate::startup::StartupFeature),
     ]
 }
 

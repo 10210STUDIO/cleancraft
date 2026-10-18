@@ -8,6 +8,7 @@
 mod cli;
 mod cli_apps;
 mod cli_monitor;
+mod cli_perf;
 
 use cleancraft_core::Env;
 use cleancraft_ui_egui::CleanApp;

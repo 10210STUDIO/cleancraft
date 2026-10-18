@@ -55,6 +55,17 @@ pub enum Cmd {
     },
     /// Quick Sweep: scan every cleanup module (looks only) and save their plans.
     Sweep,
+    /// List Tune-up Tasks with their exact commands.
+    Tasks,
+    /// Run one Tune-up Task (prints the exact commands; runs only with --yes).
+    RunTask {
+        id: String,
+        /// Confirm the commands printed.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// List login items, launch agents and daemons, and heavy apps.
+    Startup,
     /// Run the MCP server on stdio (what AI agents launch).
     Serve,
     #[command(flatten)]
@@ -196,6 +207,11 @@ pub fn run_cmd(env: &Env, cmd: Cmd) -> anyhow::Result<()> {
         }
         Cmd::Sweep => println!("{}", crate::cli_monitor::sweep(env, &settings)?),
         Cmd::Apps(c) => crate::cli_apps::run(env, c, &mut std::io::stdout())?,
+        Cmd::Tasks => crate::cli_perf::tasks(env, &mut std::io::stdout())?,
+        Cmd::RunTask { id, yes } => {
+            crate::cli_perf::run_task(env, &id, yes, &mut std::io::stdout())?
+        }
+        Cmd::Startup => crate::cli_perf::startup(env, &mut std::io::stdout())?,
         Cmd::Serve => {
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(async {
