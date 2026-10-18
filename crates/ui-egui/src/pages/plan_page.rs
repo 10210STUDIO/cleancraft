@@ -554,7 +554,8 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             &t,
             "These exact files will be moved. You can put them back from History.",
         );
-        egui::ScrollArea::vertical()
+        egui::ScrollArea::both()
+            .max_width(640.0)
             .max_height(360.0)
             .show(ui, |ui| {
                 egui::Grid::new("confirm-list")

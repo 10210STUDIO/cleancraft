@@ -24,6 +24,7 @@ pub mod sys;
 pub mod tasks;
 pub mod testkit;
 pub mod testkit_apps;
+pub mod testkit_cleanup;
 pub mod testkit_monitor;
 pub mod testkit_perf;
 pub mod updater;

@@ -13,8 +13,11 @@ use crate::policy;
 use crate::settings::Settings;
 
 pub mod leftovers;
+pub mod mail;
 pub mod malware;
+pub mod privacy;
 pub mod system_junk;
+pub mod trash;
 pub mod uninstaller;
 
 /// What a scan gets.
@@ -112,6 +115,9 @@ pub fn registry() -> Vec<Box<dyn Feature>> {
         Box::new(uninstaller::Uninstaller),
         Box::new(malware::Malware),
         Box::new(crate::startup::StartupFeature),
+        Box::new(mail::MailDownloads),
+        Box::new(trash::TrashBins),
+        Box::new(privacy::Privacy),
     ]
 }
 
