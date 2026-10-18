@@ -494,6 +494,17 @@ fn days(now: SystemTime, t: Option<SystemTime>) -> Option<u64> {
         .map(|d| d.as_secs() / 86_400)
 }
 
+/// Calendar days since `t` (today, yesterday...), for the "last opened" words.
+fn calendar_days(now: SystemTime, t: Option<SystemTime>) -> Option<u64> {
+    let secs = |x: SystemTime| {
+        x.duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .map(|d| d.as_secs() as i64)
+    };
+    let (t, now) = (secs(t?)?, secs(now)?);
+    (t <= now).then(|| crate::fsutil::calendar_days_ago(t, now) as u64)
+}
+
 fn ago(d: u64) -> String {
     match d {
         0 => "today".into(),
@@ -552,13 +563,14 @@ pub fn scan_location(ctx: &ScanCtx<'_>, loc: &Location) -> anyhow::Result<Plan> 
     let used = last_used_dates(env, &candidates);
     let now = SystemTime::now();
     for f in &w.found {
-        let opened = days(now, last_opened(&f.md, used.get(&f.path).copied()));
+        let last = last_opened(&f.md, used.get(&f.path).copied());
+        let opened = days(now, last);
         let large = f.size >= s.large_min_bytes;
         let old = f.size >= OLD_MIN_BYTES && opened.is_some_and(|d| d >= s.old_days);
         if !large && !old {
             continue;
         }
-        let when = opened
+        let when = calendar_days(now, last)
             .map(ago)
             .unwrap_or_else(|| "at an unknown time".into());
         let reason = match (large, old) {

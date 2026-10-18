@@ -281,7 +281,8 @@ pub fn last_used_text(last_used: Option<i64>, now: i64) -> String {
     match last_used {
         None => "Unknown".into(),
         Some(t) => {
-            let days = (now - t).max(0) / 86_400;
+            // Calendar days on the user's clock: an app opened late yesterday is "Yesterday".
+            let days = crate::fsutil::calendar_days_ago(t, now);
             match days {
                 0 => "Today".into(),
                 1 => "Yesterday".into(),

@@ -146,6 +146,19 @@ pub fn accessed_days_ago(md: &Metadata, now: SystemTime) -> Option<u64> {
     now.duration_since(m).ok().map(|d| d.as_secs() / 86_400)
 }
 
+/// How many calendar days back `t` is from `now` on the user's local calendar (seconds since
+/// the epoch): 0 for today, 1 for yesterday, even when less than 24 hours passed. Used for
+/// "today" / "yesterday" / "N days ago" texts; thresholds such as "not opened for 365 days"
+/// keep counting full days.
+pub fn calendar_days_ago(t: i64, now: i64) -> i64 {
+    use chrono::{Local, TimeZone};
+    let day = |s: i64| Local.timestamp_opt(s, 0).earliest().map(|d| d.date_naive());
+    match (day(t), day(now)) {
+        (Some(a), Some(b)) => (b - a).num_days().max(0),
+        _ => ((now - t) / 86_400).max(0),
+    }
+}
+
 /// "1 item", "2 items": a count with its noun in the right number.
 pub fn count(n: usize, one: &str, many: &str) -> String {
     if n == 1 {
@@ -217,6 +230,22 @@ mod tests {
         assert_eq!(human_size(99_960_000), "100 MB");
         assert_eq!(human_size(9_994_000), "9.99 MB");
         assert_eq!(count(1, "item", "items"), "1 item");
+        let now = chrono::Local::now().timestamp();
+        assert_eq!(calendar_days_ago(now, now), 0);
+        // One minute before local midnight is yesterday, whatever the hour now.
+        use chrono::TimeZone;
+        let midnight = chrono::Local
+            .from_local_datetime(
+                &chrono::Local::now()
+                    .date_naive()
+                    .and_hms_opt(0, 0, 0)
+                    .unwrap(),
+            )
+            .earliest()
+            .unwrap()
+            .timestamp();
+        assert_eq!(calendar_days_ago(midnight - 60, now), 1);
+        assert_eq!(calendar_days_ago(midnight + 60, now.max(midnight + 60)), 0);
         assert_eq!(count(0, "item", "items"), "0 items");
     }
 

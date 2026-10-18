@@ -333,7 +333,6 @@ fn local_midnight_today() -> SystemTime {
 }
 
 #[test]
-#[ignore = "DAT-6: Large & Old says 'last opened today' for a file last opened yesterday evening"]
 fn last_opened_uses_calendar_days() {
     let mac = FakeMac::new();
     let f = mac.home_file("Downloads/movie.mov", 200_000);
@@ -546,7 +545,6 @@ fn sweep_tiles_and_text_match_each_module_plan() {
 }
 
 #[test]
-#[ignore = "DAT-6: App Remover 'Today' for an app last opened yesterday evening (same 24-hour rule)"]
 fn app_last_opened_uses_calendar_days() {
     let now = chrono::Utc::now().timestamp();
     let t = local_midnight_today()
