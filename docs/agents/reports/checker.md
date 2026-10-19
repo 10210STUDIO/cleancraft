@@ -213,12 +213,12 @@ Merged from every report in `docs/agents/reports/` with duplicates removed, plus
 - **H-S8 Journal.** After a clean, `tail -c 1 ~/Library/Application\ Support/CleanCraft/journal.jsonl | xxd` prints `0a`. Run `cleancraft clean <plan> --yes`, `cleancraft undo <plan>`, the same clean again, `cleancraft undo <plan>`. Both undos put the items back (ids end in `~2` the second time).
 - **H-S9 Case-insensitive names.** `ls -d ~/documents` lists Documents. In Large & Old Files > Another folder type `~/documents`. Expect "... is protected (the contents of Documents)". Same in Disk Map > Folder to map.
 - **H-S10 Photos library.** Disk Map > Map Home Folder: the Pictures row (holding "Photos Library.photoslibrary") has a disabled checkbox "protected: it holds a Photos library".
-- **H-S11 Damaged settings (new).** Quit CleanCraft and cut the last bytes off `~/Library/Application Support/CleanCraft/settings.json` (`truncate -s -4 <file>`). Start: the notice names a `settings.damaged-*.json` copy. Note that the ignore list is no longer applied. Then `cleancraft scan system_junk`: no warning appears there (CLI uses `Settings::load`).
+- **H-S11 Damaged settings (new).** Quit CleanCraft and cut the last bytes off `~/Library/Application Support/CleanCraft/settings.json` (`truncate -s -4 <file>`). Start: the notice names the `settings.damaged.json` copy, and the ignore list is not applied until you fix or re-enter it. `cleancraft scan system_junk` prints the same warning (fixed after this check).
 
 ### System Junk
-- **H-J1 Root-owned folders (J2, J4, J15) (new).** `ls -ld /Library/Caches /Library/Logs /private/var/log /Library/Updates`. Scan System Junk. Expected from the code: System logs and macOS update downloads are all locked "Needs administrator rights". System caches are unselected and marked for the password even if `/Library/Caches` is `root:admin 775`, because group write is ignored. Decide if that is what you want.
+- **H-J1 Root-owned folders (J2, J4, J15) (new).** `ls -ld /Library/Caches /Library/Logs /private/var/log /Library/Updates`. Scan System Junk. Expected from the code: System logs and macOS update downloads are all locked "Needs administrator rights". System caches in a group-writable `/Library/Caches` (`root:admin`, mode 1775) are movable without the password for admin users (fixed after this check: group write and `id -G` are now honoured); root-only entries need the password and are not preselected.
 - **H-J2 Administrator move with an awkward name.** `sudo mkdir "/Library/Caches/it's a \$test \`x\`"`. Tick it by hand and clean: one password dialog, and the folder appears in the quarantine with the exact name.
-- **H-J3 Broken agents and privacy protection (J8) (new).** Without Full Disk Access, create `~/Library/LaunchAgents/test.cleancraft.plist` with `Program` set to a file inside `~/Library/Containers/<another app>/Data/` that exists. Scan: it must NOT be listed as broken. Expected today (code reading): it is listed and preselected. Also run a check on an agent pointing at a truly missing program.
+- **H-J3 Broken agents and privacy protection (J8) (new).** Without Full Disk Access, create `~/Library/LaunchAgents/test.cleancraft.plist` with `Program` set to a file inside `~/Library/Containers/<another app>/Data/` that exists. Scan: it must NOT be listed as broken. Fixed after this check: only "not found" counts as broken. Also run a check on an agent pointing at a truly missing program.
 - **H-J4 Languages (J6).** `defaults read -g AppleLanguages` prints `(` / `"en-US",` / `)`. J6 keeps those languages.
 - **H-J5 Universal apps (J7).** `uname -m` prints `arm64`. `lipo -archs /Applications/<universal>.app/Contents/MacOS/<exe>` prints `x86_64 arm64`. `lipo -detailed_info <same>` has `architecture x86_64` blocks with `size N`. J7 shows that size.
 - **H-J6 Broken preferences (J9).** `echo '<plist><dict>' > ~/Library/Preferences/test.cleancraft.plist`. `plutil -lint` exits non-zero and J9 lists it.
@@ -269,9 +269,11 @@ Merged from every report in `docs/agents/reports/` with duplicates removed, plus
 - **H-R3 CLI and MCP.** `cleancraft status`, `cleancraft sweep`, and MCP `system_status` twice (the second call has a network speed) and `sweep_preview`.
 
 ### Install
-- **H-U1 (U7).** Run `bash scripts/install-app.sh`, then open `/Applications/CleanCraft.app`. Check Get Info: the copyright line mentions the reference vendor (see the safety audit).
+- **H-U1 (U7).** Run `bash scripts/install-app.sh`, then open `/Applications/CleanCraft.app`. Check Get Info: the copyright line reads "MIT OR Apache-2.0. CleanCraft, an original app." (the reference vendor mention removed after this check).
 
 ## Recommended fixes (not made: app code is out of my scope)
+
+Coordinator, after this check: 1 to 4 are done (commit after c06d61b, tests in crates/core/tests/fix_coordinator.rs and review_reliability_ui.rs); from 5, running UI tests as a non-root user is still open.
 
 1. `system_junk::program_gone`: treat only `ErrorKind::NotFound` as gone (J8).
 2. `Env::can_modify`: consider group write for the user's groups, or say in J2/J4 that admin users still need the password.

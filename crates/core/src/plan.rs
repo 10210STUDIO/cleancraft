@@ -25,6 +25,7 @@ use crate::fsutil::human_size;
 )]
 #[serde(rename_all = "snake_case")]
 pub enum FeatureId {
+    #[serde(rename = "quick_sweep", alias = "smart_care")]
     SmartCare,
     SystemJunk,
     MailAttachments,
@@ -38,6 +39,7 @@ pub enum FeatureId {
     Maintenance,
     Malware,
     Privacy,
+    #[serde(rename = "disk_map", alias = "space_lens")]
     SpaceLens,
     Monitor,
 }
@@ -63,7 +65,7 @@ impl FeatureId {
 
     pub fn as_str(self) -> &'static str {
         match self {
-            FeatureId::SmartCare => "smart_care",
+            FeatureId::SmartCare => "quick_sweep",
             FeatureId::SystemJunk => "system_junk",
             FeatureId::MailAttachments => "mail_attachments",
             FeatureId::TrashBins => "trash_bins",
@@ -76,13 +78,19 @@ impl FeatureId {
             FeatureId::Maintenance => "maintenance",
             FeatureId::Malware => "malware",
             FeatureId::Privacy => "privacy",
-            FeatureId::SpaceLens => "space_lens",
+            FeatureId::SpaceLens => "disk_map",
             FeatureId::Monitor => "monitor",
         }
     }
 
     pub fn parse(s: &str) -> Option<FeatureId> {
-        let s = s.trim().replace('-', "_").to_lowercase();
+        let s = s.trim().replace(['-', ' '], "_").to_lowercase();
+        let s = match s.as_str() {
+            // Older ids, still accepted.
+            "smart_care" => "quick_sweep",
+            "space_lens" => "disk_map",
+            other => other,
+        };
         FeatureId::ALL.into_iter().find(|f| f.as_str() == s)
     }
 

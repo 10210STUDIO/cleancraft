@@ -63,11 +63,9 @@ impl Settings {
         match serde_json::from_slice(&bytes) {
             Ok(s) => (s, None),
             Err(_) => {
-                let copy = path.with_extension(format!(
-                    "damaged-{}.json",
-                    chrono::Utc::now().format("%Y%m%d%H%M%S")
-                ));
-                let kept = std::fs::write(&copy, &bytes).is_ok();
+                let copy = path.with_extension("damaged.json");
+                let kept = std::fs::read(&copy).is_ok_and(|b| b == bytes)
+                    || std::fs::write(&copy, &bytes).is_ok();
                 let msg = if kept {
                     format!(
                         "Your settings file could not be read, so default settings are in use (ignore list empty). A copy of the damaged file is at {}.",

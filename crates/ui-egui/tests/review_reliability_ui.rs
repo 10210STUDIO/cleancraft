@@ -133,6 +133,13 @@ fn damaged_settings_are_reported_and_the_ignore_list_survives() {
         .notice
         .as_ref()
         .is_some_and(|(m, _)| m.to_lowercase().contains("settings"));
+    assert!(warned, "no warning about the damaged settings file");
+    let copy = Settings::path(&mac.env).with_extension("damaged.json");
+    assert_eq!(
+        std::fs::read(&copy).ok().as_deref(),
+        Some(&full[..full.len() - 4]),
+        "the damaged file is not kept as a copy"
+    );
     click(&mut h, "System Junk");
     click(&mut h, "Scan");
     let proposed = h.state().plans[&FeatureId::SystemJunk]

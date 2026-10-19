@@ -171,7 +171,28 @@ impl Env {
                 .map(|m| m.uid())
                 .unwrap_or(u32::MAX);
             let mode = md.mode();
-            (md.uid() == me && mode & 0o200 != 0) || mode & 0o002 != 0
+            if (md.uid() == me && mode & 0o200 != 0) || mode & 0o002 != 0 {
+                return true;
+            }
+            // Group-writable folders (macOS /Library/Caches is root:admin rwxrwxr-t): writable
+            // when this user is in that group. The home folder's group is the user's primary
+            // group; other memberships come from `id -G`.
+            if mode & 0o020 != 0 {
+                let primary = std::fs::metadata(&self.home).map(|m| m.gid()).ok();
+                if primary == Some(md.gid()) {
+                    return true;
+                }
+                if let Ok(out) = self.sys.run("/usr/bin/id", &["-G"])
+                    && out.ok()
+                {
+                    return out
+                        .stdout
+                        .split_whitespace()
+                        .filter_map(|g| g.parse::<u32>().ok())
+                        .any(|g| g == md.gid());
+                }
+            }
+            false
         }
         #[cfg(not(unix))]
         {

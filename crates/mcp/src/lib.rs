@@ -137,9 +137,14 @@ impl CleanCraftMcp {
     async fn scan(&self, Parameters(a): Parameters<FeatureArg>) -> ToolResult {
         let f = FeatureId::parse(&a.feature)
             .ok_or_else(|| format!("unknown feature '{}'", a.feature))?;
-        let plan = features::scan(&self.env, &self.settings(), f).map_err(|e| format!("{e:#}"))?;
+        let (settings, warning) = Settings::load_checked(&self.env);
+        let plan = features::scan(&self.env, &settings, f).map_err(|e| format!("{e:#}"))?;
         plans::save(&self.env, &plan).map_err(|e| e.to_string())?;
-        ok(plan_view(&self.env, &plan, 0, 200))
+        let mut v = plan_view(&self.env, &plan, 0, 200);
+        if let Some(w) = warning {
+            v["settings_warning"] = serde_json::Value::String(w);
+        }
+        ok(v)
     }
 
     #[tool(description = "Read a saved plan, with paging over its items.")]

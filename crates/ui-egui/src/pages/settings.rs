@@ -130,7 +130,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
         ui.add_space(8.0);
         kit::card(&t).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(RichText::new("Agents and menu bar").font(font(14.0, Weight::SemiBold)));
+            ui.label(RichText::new("AI agents").font(font(14.0, Weight::SemiBold)));
             if ui
                 .checkbox(
                     &mut app.settings.agents_may_clean,

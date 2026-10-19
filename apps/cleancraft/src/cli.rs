@@ -97,7 +97,10 @@ pub fn run(args: Vec<String>) -> i32 {
 }
 
 pub fn run_cmd(env: &Env, cmd: Cmd) -> anyhow::Result<()> {
-    let settings = Settings::load(env);
+    let (settings, warning) = Settings::load_checked(env);
+    if let Some(w) = warning {
+        eprintln!("Warning: {w}");
+    }
     match cmd {
         Cmd::Features => {
             let scannable: Vec<FeatureId> = features::registry().iter().map(|f| f.id()).collect();

@@ -1273,7 +1273,12 @@ pub fn program_gone(env: &Env, prog: &str) -> bool {
             return false;
         }
     }
-    std::fs::symlink_metadata(env.sys_path(prog)).is_err()
+    // Only "not found" means gone. A privacy refusal (a program in a protected folder) or any
+    // other error means we cannot tell, so the agent is not called broken.
+    matches!(
+        std::fs::symlink_metadata(env.sys_path(prog)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound
+    ) && env.fault_for(&env.sys_path(prog)).is_none()
 }
 
 /// See [`SystemJunk`]'s `validate`. `allow` is the feature's allow-list.

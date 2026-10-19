@@ -65,7 +65,7 @@ cat > "$STAGE/Contents/Info.plist" <<PLIST
   <key>NSAppleEventsUsageDescription</key>
   <string>CleanCraft asks Finder to empty the Trash and System Events to list login items, only when you click those actions.</string>
   <key>NSHumanReadableCopyright</key>
-  <string>MIT OR Apache-2.0. Not affiliated with the reference vendor.</string>
+  <string>MIT OR Apache-2.0. CleanCraft, an original app.</string>
 </dict>
 </plist>
 PLIST

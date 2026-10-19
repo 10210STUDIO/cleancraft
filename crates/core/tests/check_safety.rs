@@ -65,57 +65,76 @@ fn running_as_root() -> bool {
         .is_ok_and(|md| md.uid() == 0)
 }
 
-/// What a real Mac looks like for a user who is not root: `/Library/Logs` and
-/// `/private/var/log` belong to root (group-writable for admin users at most). CleanCraft then
-/// locks every System log item (J4) and every `/Library/Updates` download (J15), and system
-/// caches (J2) need the administrator password and are not preselected. The builders' UI tests
-/// run as root, where these folders are always changeable, so they never show this.
+/// What a real Mac looks like for a user who is not root. `/private/var/log` and
+/// `/Library/Updates` are root:wheel 755: every item there is locked (J4, J15). `/Library/Logs`
+/// and `/Library/Caches` are root:admin and group writable: an administrator account (member of
+/// the folder's group, from `id -G`) can move entries there without the password; a standard
+/// account cannot. The builders' UI tests run as root, where everything is changeable.
 #[test]
 fn check_system_folders_owned_by_root_lock_j4_on_a_real_mac() {
     if !running_as_root() {
         // Only root can give the fake folders another owner; on a Mac the folders already are.
         return;
     }
-    let m = junk_mac();
-    let other_uid = 4242;
-    for abs in [
-        "/Library/Logs",
-        "/private/var/log",
-        "/Library/Updates",
-        "/Library/Caches",
-    ] {
+    use std::os::unix::fs::PermissionsExt;
+    let set = |m: &FakeMac, abs: &str, gid: u32, mode: u32| {
         let p = m.env.sys_path(abs);
-        // Owned by someone else, writable by the owner and the group (our gid 0): like
-        // root:admin 775 seen by an administrator account.
-        std::os::unix::fs::chown(&p, Some(other_uid), Some(0)).unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&p, fs::Permissions::from_mode(0o775)).unwrap();
-    }
-    let plan = features::scan(&m.env, &Settings::default(), FeatureId::SystemJunk).unwrap();
-    let logs: Vec<_> = plan
-        .items
-        .iter()
-        .filter(|i| i.category == "system_logs")
-        .collect();
-    assert!(!logs.is_empty());
-    assert!(
-        logs.iter().all(|i| i.locked.is_some() && !i.selected),
-        "J4 items selectable: {logs:?}"
-    );
-    let updates = m.env.sys_path("/Library/Updates");
-    assert!(
-        plan.items
+        std::os::unix::fs::chown(&p, Some(4242), Some(gid)).unwrap();
+        fs::set_permissions(&p, fs::Permissions::from_mode(mode)).unwrap();
+    };
+    for admin in [true, false] {
+        let m = junk_mac();
+        set(&m, "/private/var/log", 4243, 0o755);
+        set(&m, "/Library/Updates", 4243, 0o755);
+        set(&m, "/Library/Logs", 80, 0o775);
+        set(&m, "/Library/Caches", 80, 0o1775);
+        m.env
+            .fake_sys()
+            .unwrap()
+            .answer("id -G", if admin { "20 12 61 80" } else { "20 12 61" });
+        let plan = features::scan(&m.env, &Settings::default(), FeatureId::SystemJunk).unwrap();
+        let var_log = m.env.sys_path("/private/var/log");
+        let updates = m.env.sys_path("/Library/Updates");
+        for root_only in [&var_log, &updates] {
+            let items: Vec<_> = plan
+                .items
+                .iter()
+                .filter(|i| i.path.starts_with(root_only))
+                .collect();
+            assert!(
+                items
+                    .iter()
+                    .all(|i| !i.selected && (i.locked.is_some() || i.needs_admin)),
+                "root-only {} items selectable (admin={admin}): {items:?}",
+                root_only.display()
+            );
+        }
+        let lib = [
+            m.env.sys_path("/Library/Logs"),
+            m.env.sys_path("/Library/Caches"),
+        ];
+        let group_items: Vec<_> = plan
+            .items
             .iter()
-            .filter(|i| i.path.starts_with(&updates))
-            .all(|i| i.locked.is_some() && !i.selected)
-    );
-    let caches: Vec<_> = plan
-        .items
-        .iter()
-        .filter(|i| i.category == "system_caches")
-        .collect();
-    assert!(!caches.is_empty());
-    assert!(caches.iter().all(|i| i.needs_admin && !i.selected));
+            .filter(|i| lib.iter().any(|l| i.path.starts_with(l)))
+            .collect();
+        assert!(!group_items.is_empty());
+        if admin {
+            assert!(
+                group_items
+                    .iter()
+                    .all(|i| i.locked.is_none() && !i.needs_admin),
+                "admin cannot clean group-writable folders: {group_items:?}"
+            );
+        } else {
+            assert!(
+                group_items
+                    .iter()
+                    .all(|i| !i.selected && (i.locked.is_some() || i.needs_admin)),
+                "standard user can clean root:admin folders: {group_items:?}"
+            );
+        }
+    }
 }
 
 /// Every `.rs` file under `crates/*/src` and `apps/*/src`, with the text before its
