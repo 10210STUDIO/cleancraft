@@ -9,6 +9,7 @@ use egui::{Color32, CornerRadius, RichText, Sense, Stroke, Ui, vec2};
 use crate::icons::{self, Icon};
 use crate::kit;
 use crate::pages::{self, plan_page::PlanState};
+use crate::section_icons::{self, SectionIcon};
 use crate::theme::{self, Section, Tokens, Weight, font, icon as isz, motion, size, space};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,16 +55,16 @@ pub fn group_of(f: FeatureId) -> usize {
         .unwrap_or(0)
 }
 
-/// The icon of a sidebar entry.
-pub fn group_icon(i: usize) -> Icon {
+/// The icon of a sidebar entry (motion3's small 3D section icons).
+pub fn group_icon(i: usize) -> SectionIcon {
     match i {
-        0 => Icon::Sweep,
-        1 => Icon::Junk,
-        2 => Icon::Shield,
-        3 => Icon::Tasks,
-        4 => Icon::Remover,
-        5 => Icon::Folder,
-        _ => Icon::Monitor,
+        0 => SectionIcon::QuickSweep,
+        1 => SectionIcon::Clean,
+        2 => SectionIcon::Protect,
+        3 => SectionIcon::Speed,
+        4 => SectionIcon::Apps,
+        5 => SectionIcon::Files,
+        _ => SectionIcon::Monitor,
     }
 }
 
@@ -97,9 +98,6 @@ pub struct CleanApp {
     pub section_tool: BTreeMap<usize, FeatureId>,
 }
 
-/// The window's top band where macOS draws the traffic lights (transparent title bar):
-/// nothing clickable in the sidebar goes there.
-const TITLE_BAND: f32 = 28.0;
 /// Sidebar entry height.
 const NAV_ROW: f32 = 44.0;
 
@@ -324,14 +322,11 @@ impl CleanApp {
             side.y_range(),
             Stroke::new(1.0, Color32::from_white_alpha(10)),
         );
-        // The traffic lights' band, then the logo under it.
-        ui.add_space(TITLE_BAND + space::XS);
+        // The traffic lights' band (titlebar.rs), then the logo under it.
+        ui.add_space(crate::titlebar::SIDEBAR_TOP - 8.0);
         ui.horizontal(|ui| {
-            ui.add_space(6.0);
-            let (r, _) = ui.allocate_exact_size(egui::Vec2::splat(30.0), Sense::hover());
-            let (a, b) = Section::Overview.colors();
-            icons::gradient_tile(ui.painter(), r, 8.5, a, b);
-            icons::paint(ui.painter(), r.shrink(5.0), Icon::Logo, theme::on_color(a));
+            ui.add_space(4.0);
+            crate::logo::show(ui, crate::logo::SIDEBAR_PT);
             ui.add_space(6.0);
             ui.label(
                 RichText::new("CleanCraft")
@@ -349,8 +344,7 @@ impl CleanApp {
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = space::XS;
                 for (i, (name, feats)) in GROUPS.iter().enumerate() {
-                    let color = Section::of(feats[0]).colors().0;
-                    if self.nav_row(ui, group_icon(i), color, name, current == Some(i)) {
+                    if self.nav_row(ui, group_icon(i), name, current == Some(i)) {
                         self.act();
                         let f = self.section_tool.get(&i).copied().unwrap_or(feats[0]);
                         self.page = Page::Feature(f);
@@ -364,11 +358,9 @@ impl CleanApp {
                     Stroke::new(1.0, Color32::from_white_alpha(14)),
                 );
                 ui.add_space(space::S);
-                let neutral = Section::Neutral.colors().0;
                 if self.nav_row(
                     ui,
-                    Icon::History,
-                    neutral,
+                    SectionIcon::History,
                     "History",
                     self.page == Page::History,
                 ) {
@@ -377,8 +369,7 @@ impl CleanApp {
                 }
                 if self.nav_row(
                     ui,
-                    Icon::Settings,
-                    neutral,
+                    SectionIcon::Settings,
                     "Settings",
                     self.page == Page::Settings,
                 ) {
@@ -390,8 +381,9 @@ impl CleanApp {
 
     /// One sidebar entry: a 28 pt icon tile in the section's colour and a 15 pt label in a
     /// 44 pt row; the selected entry sits on a soft pill.
-    fn nav_row(&self, ui: &mut Ui, icon: Icon, color: Color32, label: &str, active: bool) -> bool {
+    fn nav_row(&self, ui: &mut Ui, icon: SectionIcon, label: &str, active: bool) -> bool {
         let t = self.t;
+        let color = icon.section().colors().0;
         let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), NAV_ROW), Sense::click());
         resp.widget_info(|| {
             egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, label)
@@ -424,11 +416,8 @@ impl CleanApp {
             r.left_center() + vec2(8.0 + 14.0, 0.0),
             egui::Vec2::splat(28.0),
         );
-        let mut q = p.clone();
-        if !active {
-            q.set_opacity(0.88 + 0.12 * hov);
-        }
-        kit::icon_tile(&q, tile, icon, color);
+        // Rest, half lit on hover, fully lit when selected (section_icons.rs).
+        section_icons::paint(ui, tile, icon, on.max(0.5 * hov));
         p.text(
             egui::pos2(tile.right() + 12.0, r.center().y),
             egui::Align2::LEFT_CENTER,
