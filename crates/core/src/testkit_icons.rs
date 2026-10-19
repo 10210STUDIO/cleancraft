@@ -16,6 +16,35 @@ pub fn png_bytes(w: u32, h: u32, rgba: [u8; 4]) -> Vec<u8> {
     out.into_inner()
 }
 
+/// A rounded, two-tone app icon with a white ring, like a real one (renders and demos).
+pub fn fancy_icon(px: u32, a: [u8; 3], b: [u8; 3]) -> Vec<u8> {
+    let mut img = image::RgbaImage::new(px, px);
+    let r = px as f32 * 0.22;
+    let m = px as f32 * 0.08;
+    for (x, y, p) in img.enumerate_pixels_mut() {
+        let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+        let (lo, hi) = (m, px as f32 - m);
+        let cx = fx.clamp(lo + r, hi - r);
+        let cy = fy.clamp(lo + r, hi - r);
+        let d = ((fx - cx).powi(2) + (fy - cy).powi(2)).sqrt();
+        let alpha = (r - d + 0.5).clamp(0.0, 1.0);
+        let t = fy / px as f32;
+        let c = |i: usize| (a[i] as f32 * (1.0 - t) + b[i] as f32 * t) as u8;
+        let ring = ((fx - px as f32 / 2.0).powi(2) + (fy - px as f32 / 2.0).powi(2)).sqrt();
+        let glyph = (ring - px as f32 * 0.22).abs() < px as f32 * 0.05;
+        *p = if glyph {
+            image::Rgba([255, 255, 255, (alpha * 255.0) as u8])
+        } else {
+            image::Rgba([c(0), c(1), c(2), (alpha * 255.0) as u8])
+        };
+    }
+    let mut out = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(img)
+        .write_to(&mut out, image::ImageFormat::Png)
+        .unwrap();
+    out.into_inner()
+}
+
 /// How an app names its icon in Info.plist.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IconKind<'a> {

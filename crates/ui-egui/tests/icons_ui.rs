@@ -348,3 +348,107 @@ fn without_a_loader_everything_is_a_placeholder() {
     assert_eq!(images::shown(&h.ctx, &m.editor), None);
     assert_eq!(tool_calls(&m.mac), 0);
 }
+
+/// `CLEANCRAFT_SNAPSHOTS=1`: renders App Remover with real icons and the file-kind gallery,
+/// at 1x and 2x, into docs/screens/v2/ for review. Always checks they render.
+#[test]
+fn icons_render() {
+    let save = std::env::var("CLEANCRAFT_SNAPSHOTS").is_ok_and(|v| v == "1");
+    let out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/screens/v2");
+    if save {
+        std::fs::create_dir_all(&out_dir).unwrap();
+    }
+    for ppp in [1.0f32, 2.0] {
+        let mac = FakeMac::new();
+        let colors = [
+            ("Editor", [90, 160, 255], [40, 70, 200]),
+            ("Notes Pro", [255, 210, 90], [235, 140, 30]),
+            ("Mixer", [250, 110, 150], [180, 40, 110]),
+            ("Atlas", [90, 220, 160], [20, 140, 100]),
+        ];
+        for (name, a, b) in colors {
+            let app = mac.icon_app(
+                name,
+                &format!("com.example.{}", name.replace(' ', "")),
+                IconKind::Icns("AppIcon"),
+            );
+            let icns = app.join("Contents/Resources/AppIcon.icns");
+            for px in app_icons::SIZES {
+                let out = app_icons::app_icon_path(&mac.env, &app, px).unwrap();
+                mac.env.fake_sys().unwrap().answer_creating(
+                    &cleancraft_core::testkit_icons::sips_line(&mac, &icns, &out, px),
+                    "",
+                    &out,
+                    &cleancraft_core::testkit_icons::fancy_icon(px, a, b),
+                );
+            }
+        }
+        mac.app("Plain", "com.example.Plain", "1.0"); // no icon: placeholder tile
+        mac.spotlight_finds_nothing();
+        let app = cleancraft_ui_egui::CleanApp::new(mac.env.clone()).with_sync();
+        let mut h = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1060.0, 680.0))
+            .with_pixels_per_point(ppp)
+            .build_ui_state(
+                |ui, app: &mut cleancraft_ui_egui::CleanApp| {
+                    app.logic(&ui.ctx().clone());
+                    app.ui(ui);
+                },
+                app,
+            );
+        for _ in 0..4 {
+            h.step();
+        }
+        images::install(&h.ctx.clone(), &mac.env, Mode::Sync);
+        h.get_by_label("App Remover").click();
+        for _ in 0..6 {
+            h.step();
+        }
+        let img = h.render().expect("render");
+        if save {
+            img.save(out_dir.join(format!("icons-app-remover@{ppp}x.png")))
+                .unwrap();
+        }
+
+        // The file-kind gallery at 16, 24, 32 and 64 points.
+        let g = FakeMac::new();
+        g.write(
+            &g.home().join("Pictures/photo.png"),
+            &cleancraft_core::testkit_icons::fancy_icon(128, [120, 190, 255], [250, 160, 90]),
+        );
+        let mut gh = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1000.0, 300.0))
+            .with_pixels_per_point(ppp)
+            .build_ui_state(
+                move |ui, n: &mut u32| {
+                    *n += 1;
+                    if *n == 1 {
+                        cleancraft_ui_egui::theme::install_fonts(ui.ctx());
+                        return;
+                    }
+                    ui.painter().rect_filled(
+                        ui.max_rect(),
+                        0.0,
+                        egui::Color32::from_rgb(0x16, 0x1A, 0x26),
+                    );
+                    for size in [16.0, 24.0, 32.0, 64.0] {
+                        ui.horizontal(|ui| {
+                            for k in FileKind::ALL {
+                                let probe = PathBuf::from(format!("/nowhere/x.{k:?}"));
+                                images::file_icon(ui, &probe, k, size);
+                            }
+                        });
+                    }
+                },
+                0u32,
+            );
+        for _ in 0..3 {
+            gh.step();
+        }
+        let gi = gh.render().expect("render");
+        if save {
+            gi.save(out_dir.join(format!("icons-file-kinds@{ppp}x.png")))
+                .unwrap();
+        }
+    }
+}
