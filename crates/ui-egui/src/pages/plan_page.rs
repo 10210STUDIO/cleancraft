@@ -868,9 +868,21 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
     let cb_rect = Rect::from_center_size(pos2(r.left() + 20.0, r.center().y), vec2(22.0, 22.0));
     let mut on = selected_now;
     let cb = kit::place(ui, cb_rect, |ui| {
+        if locked {
+            // Still a (disabled) checkbox for VoiceOver and tests; a padlock on screen.
+            ui.multiply_opacity(0.0);
+        }
         ui.add_enabled_ui(!locked, |ui| kit::check(ui, &t, &mut on, &name))
             .inner
     });
+    if locked {
+        icons::paint(
+            &p,
+            Rect::from_center_size(cb_rect.center(), egui::Vec2::splat(isz::INLINE + 2.0)),
+            Icon::Lock,
+            t.text_faint,
+        );
+    }
     if cb.changed() {
         app.act();
         let every_copy = on

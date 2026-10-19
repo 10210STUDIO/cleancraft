@@ -53,11 +53,13 @@ pub enum Icon {
     Back,
     /// Up and down chevrons of a pop-up menu.
     UpDown,
+    /// A padlock: an item that cannot be selected.
+    Lock,
 }
 
 impl Icon {
     /// Every icon, for tests and the gallery.
-    pub const ALL: [Icon; 33] = [
+    pub const ALL: [Icon; 34] = [
         Icon::Sweep,
         Icon::Junk,
         Icon::Mail,
@@ -91,6 +93,7 @@ impl Icon {
         Icon::Gear,
         Icon::Back,
         Icon::UpDown,
+        Icon::Lock,
     ];
 }
 
@@ -481,6 +484,12 @@ fn draw(pen: &Pen<'_>, icon: Icon) {
         }
         Icon::Chevron => pen.line(&[(9.5, 5.5), (16.0, 12.0), (9.5, 18.5)]),
         Icon::Back => pen.line(&[(14.5, 5.5), (8.0, 12.0), (14.5, 18.5)]),
+        Icon::Lock => {
+            pen.rrect(5.5, 10.5, 13.0, 9.5, 2.0);
+            pen.line(&[(8.5, 10.5), (8.5, 7.5)]);
+            pen.line(&[(15.5, 10.5), (15.5, 7.5)]);
+            pen.arc(12.0, 7.5, 3.5, 180.0, 360.0);
+        }
         Icon::UpDown => {
             pen.line(&[(7.5, 9.5), (12.0, 5.0), (16.5, 9.5)]);
             pen.line(&[(7.5, 14.5), (12.0, 19.0), (16.5, 14.5)]);

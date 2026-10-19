@@ -178,22 +178,14 @@ fn big(app: &CleanApp, ui: &mut Ui, text: &str) {
     );
 }
 
-/// A big value with a semicircle gauge on its left.
+/// A semicircle gauge with the value inside it.
 fn gauge_big(app: &CleanApp, ui: &mut Ui, frac: f32, color: Color32, text: &str) {
-    ui.horizontal(|ui| {
-        let (r, _) = ui.allocate_exact_size(vec2(76.0, 46.0), Sense::hover());
-        kit::gauge(
-            ui.painter(),
-            r.center_bottom() - vec2(0.0, 4.0),
-            32.0,
-            frac,
-            color,
-        );
-        ui.vertical(|ui| {
-            ui.add_space(4.0);
-            big(app, ui, text);
-        });
-    });
+    let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 78.0), Sense::hover());
+    let c = egui::pos2(r.left() + 56.0, r.bottom() - 8.0);
+    kit::gauge(ui.painter(), c, 48.0, frac, color);
+    let fid = font(size::TITLE, Weight::Bold);
+    let tr = egui::Rect::from_center_size(c - vec2(0.0, 16.0), vec2(88.0, 30.0));
+    kit::text_at(ui, tr, text, text, fid, app.t.text, egui::Align::Center);
 }
 
 /// A label pair on one line: name on the left, value on the right.

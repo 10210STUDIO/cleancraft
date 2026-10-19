@@ -1616,7 +1616,7 @@ pub fn sort_menu<T: Copy + PartialEq>(ui: &mut Ui, id: &str, value: &mut T, choi
 
 /// A plain text field in CleanCraft's style (`FIELD` tall, rounded). The caller names it.
 pub fn text_field(ui: &mut Ui, t: &Tokens, text: &mut String, hint: &str, width: f32) -> Response {
-    let resp = ui.add(
+    ui.add(
         egui::TextEdit::singleline(text)
             .hint_text(RichText::new(hint).color(t.text_faint))
             .font(font(size::CALLOUT, Weight::Regular))
@@ -1624,8 +1624,7 @@ pub fn text_field(ui: &mut Ui, t: &Tokens, text: &mut String, hint: &str, width:
             .min_size(vec2(width, hit::FIELD))
             .vertical_align(egui::Align::Center)
             .margin(Margin::symmetric(12, 6)),
-    );
-    resp
+    )
 }
 
 /// A secondary pill, returning its response (to rename it for accessibility).
