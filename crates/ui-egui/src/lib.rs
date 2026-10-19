@@ -1,6 +1,7 @@
 //! CleanCraft egui frontend.
 
 pub mod app;
+pub mod icons;
 pub mod jobs;
 pub mod kit;
 pub mod pages;

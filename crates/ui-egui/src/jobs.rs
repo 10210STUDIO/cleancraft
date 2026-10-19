@@ -1,14 +1,19 @@
 //! Background work. Scans and cleanups run on a thread so the window stays responsive; the UI
 //! polls each frame. Tests set `sync` so a click finishes its work before the next frame.
 
-use std::sync::mpsc::{Receiver, TryRecvError, channel};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 pub struct Job<T> {
     rx: Option<Receiver<T>>,
     done: Option<T>,
     /// Last progress line reported by the work.
     pub status: Arc<Mutex<String>>,
+    /// When the work started (for the elapsed time on progress screens).
+    pub started: Instant,
+    /// Keeps a `waiting` job's channel open.
+    _hold: Option<Sender<T>>,
 }
 
 impl<T: Send + 'static> Job<T> {
@@ -29,6 +34,8 @@ impl<T: Send + 'static> Job<T> {
                 rx: None,
                 done: Some(v),
                 status,
+                started: Instant::now(),
+                _hold: None,
             };
         }
         let (tx, rx) = channel();
@@ -45,7 +52,27 @@ impl<T: Send + 'static> Job<T> {
             rx: Some(rx),
             done: None,
             status,
+            started: Instant::now(),
+            _hold: None,
         }
+    }
+
+    /// Work that never finishes, showing `status`: for screenshots of progress screens and
+    /// for tests of the Stop button.
+    pub fn waiting(status: &str) -> Job<T> {
+        let (tx, rx) = channel();
+        Job {
+            rx: Some(rx),
+            done: None,
+            status: Arc::new(Mutex::new(status.to_string())),
+            started: Instant::now(),
+            _hold: Some(tx),
+        }
+    }
+
+    /// Whole seconds since the work started.
+    pub fn elapsed_secs(&self) -> u64 {
+        self.started.elapsed().as_secs()
     }
 
     /// The result, once, when the work has finished.

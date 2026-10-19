@@ -6,9 +6,10 @@ use cleancraft_core::permissions::{self, Access};
 use cleancraft_core::{Env, FeatureId, Settings};
 use egui::{Color32, CornerRadius, RichText, Sense, Stroke, Ui, vec2};
 
+use crate::icons::{self, Icon};
 use crate::kit;
 use crate::pages::{self, plan_page::PlanState};
-use crate::theme::{self, Tokens, Weight, font};
+use crate::theme::{self, Section, Tokens, Weight, font, motion, space};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Page {
@@ -65,6 +66,9 @@ pub struct CleanApp {
     actions: u64,
     fonts_installed: bool,
     fonts_pass: u64,
+    /// The page the transition animation is running for, and when it started.
+    shown_page: Page,
+    page_since: f64,
 }
 
 impl CleanApp {
@@ -91,6 +95,8 @@ impl CleanApp {
             actions: 0,
             fonts_installed: false,
             fonts_pass: 0,
+            shown_page: Page::Feature(FeatureId::SmartCare),
+            page_since: f64::NEG_INFINITY,
         }
     }
 
@@ -167,7 +173,16 @@ impl CleanApp {
         }
     }
 
+    /// The section of the page on screen.
+    pub fn section(&self) -> Section {
+        match self.page {
+            Page::Feature(f) => Section::of(f),
+            Page::History | Page::Settings => Section::Neutral,
+        }
+    }
+
     pub fn ui(&mut self, ui: &mut Ui) {
+        self.t = self.t.for_section(self.section());
         let t = self.t;
         let full = ui.max_rect();
         ui.painter().rect_filled(full, 0.0, t.bg);
@@ -176,38 +191,72 @@ impl CleanApp {
             ui.ctx().request_repaint();
             return;
         }
+        let mut content = full;
+        content.min.x += space::SIDEBAR;
+        kit::backdrop(ui.painter(), content, &t);
         egui::Panel::left("sidebar")
             .resizable(false)
-            .exact_size(232.0)
+            .exact_size(space::SIDEBAR)
             .frame(
                 egui::Frame::new()
                     .fill(t.sidebar)
                     .inner_margin(egui::Margin::symmetric(12, 16)),
             )
             .show(ui, |ui| self.sidebar(ui));
+        // Page change: fade in with a short slide up.
+        let now = ui.input(|i| i.time);
+        if self.shown_page != self.page {
+            self.shown_page = self.page;
+            self.page_since = now;
+        }
+        let k = motion::ease_out(motion::progress(now, self.page_since, motion::PAGE));
+        if k < 1.0 {
+            ui.ctx().request_repaint();
+        }
         egui::CentralPanel::default()
-            .frame(
-                egui::Frame::new()
-                    .fill(t.bg)
-                    .inner_margin(egui::Margin::symmetric(28, 22)),
-            )
+            .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(
+                space::PAGE_X,
+                space::PAGE_Y,
+            )))
             .show(ui, |ui| {
                 self.banners(ui);
-                match self.page {
+                ui.multiply_opacity(0.25 + 0.75 * k);
+                let shift = egui::emath::TSTransform::from_translation(vec2(
+                    0.0,
+                    (1.0 - k) * motion::PAGE_SLIDE,
+                ));
+                ui.with_visual_transform(shift, |ui| match self.page {
                     Page::Feature(f) => pages::feature_page(self, ui, f),
                     Page::History => pages::history::ui(self, ui),
                     Page::Settings => pages::settings::ui(self, ui),
-                }
+                });
             });
     }
 
     fn sidebar(&mut self, ui: &mut Ui) {
         let t = self.t;
+        let side = ui.max_rect().expand2(vec2(12.0, 16.0));
+        icons::vertical_gradient(
+            ui.painter(),
+            side,
+            Color32::from_rgb(0x12, 0x16, 0x1F),
+            t.sidebar,
+        );
+        ui.painter().vline(
+            side.right() - 0.5,
+            side.y_range(),
+            Stroke::new(1.0, Color32::from_white_alpha(10)),
+        );
         ui.horizontal(|ui| {
-            kit::badge(ui, t.accent, "C", 30.0);
+            ui.add_space(2.0);
+            let (r, _) = ui.allocate_exact_size(egui::Vec2::splat(30.0), Sense::hover());
+            let (a, b) = Section::Overview.colors();
+            icons::gradient_tile(ui.painter(), r, 9.0, a, b);
+            icons::paint(ui.painter(), r.shrink(5.0), Icon::Logo, theme::on_color(a));
+            ui.add_space(2.0);
             ui.label(
                 RichText::new("CleanCraft")
-                    .font(font(18.0, Weight::Bold))
+                    .font(font(17.0, Weight::Bold))
                     .color(t.text),
             );
         });
@@ -220,66 +269,105 @@ impl CleanApp {
                 for (group, feats) in GROUPS {
                     if !group.is_empty() {
                         ui.add_space(5.0);
-                        ui.label(
-                            RichText::new(group.to_uppercase())
-                                .font(font(10.5, Weight::SemiBold))
-                                .color(t.text_faint),
-                        );
+                        ui.horizontal(|ui| {
+                            ui.add_space(8.0);
+                            ui.label(
+                                RichText::new(group.to_uppercase())
+                                    .font(font(10.0, Weight::SemiBold))
+                                    .color(t.text_faint),
+                            );
+                        });
                     }
                     for f in *feats {
-                        let (glyph, color) = kit::feature_look(&t, *f);
-                        if self.nav_row(ui, glyph, color, f.title(), self.page == Page::Feature(*f))
+                        let (icon, color) = kit::feature_look(&t, *f);
+                        if self.nav_row(ui, icon, color, f.title(), self.page == Page::Feature(*f))
                         {
                             self.act();
                             self.page = Page::Feature(*f);
                         }
                     }
                 }
-                ui.add_space(10.0);
-                ui.separator();
-                if self.nav_row(ui, "☰", t.text_dim, "History", self.page == Page::History) {
+                ui.add_space(8.0);
+                let y = ui.cursor().min.y;
+                ui.painter().hline(
+                    ui.max_rect().x_range(),
+                    y,
+                    Stroke::new(1.0, Color32::from_white_alpha(14)),
+                );
+                ui.add_space(8.0);
+                let neutral = Section::Neutral.colors().0;
+                if self.nav_row(ui, Icon::History, neutral, "History", self.page == Page::History) {
                     self.act();
                     self.navigate("history");
                 }
-                if self.nav_row(ui, "⚙", t.text_dim, "Settings", self.page == Page::Settings) {
+                if self.nav_row(
+                    ui,
+                    Icon::Settings,
+                    neutral,
+                    "Settings",
+                    self.page == Page::Settings,
+                ) {
                     self.act();
                     self.navigate("settings");
                 }
             });
     }
 
-    fn nav_row(&self, ui: &mut Ui, glyph: &str, color: Color32, label: &str, active: bool) -> bool {
+    fn nav_row(&self, ui: &mut Ui, icon: Icon, color: Color32, label: &str, active: bool) -> bool {
         let t = self.t;
         let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 28.0), Sense::click());
         resp.widget_info(|| {
             egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, label)
         });
+        let hov = kit::anim(ui.ctx(), resp.id.with("hov"), resp.hovered(), motion::HOVER);
+        let on = kit::anim(ui.ctx(), resp.id.with("on"), active, motion::PAGE);
         let p = ui.painter();
-        if active {
-            p.rect_filled(r, CornerRadius::same(8), t.accent_dim);
-        } else if resp.hovered() {
-            p.rect_filled(r, CornerRadius::same(8), t.card);
+        if on > 0.0 {
+            p.rect_filled(
+                r,
+                CornerRadius::same(9),
+                icons::lerp(Color32::TRANSPARENT, color.gamma_multiply(0.16), on),
+            );
+            let bar = egui::Rect::from_center_size(
+                r.left_center() + vec2(1.5, 0.0),
+                vec2(3.0, 14.0 * on),
+            );
+            p.rect_filled(bar, CornerRadius::same(2), color);
         }
-        p.text(
-            r.left_center() + vec2(14.0, 0.0),
-            egui::Align2::CENTER_CENTER,
-            glyph,
-            font(14.0, Weight::Bold),
-            color,
+        if hov > 0.0 && !active {
+            p.rect_filled(
+                r,
+                CornerRadius::same(9),
+                Color32::from_white_alpha((10.0 * hov) as u8),
+            );
+        }
+        let ir = egui::Rect::from_center_size(
+            r.left_center() + vec2(18.0, 0.0),
+            egui::Vec2::splat(16.0),
         );
+        let icon_color = if active {
+            icons::lerp(color, Color32::WHITE, 0.2)
+        } else {
+            icons::lerp(color.gamma_multiply(0.85), color, hov)
+        };
+        icons::paint_with(p, ir, icon, icon_color, 1.45);
         p.text(
-            r.left_center() + vec2(32.0, 0.0),
+            r.left_center() + vec2(36.0, 0.0),
             egui::Align2::LEFT_CENTER,
             label,
             font(
-                13.5,
+                13.0,
                 if active {
                     Weight::SemiBold
                 } else {
-                    Weight::Regular
+                    Weight::Medium
                 },
             ),
-            if active { t.text } else { t.text_dim },
+            if active {
+                t.text
+            } else {
+                icons::lerp(t.text_dim, t.text, hov)
+            },
         );
         resp.clicked()
     }
@@ -288,16 +376,20 @@ impl CleanApp {
         let t = self.t;
         if self.fda == Access::Missing {
             egui::Frame::new()
-                .fill(t.warning.gamma_multiply(0.15))
-                .stroke(Stroke::new(1.0, t.warning))
-                .corner_radius(CornerRadius::same(10))
-                .inner_margin(egui::Margin::same(10))
+                .fill(Color32::from_rgba_unmultiplied(0x3A, 0x2C, 0x12, 200))
+                .stroke(Stroke::new(1.0, t.warning.gamma_multiply(0.45)))
+                .corner_radius(CornerRadius::same(theme::radius::M))
+                .inner_margin(egui::Margin::symmetric(12, 8))
                 .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
                     ui.horizontal_wrapped(|ui| {
+                        let (r, _) = ui.allocate_exact_size(egui::Vec2::splat(18.0), Sense::hover());
+                        icons::paint(ui.painter(), r, Icon::Warning, t.warning);
                         ui.label(
                             RichText::new(
                                 "CleanCraft cannot see Mail, Safari and Trash data. Turn on Full Disk Access for CleanCraft to include them.",
                             )
+                            .font(font(12.5, Weight::Regular))
                             .color(t.text),
                         );
                         if kit::secondary(ui, &t, "Open Privacy Settings") {
@@ -320,19 +412,34 @@ impl CleanApp {
             ui.add_space(8.0);
         }
         if let Some((msg, err)) = self.notice.clone() {
-            let color = if err { t.danger } else { t.accent };
+            let color = if err { t.danger } else { t.success };
             egui::Frame::new()
-                .fill(color.gamma_multiply(0.15))
-                .corner_radius(CornerRadius::same(10))
-                .inner_margin(egui::Margin::same(10))
+                .fill(icons::lerp(Color32::from_rgb(0x1A, 0x1F, 0x29), color, 0.14))
+                .stroke(Stroke::new(1.0, color.gamma_multiply(0.4)))
+                .corner_radius(CornerRadius::same(theme::radius::M))
+                .inner_margin(egui::Margin::symmetric(12, 8))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(&msg).color(t.text));
+                        let (r, _) = ui.allocate_exact_size(egui::Vec2::splat(18.0), Sense::hover());
+                        icons::paint(
+                            ui.painter(),
+                            r,
+                            if err { Icon::Warning } else { Icon::Check },
+                            color,
+                        );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("Dismiss").clicked() {
+                            if kit::ghost(ui, &t, "Dismiss", None).clicked() {
                                 self.act();
                                 self.notice = None;
                             }
+                            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(&msg).font(font(12.5, Weight::Regular)).color(t.text),
+                                    )
+                                    .wrap(),
+                                );
+                            });
                         });
                     });
                 });
