@@ -119,7 +119,7 @@ fn charging_estimate_is_time_until_full() {
     h.get_by_label("Live Monitor").scroll_to_me();
     steps(&mut h);
     click(&mut h, "Live Monitor");
-    assert!(has(&h, "charging"));
+    assert!(has(&h, "Charging"), "pmset state in sentence case");
     assert!(has(&h, "1 h 30 min"));
     assert!(
         !has(&h, "Time left"),

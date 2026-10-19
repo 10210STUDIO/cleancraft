@@ -150,7 +150,7 @@ Neutral slate (History and Settings).
 
 ## Components (kit.rs)
 
-`pill` (Primary, Secondary, Danger, Ghost), `check`, `check_mixed`, `check_text`, `radio`,
+`pill` (Primary, Secondary, Danger, Ghost), `switch`, `check`, `check_mixed`, `check_text`, `radio`,
 `search_field`, `text_field`, `sort_menu`, `quiet_label`, `card`, `well`,
 `bar_frame`, `bottom_bar`, `dialog_frame`, `modal`, `dialog_head`, `strip`, `header`,
 `card_head`, `hero`, `round_action`, `chips`, `progress`, `progress_ring`, `done_check`,
@@ -158,12 +158,50 @@ Neutral slate (History and Settings).
 `bar`, `gauge`, `sparkline`, `badge`, `icon_tile`, `app_icon`, `initial_tile`, `confirm_line`,
 `text_at`, `place`.
 
+### Added in round 3
+
+- `switch`: a 38 x 22 pt macOS switch (green when on) for states that are on or off
+  (Startup Items). Its accessible name is the action a click takes ("Turn Off Dropbox"). It
+  replaces the old "On" tag plus "Turn Off" button pair.
+- `modal` returns a `Dialog`: it fades in with its scrim and rises 8 pt (`motion::tr::OVERLAY`,
+  0.2 s; instant with Reduce motion), has a close button (X, 28 pt hit area, "Close dialog")
+  at its top right, and `should_close()` is true after the X or Esc (both mean Cancel). A
+  click on the scrim does nothing: the dialogs confirm moves.
+- `display_count`: the results total counts up from 0 over 0.6 s (`motion::tr::COUNT`);
+  VoiceOver hears the final figure from the first frame.
+- `appear`: rows of a results list and Quick Sweep tiles fade in 35 ms apart
+  (`motion::appear`).
+- `chips_with_state`: Quick Sweep's scanning screen lists every module as a chip that is done
+  (green check), scanning (spinning arc, accent border) or waiting (dimmed).
+- `progress_with`: the scanning screen with a known share done and extra content.
+- `scroll_fade` (lists in cards) and `scroll_fade_page` (lists on the backdrop): a 24 pt fade
+  at the bottom of a scroll area while more content is below, and at its top once scrolled.
+- `dither`: one or two levels of white noise (a 64 px tile, one texel per physical pixel) over
+  the backdrop, so its wide dark gradients do not band on Retina displays.
+- `theme::DANGER_A` / `DANGER_B` and `danger_label()`: the Danger pill's label is ink, at
+  least 4.5:1 on both ends of its gradient (white was 2.7:1).
+
 ## Layout
 
 - Supported window sizes: 1060 x 680 (minimum) to 1920 x 1200; default 1280 x 820, which
   fits a 14 inch MacBook Pro at its default scaling (1512 x 982) with room for the Dock.
 - Nothing overlaps, clips or scrolls sideways at any of those sizes (checked by
   `ux_render::no_page_uses_a_glyph_inter_cannot_draw_and_nothing_leaves_the_window`).
+- Every module page shows its header (badge, title, one line) in every phase: start screen,
+  scanning, results, Done. Clicking Scan never moves the title. The start screen under it is
+  the module's object, optional controls, the round action and one note; the title and
+  explanation are not repeated in it.
 - Start screens centre their block vertically (85% of the free space above, so the block
   sits slightly high), with the picture sized by what is left.
+- Done screens, Quick Sweep's included, are one centred composition: object with check badge,
+  headline, buttons, then any per-module cards.
+- The sidebar's top 28 pt are the title band: on macOS the traffic lights sit at its left
+  (transparent title bar), the logo and "CleanCraft" right of them. Group labels get 8 pt
+  above and 4 pt under them (22 pt at the 680 pt minimum, 26 to 30 in taller windows); rows
+  never go under 28 pt.
+- Results rows: line 1 is the name, the path (shortened in the middle) and the size; line 2
+  is the reason tag, which runs under the size to the row's end. A reason that repeats the
+  row's name drops it ("Trash of USB: 1 item" on the row "Trash of USB" reads "1 item").
+  Locked rows show a padlock instead of the checkbox; why they are locked follows the tag
+  when it fits whole, and is always in the tooltip.
 - Grids (Quick Sweep tiles) share the page height between rows so they fill the page.

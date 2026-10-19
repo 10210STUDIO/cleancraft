@@ -73,6 +73,13 @@ pub struct CleanApp {
     row_h: f32,
 }
 
+/// The window's top band where macOS draws the traffic lights (transparent title bar).
+const TITLE_BAND: f32 = 28.0;
+/// Width the traffic lights take from the window's left edge.
+const LIGHTS_WIDTH: f32 = 76.0;
+/// The traffic lights are drawn over the sidebar (macOS with the transparent title bar).
+const TRAFFIC_LIGHTS: bool = cfg!(target_os = "macos");
+
 impl CleanApp {
     pub fn new(env: Env) -> CleanApp {
         let (settings, settings_warning) = Settings::load_checked(&env);
@@ -210,7 +217,14 @@ impl CleanApp {
             .frame(
                 egui::Frame::new()
                     .fill(t.sidebar)
-                    .inner_margin(egui::Margin::symmetric(space::SIDEBAR_X, space::SIDEBAR_Y)),
+                    // No top margin: the sidebar's first 28 pt are the title band (traffic
+                    // lights and the logo), see sidebar().
+                    .inner_margin(egui::Margin {
+                        left: space::SIDEBAR_X,
+                        right: space::SIDEBAR_X,
+                        top: 0,
+                        bottom: 8,
+                    }),
             )
             .show(ui, |ui| self.sidebar(ui));
         // Page change: fade in with a short slide up.
@@ -259,34 +273,56 @@ impl CleanApp {
             side.y_range(),
             Stroke::new(1.0, Color32::from_white_alpha(10)),
         );
-        ui.horizontal(|ui| {
-            ui.add_space(4.0);
-            let (r, _) = ui.allocate_exact_size(egui::Vec2::splat(32.0), Sense::hover());
-            let (a, b) = Section::Overview.colors();
-            icons::gradient_tile(ui.painter(), r, 9.0, a, b);
-            icons::paint(ui.painter(), r.shrink(5.5), Icon::Logo, theme::on_color(a));
-            ui.add_space(4.0);
-            ui.label(
-                RichText::new("CleanCraft")
-                    .font(font(size::TITLE2, Weight::Bold))
-                    .color(t.text),
-            );
-        });
+        // The title band: the window's top 28 pt, where macOS draws the traffic lights over
+        // the sidebar (transparent title bar). The logo and the name sit in it, right of the
+        // lights, so the whole height below is the list (17 rows and 6 group labels fit a
+        // 680 pt window with air above each label).
+        let band_w = ui.available_width();
+        let (band, _) = ui.allocate_exact_size(vec2(band_w, TITLE_BAND), Sense::hover());
+        let lights = if TRAFFIC_LIGHTS { LIGHTS_WIDTH } else { 0.0 };
+        let logo = egui::Rect::from_center_size(
+            egui::pos2(
+                band.left() + 4.0 + (lights - space::SIDEBAR_X as f32).max(0.0) + 11.0,
+                band.center().y,
+            ),
+            egui::Vec2::splat(22.0),
+        );
+        let (a, b) = Section::Overview.colors();
+        icons::gradient_tile(ui.painter(), logo, 6.5, a, b);
+        icons::paint(
+            ui.painter(),
+            logo.shrink(4.0),
+            Icon::Logo,
+            theme::on_color(a),
+        );
+        ui.painter().text(
+            egui::pos2(logo.right() + 8.0, band.center().y),
+            egui::Align2::LEFT_CENTER,
+            "CleanCraft",
+            font(size::TITLE3, Weight::Bold),
+            t.text,
+        );
         ui.add_space(space::S);
         // Rows breathe in tall windows and tighten in short ones, so every entry fits a
         // 680 pt tall window without scrolling, and never gets under the 28 pt hit target.
         let headers = GROUPS.iter().filter(|g| !g.0.is_empty()).count() as f32;
         let rows = GROUPS.iter().map(|g| g.1.len()).sum::<usize>() as f32 + 2.0;
         let avail = ui.available_height();
-        let sep = 13.0;
-        // Spare height goes to rows up to 32, then to the group labels up to 28 (air above
-        // each label), then to rows up to 36.
-        let extra = (avail - headers * 18.0 - rows * hit::MIN - sep).max(0.0);
+        let sep = 9.0;
+        // A group label needs 26 pt: 8 above (so it reads with the group below it, not the
+        // row above), the 14 pt line, 4 under. Rows keep the 28 pt hit target; what is left
+        // in a 680 pt window comes off the labels' air first, then spare height goes to rows
+        // up to 32, then to the labels up to 30, then to rows up to 36.
+        let head_min = 22.0;
+        let head_want = 26.0;
+        let base = avail - rows * hit::MIN - sep;
+        let head_fit = (base / headers).clamp(head_min, head_want);
+        let extra = (base - headers * head_fit).max(0.0);
         let to_rows = extra.min(rows * 4.0);
-        let to_heads = (extra - to_rows).min(headers * 10.0);
+        let to_heads = (extra - to_rows).min(headers * 4.0);
         let to_rows2 = (extra - to_rows - to_heads).min(rows * (hit::NAV_MAX - 32.0));
         let row_h = (hit::MIN + (to_rows + to_rows2) / rows).floor();
-        let head_h = (18.0 + to_heads / headers).floor();
+        let head_h = (head_fit + to_heads / headers).floor();
         self.row_h = row_h;
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
@@ -308,9 +344,9 @@ impl CleanApp {
                                 },
                             ));
                         let gh = g.size().y;
-                        // More air above the label than under it, so it reads with the
-                        // group below.
-                        let y = r.top() + (r.height() - gh) * 0.62;
+                        // 4 pt under the label, the rest above: it reads with the group
+                        // below it.
+                        let y = r.bottom() - 4.0 - gh;
                         ui.painter()
                             .galley(egui::pos2(r.left() + 10.0, y), g, t.text_faint);
                     }
@@ -323,14 +359,14 @@ impl CleanApp {
                         }
                     }
                 }
-                ui.add_space(6.0);
+                ui.add_space(4.0);
                 let y = ui.cursor().min.y;
                 ui.painter().hline(
                     ui.max_rect().x_range(),
                     y,
                     Stroke::new(1.0, Color32::from_white_alpha(14)),
                 );
-                ui.add_space(6.0);
+                ui.add_space(4.0);
                 let neutral = Section::Neutral.colors().0;
                 if self.nav_row(
                     ui,

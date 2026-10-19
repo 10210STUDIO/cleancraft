@@ -300,7 +300,7 @@ fn scan_errors_read_as_plain_sentences() {
     );
     let (text, fda) = plan_page::friendly_error("the disk is busy (os error 16)");
     assert!(!fda);
-    assert_eq!(text, "The disk is busy.");
+    assert_eq!(text, "the disk is busy");
 
     let m = testkit_cleanup::junk_mac();
     base(&m);

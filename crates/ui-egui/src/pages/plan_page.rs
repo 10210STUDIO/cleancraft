@@ -1436,12 +1436,13 @@ pub fn friendly_error(e: &str) -> (String, bool) {
         };
         return (text, true);
     }
-    // Drop the OS error number, keep the words.
+    // Drop the OS error number.
     let mut text = e.to_string();
     if let Some(i) = text.find(" (os error") {
         text.truncate(i);
     }
-    (sentence(&text), false)
+    // Otherwise the words stay as written (they are already sentences from the modules).
+    (text, false)
 }
 
 /// "1 item" stays, "items found" becomes "Items found": the rest of a reason after its
