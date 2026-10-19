@@ -187,7 +187,13 @@ fn big(app: &CleanApp, ui: &mut Ui, text: &str) {
 fn gauge_big(app: &CleanApp, ui: &mut Ui, frac: f32, color: Color32, text: &str) {
     ui.horizontal(|ui| {
         let (r, _) = ui.allocate_exact_size(vec2(64.0, 40.0), Sense::hover());
-        kit::gauge(ui.painter(), r.center_bottom() - vec2(0.0, 4.0), 27.0, frac, color);
+        kit::gauge(
+            ui.painter(),
+            r.center_bottom() - vec2(0.0, 4.0),
+            27.0,
+            frac,
+            color,
+        );
         ui.vertical(|ui| {
             ui.add_space(4.0);
             big(app, ui, text);
@@ -234,9 +240,7 @@ fn level_color(app: &CleanApp, frac: f32) -> Color32 {
 }
 
 fn cpu_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
-    let t = app.t;
     let history = app.monitor.history.clone();
-    let _ = t;
     card(app, ui, Icon::Monitor, "CPU", |ui| match &s.cpu {
         Some(c) => {
             let frac = (c.load / 100.0) as f32;
@@ -372,7 +376,11 @@ fn battery_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
     card(app, ui, Icon::Startup, "BATTERY", |ui| match &s.battery {
         Some(BatteryReading::Present(b)) => {
             let frac = b.percent as f32 / 100.0;
-            let color = if frac < 0.2 { app.t.danger } else { app.t.success };
+            let color = if frac < 0.2 {
+                app.t.danger
+            } else {
+                app.t.success
+            };
             gauge_big(app, ui, frac, color, &format!("{}%", b.percent));
             row(app, ui, "State", &b.state);
             row(

@@ -213,96 +213,96 @@ fn task_card(app: &mut CleanApp, ui: &mut Ui, info: &tasks::TaskInfo) {
             ui.add_space(26.0);
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 4.0;
-        ui.label(RichText::new(info.description).color(t.text_dim));
-        let command = match &ready {
-            Some(Ok(p)) => p.commands().join("\n"),
-            _ => info.command.to_string(),
-        };
-        kit::well(&t)
-            .inner_margin(egui::Margin::symmetric(10, 6))
-            .show(ui, |ui| {
-                ui.label(
-                    RichText::new(format!("Command: {command}"))
-                        .monospace()
-                        .size(11.5)
-                        .color(t.text_faint),
-                );
-            });
-        if let Some(Err(why)) = &ready {
-            ui.label(RichText::new(why).color(t.warning));
-        }
-        match app.tasks.last.get(info.id) {
-            Some((ts, ok)) => kit::dim(
-                ui,
-                &t,
-                &format!(
-                    "Last run {} ({})",
-                    tasks::local_time(*ts),
-                    if *ok { "done" } else { "failed" }
-                ),
-            ),
-            None => kit::dim(ui, &t, "Never run by CleanCraft"),
-        }
-        // Same rule as Quick Sweep's tune-up count.
-        if let Some(why) = tasks::suggestion(
-            info.id,
-            &app.tasks.last,
-            matches!(ready, Some(Ok(_))),
-            chrono::Utc::now().timestamp(),
-        ) {
-            ui.label(
-                RichText::new(why)
-                    .font(font(11.5, Weight::Medium))
-                    .color(t.sec_a),
-            );
-        }
-        if let Some(r) = app.tasks.results.get(info.id).cloned() {
-            let color = match r.outcome {
-                Outcome::Done => t.success,
-                Outcome::Failed => t.danger,
-                Outcome::Cancelled => t.warning,
-            };
-            ui.label(
-                RichText::new(&r.message)
-                    .font(font(13.0, Weight::SemiBold))
-                    .color(color),
-            );
-            if let (Some(b), Some(a)) = (r.free_before, r.free_after) {
-                ui.label(format!(
-                    "Free space before {}, after {}",
-                    human_size(b),
-                    human_size(a)
-                ));
-            }
-            if let (Some(b), Some(a)) = (r.file_before, r.file_after) {
-                ui.label(format!(
-                    "Mail index before {}, after {}",
-                    human_size(b),
-                    human_size(a)
-                ));
-            }
-            if !r.output.is_empty() {
-                let open = app.tasks.show_log.contains(info.id);
-                let label = if open {
-                    format!("Hide log of {}", info.title)
-                } else {
-                    format!("Show log of {}", info.title)
+                ui.label(RichText::new(info.description).color(t.text_dim));
+                let command = match &ready {
+                    Some(Ok(p)) => p.commands().join("\n"),
+                    _ => info.command.to_string(),
                 };
-                if kit::ghost(ui, &t, &label, None).clicked() {
-                    app.act();
-                    if open {
-                        app.tasks.show_log.remove(info.id);
-                    } else {
-                        app.tasks.show_log.insert(info.id.to_string());
+                kit::well(&t)
+                    .inner_margin(egui::Margin::symmetric(10, 6))
+                    .show(ui, |ui| {
+                        ui.label(
+                            RichText::new(format!("Command: {command}"))
+                                .monospace()
+                                .size(11.5)
+                                .color(t.text_faint),
+                        );
+                    });
+                if let Some(Err(why)) = &ready {
+                    ui.label(RichText::new(why).color(t.warning));
+                }
+                match app.tasks.last.get(info.id) {
+                    Some((ts, ok)) => kit::dim(
+                        ui,
+                        &t,
+                        &format!(
+                            "Last run {} ({})",
+                            tasks::local_time(*ts),
+                            if *ok { "done" } else { "failed" }
+                        ),
+                    ),
+                    None => kit::dim(ui, &t, "Never run by CleanCraft"),
+                }
+                // Same rule as Quick Sweep's tune-up count.
+                if let Some(why) = tasks::suggestion(
+                    info.id,
+                    &app.tasks.last,
+                    matches!(ready, Some(Ok(_))),
+                    chrono::Utc::now().timestamp(),
+                ) {
+                    ui.label(
+                        RichText::new(why)
+                            .font(font(11.5, Weight::Medium))
+                            .color(t.sec_a),
+                    );
+                }
+                if let Some(r) = app.tasks.results.get(info.id).cloned() {
+                    let color = match r.outcome {
+                        Outcome::Done => t.success,
+                        Outcome::Failed => t.danger,
+                        Outcome::Cancelled => t.warning,
+                    };
+                    ui.label(
+                        RichText::new(&r.message)
+                            .font(font(13.0, Weight::SemiBold))
+                            .color(color),
+                    );
+                    if let (Some(b), Some(a)) = (r.free_before, r.free_after) {
+                        ui.label(format!(
+                            "Free space before {}, after {}",
+                            human_size(b),
+                            human_size(a)
+                        ));
+                    }
+                    if let (Some(b), Some(a)) = (r.file_before, r.file_after) {
+                        ui.label(format!(
+                            "Mail index before {}, after {}",
+                            human_size(b),
+                            human_size(a)
+                        ));
+                    }
+                    if !r.output.is_empty() {
+                        let open = app.tasks.show_log.contains(info.id);
+                        let label = if open {
+                            format!("Hide log of {}", info.title)
+                        } else {
+                            format!("Show log of {}", info.title)
+                        };
+                        if kit::ghost(ui, &t, &label, None).clicked() {
+                            app.act();
+                            if open {
+                                app.tasks.show_log.remove(info.id);
+                            } else {
+                                app.tasks.show_log.insert(info.id.to_string());
+                            }
+                        }
+                        if open {
+                            kit::well(&t).show(ui, |ui| {
+                                ui.label(RichText::new(&r.output).monospace().size(11.5));
+                            });
+                        }
                     }
                 }
-                if open {
-                    kit::well(&t).show(ui, |ui| {
-                        ui.label(RichText::new(&r.output).monospace().size(11.5));
-                    });
-                }
-            }
-        }
             });
         });
     });

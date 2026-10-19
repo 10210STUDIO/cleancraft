@@ -155,7 +155,15 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         Phase::Running(j) => {
             let s = j.status();
             let secs = j.elapsed_secs();
-            kit::progress(ui, &t, Icon::Trash, "Cleaning", &format!("Cleaning {s}"), secs, false);
+            kit::progress(
+                ui,
+                &t,
+                Icon::Trash,
+                "Cleaning",
+                &format!("Cleaning {s}"),
+                secs,
+                false,
+            );
         }
         Phase::Done(_) => done(app, ui),
     }
@@ -320,10 +328,7 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile, w: f32) {
         );
     });
     // Controls on the bottom edge.
-    let controls = Rect::from_min_max(
-        pos2(inner.left(), inner.bottom() - 32.0),
-        inner.max,
-    );
+    let controls = Rect::from_min_max(pos2(inner.left(), inner.bottom() - 32.0), inner.max);
     kit::place_with(
         ui,
         controls,
@@ -474,7 +479,11 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
     let started = kit::first_seen(ui, ("sweep-done", key));
     let mut undo: Option<(FeatureId, String)> = None;
     ui.vertical_centered(|ui| {
-        let d = if ui.available_height() < 480.0 { 72.0 } else { 96.0 };
+        let d = if ui.available_height() < 480.0 {
+            72.0
+        } else {
+            96.0
+        };
         kit::done_check(ui, &t, d, started);
         ui.add_space(space::S);
         ui.label(
@@ -491,7 +500,15 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
         }
         ui.add_space(space::M);
         kit::centered_row(ui, egui::Id::new("sweep-done-buttons"), |ui| {
-            if kit::pill(ui, &t, "Show History", kit::Kind::Secondary, Some(Icon::History)).clicked() {
+            if kit::pill(
+                ui,
+                &t,
+                "Show History",
+                kit::Kind::Secondary,
+                Some(Icon::History),
+            )
+            .clicked()
+            {
                 app.act();
                 app.navigate("history");
             }

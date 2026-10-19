@@ -202,9 +202,7 @@ fn split_row(ui: &mut Ui, left: impl FnOnce(&mut Ui), right: impl FnOnce(&mut Ui
 }
 
 fn short(ui: &mut Ui, text: &str, size: f32, w: Weight, color: egui::Color32) {
-    ui.add(
-        egui::Label::new(RichText::new(text).font(font(size, w)).color(color)).truncate(),
-    );
+    ui.add(egui::Label::new(RichText::new(text).font(font(size, w)).color(color)).truncate());
 }
 
 pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
@@ -307,8 +305,16 @@ fn login_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot) {
                         split_row(
                             ui,
                             |ui| {
-                                let (r, _) = ui.allocate_exact_size(egui::vec2(28.0, 28.0), egui::Sense::hover());
-                                kit::initial_tile(ui.painter(), r, &it.name, kit::name_color(&it.name));
+                                let (r, _) = ui.allocate_exact_size(
+                                    egui::vec2(28.0, 28.0),
+                                    egui::Sense::hover(),
+                                );
+                                kit::initial_tile(
+                                    ui.painter(),
+                                    r,
+                                    &it.name,
+                                    kit::name_color(&it.name),
+                                );
                                 short(ui, &it.name, 13.5, Weight::SemiBold, t.text);
                                 short(
                                     ui,
@@ -334,10 +340,24 @@ fn login_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot) {
                         split_row(
                             ui,
                             |ui| {
-                                let (r, _) = ui.allocate_exact_size(egui::vec2(28.0, 28.0), egui::Sense::hover());
-                                kit::initial_tile(ui.painter(), r, &it.name, egui::Color32::from_gray(90));
+                                let (r, _) = ui.allocate_exact_size(
+                                    egui::vec2(28.0, 28.0),
+                                    egui::Sense::hover(),
+                                );
+                                kit::initial_tile(
+                                    ui.painter(),
+                                    r,
+                                    &it.name,
+                                    egui::Color32::from_gray(90),
+                                );
                                 short(ui, &it.name, 13.5, Weight::SemiBold, t.text_dim);
-                                short(ui, it.path.as_deref().unwrap_or(""), 11.5, Weight::Regular, t.text_faint);
+                                short(
+                                    ui,
+                                    it.path.as_deref().unwrap_or(""),
+                                    11.5,
+                                    Weight::Regular,
+                                    t.text_faint,
+                                );
                             },
                             |ui| {
                                 if row_button(ui, "Turn On", format!("Turn On {}", it.name)) {
@@ -374,7 +394,13 @@ fn launch_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot, d: Domain) {
                             ui.spacing_mut().item_spacing.y = 2.0;
                             short(ui, &it.label, 13.5, Weight::SemiBold, t.text);
                             let prog = it.program.as_deref().unwrap_or("no program named");
-                            short(ui, &format!("Runs {prog}"), 11.5, Weight::Regular, t.text_faint);
+                            short(
+                                ui,
+                                &format!("Runs {prog}"),
+                                11.5,
+                                Weight::Regular,
+                                t.text_faint,
+                            );
                             let (sig, col) = if !it.program_exists && it.program.is_some() {
                                 (
                                     "Program missing: this item does nothing".to_string(),
@@ -479,13 +505,24 @@ fn heavy_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot) {
                         split_row(
                             ui,
                             |ui| {
-                                let (r, _) = ui.allocate_exact_size(egui::vec2(26.0, 26.0), egui::Sense::hover());
-                                kit::initial_tile(ui.painter(), r, &p.name, kit::name_color(&p.name));
+                                let (r, _) = ui.allocate_exact_size(
+                                    egui::vec2(26.0, 26.0),
+                                    egui::Sense::hover(),
+                                );
+                                kit::initial_tile(
+                                    ui.painter(),
+                                    r,
+                                    &p.name,
+                                    kit::name_color(&p.name),
+                                );
                                 short(ui, &p.name, 13.5, Weight::SemiBold, t.text);
                                 ui.label(
-                                    RichText::new(format!("CPU {:.1}%  Memory {:.1}%", p.cpu, p.mem))
-                                        .font(font(12.0, Weight::Medium))
-                                        .color(t.warning),
+                                    RichText::new(format!(
+                                        "CPU {:.1}%  Memory {:.1}%",
+                                        p.cpu, p.mem
+                                    ))
+                                    .font(font(12.0, Weight::Medium))
+                                    .color(t.warning),
                                 );
                                 kit::dim(ui, &t, &format!("pid {}", p.pid));
                             },

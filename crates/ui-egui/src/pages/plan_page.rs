@@ -403,10 +403,7 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), avail_h));
     let left_w = if body.width() < 760.0 { 220.0 } else { 252.0 };
     let left = egui::Rect::from_min_size(body.min, egui::vec2(left_w, avail_h));
-    let right = egui::Rect::from_min_max(
-        egui::pos2(left.right() + space::M, body.top()),
-        body.max,
-    );
+    let right = egui::Rect::from_min_max(egui::pos2(left.right() + space::M, body.top()), body.max);
     ui.allocate_rect(body, egui::Sense::hover());
     // Categories.
     ui.scope_builder(egui::UiBuilder::new().max_rect(left), |ui| {
@@ -437,9 +434,7 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                     .desired_width(200.0)
                     .margin(egui::Margin::symmetric(10, 7)),
             );
-            r.widget_info(|| {
-                egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Search")
-            });
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Search"));
             if r.changed() {
                 app.act();
             }
@@ -564,11 +559,7 @@ fn categories(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan) {
             size as f32 / total as f32,
             color,
             current,
-            Some((
-                !sel_items.is_empty(),
-                all_on,
-                format!("Select {}", c.title),
-            )),
+            Some((!sel_items.is_empty(), all_on, format!("Select {}", c.title))),
         );
         r.row.on_hover_text(&c.description);
         if let Some(on) = r.check_changed {
@@ -610,7 +601,12 @@ pub fn category_row(
     resp.widget_info(|| {
         egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, current, label)
     });
-    let hov = kit::anim(ui.ctx(), resp.id.with("hov"), resp.hovered(), crate::theme::motion::HOVER);
+    let hov = kit::anim(
+        ui.ctx(),
+        resp.id.with("hov"),
+        resp.hovered(),
+        crate::theme::motion::HOVER,
+    );
     let p = ui.painter().clone();
     if current {
         p.rect_filled(r, 12.0, color.gamma_multiply(0.16));
@@ -643,7 +639,10 @@ pub fn category_row(
     let size_g = kit::galley(ui, size_text, font(13.0, Weight::SemiBold), t.text);
     let size_w = size_g.size().x;
     p.galley(
-        pos2(r.right() - 10.0 - size_w, r.top() + 16.0 - size_g.size().y / 2.0),
+        pos2(
+            r.right() - 10.0 - size_w,
+            r.top() + 16.0 - size_g.size().y / 2.0,
+        ),
         size_g,
         t.text,
     );
@@ -654,7 +653,11 @@ pub fn category_row(
         egui::Align2::LEFT_CENTER,
         title_s,
         font(13.0, Weight::SemiBold),
-        if current { t.text } else { icons::lerp(t.text_dim, t.text, 0.5 + 0.5 * hov) },
+        if current {
+            t.text
+        } else {
+            icons::lerp(t.text_dim, t.text, 0.5 + 0.5 * hov)
+        },
     );
     p.text(
         pos2(x, r.top() + 33.0),
@@ -786,13 +789,23 @@ fn group_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, g: &str) {
     };
     let w = ui.available_width();
     let (r, _) = ui.allocate_exact_size(vec2(w, ROW_H), Sense::hover());
-    let line = Rect::from_min_max(pos2(r.left() + 6.0, r.bottom() - 10.0), pos2(r.right() - 6.0, r.bottom() - 9.0));
-    ui.painter().rect_filled(line, 0.0, t.sec_a.gamma_multiply(0.25));
-    let ir = Rect::from_center_size(pos2(r.left() + 18.0, r.center().y + 2.0), egui::Vec2::splat(16.0));
+    let line = Rect::from_min_max(
+        pos2(r.left() + 6.0, r.bottom() - 10.0),
+        pos2(r.right() - 6.0, r.bottom() - 9.0),
+    );
+    ui.painter()
+        .rect_filled(line, 0.0, t.sec_a.gamma_multiply(0.25));
+    let ir = Rect::from_center_size(
+        pos2(r.left() + 18.0, r.center().y + 2.0),
+        egui::Vec2::splat(16.0),
+    );
     icons::paint(ui.painter(), ir, Icon::Duplicates, t.sec_a);
     kit::text_at(
         ui,
-        Rect::from_min_max(pos2(r.left() + 34.0, r.top() + 8.0), pos2(r.right() - 8.0, r.bottom() - 10.0)),
+        Rect::from_min_max(
+            pos2(r.left() + 34.0, r.top() + 8.0),
+            pos2(r.right() - 8.0, r.bottom() - 10.0),
+        ),
         &text,
         &text,
         font(12.5, Weight::SemiBold),
@@ -859,50 +872,53 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
     let tile = Rect::from_center_size(pos2(r.left() + 50.0, r.center().y), vec2(32.0, 32.0));
     p.rect_filled(tile, 9.0, Color32::from_white_alpha(12));
     let kind = kit::kind_icon(&it.path);
-    icons::paint(&p, tile.shrink(7.0), kind, icons::lerp(t.sec_a, t.text, 0.25));
+    icons::paint(
+        &p,
+        tile.shrink(7.0),
+        kind,
+        icons::lerp(t.sec_a, t.text, 0.25),
+    );
     // Actions and size on the right.
     let right_w = 190.0;
-    let actions = Rect::from_min_max(pos2(r.right() - right_w, r.top()), pos2(r.right() - 6.0, r.bottom()));
-    kit::place_with(
-        ui,
-        actions,
-        Layout::right_to_left(Align::Center),
-        |ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            let ig = kit::ghost(ui, &t, "Ignore", None)
-                .on_hover_text("Never propose this again (Settings > Ignore list)");
-            if ig.clicked() {
-                app.act();
-                app.settings.ignore.push(it.path.clone());
-                app.save_settings();
-                if let Some(p) = app.plan_state(f).plan.as_mut() {
-                    p.set_selected(id, false);
-                    p.items[id].locked = Some("on your ignore list".into());
-                }
-            }
-            // Only files and folders on disk can be shown in Finder (Wi-Fi networks and
-            // permissions are listed under a label, not a file).
-            if std::fs::symlink_metadata(&it.path).is_ok()
-                && kit::ghost(ui, &t, "Reveal", None)
-                    .on_hover_text("Show in Finder")
-                    .clicked()
-            {
-                app.act();
-                let path = it.path.to_string_lossy().into_owned();
-                match app.env.sys.run("/usr/bin/open", &["-R", &path]) {
-                    Ok(out) if out.ok() => {}
-                    Ok(out) => app.warn(format!("Could not open Finder: {}", out.stderr.trim())),
-                    Err(e) => app.warn(format!("Could not open Finder: {e}")),
-                }
-            }
-            ui.add_space(6.0);
-            ui.label(
-                RichText::new(human_size(it.size))
-                    .font(font(13.5, Weight::SemiBold))
-                    .color(if locked { t.text_faint } else { t.text }),
-            );
-        },
+    let actions = Rect::from_min_max(
+        pos2(r.right() - right_w, r.top()),
+        pos2(r.right() - 6.0, r.bottom()),
     );
+    kit::place_with(ui, actions, Layout::right_to_left(Align::Center), |ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        let ig = kit::ghost(ui, &t, "Ignore", None)
+            .on_hover_text("Never propose this again (Settings > Ignore list)");
+        if ig.clicked() {
+            app.act();
+            app.settings.ignore.push(it.path.clone());
+            app.save_settings();
+            if let Some(p) = app.plan_state(f).plan.as_mut() {
+                p.set_selected(id, false);
+                p.items[id].locked = Some("on your ignore list".into());
+            }
+        }
+        // Only files and folders on disk can be shown in Finder (Wi-Fi networks and
+        // permissions are listed under a label, not a file).
+        if std::fs::symlink_metadata(&it.path).is_ok()
+            && kit::ghost(ui, &t, "Reveal", None)
+                .on_hover_text("Show in Finder")
+                .clicked()
+        {
+            app.act();
+            let path = it.path.to_string_lossy().into_owned();
+            match app.env.sys.run("/usr/bin/open", &["-R", &path]) {
+                Ok(out) if out.ok() => {}
+                Ok(out) => app.warn(format!("Could not open Finder: {}", out.stderr.trim())),
+                Err(e) => app.warn(format!("Could not open Finder: {e}")),
+            }
+        }
+        ui.add_space(6.0);
+        ui.label(
+            RichText::new(human_size(it.size))
+                .font(font(13.5, Weight::SemiBold))
+                .color(if locked { t.text_faint } else { t.text }),
+        );
+    });
     // Name, then the reason as a tag and the dimmed path.
     let x0 = r.left() + 76.0;
     let text_w = (r.right() - right_w - 8.0 - x0).max(60.0);
@@ -935,7 +951,10 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
     let path_s = kit::truncate_middle(ui.ctx(), &shown, &pf, path_w);
     kit::text_at(
         ui,
-        Rect::from_min_size(pos2(path_x, r.top() + 28.0), vec2(path_w, tag_r.height() + 2.0)),
+        Rect::from_min_size(
+            pos2(path_x, r.top() + 28.0),
+            vec2(path_w, tag_r.height() + 2.0),
+        ),
         &path_s,
         &shown,
         pf,
@@ -1100,7 +1119,11 @@ pub fn done_view(
     let started = kit::first_seen(ui, ("done", &rep.plan_id));
     let id = egui::Id::new(("done-block", &rep.plan_id));
     kit::centered_block(ui, id, |ui| {
-        let d = if ui.available_height() < 420.0 { 84.0 } else { 116.0 };
+        let d = if ui.available_height() < 420.0 {
+            84.0
+        } else {
+            116.0
+        };
         kit::done_check(ui, &t, d, started);
         ui.add_space(space::M);
         ui.label(
@@ -1149,7 +1172,15 @@ fn done(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             }
             start_scan(app, f);
         }
-        if kit::pill(ui, &t, "Show History", kit::Kind::Secondary, Some(Icon::History)).clicked() {
+        if kit::pill(
+            ui,
+            &t,
+            "Show History",
+            kit::Kind::Secondary,
+            Some(Icon::History),
+        )
+        .clicked()
+        {
             app.act();
             app.navigate("history");
         }

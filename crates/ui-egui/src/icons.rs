@@ -172,12 +172,8 @@ impl Pen<'_> {
     /// Rounded rectangle outline.
     fn rrect(&self, x: f32, y: f32, w: f32, h: f32, rad: f32) {
         let r = Rect::from_min_max(self.pt(x, y), self.pt(x + w, y + h));
-        self.p.rect_stroke(
-            r,
-            self.u(rad),
-            self.stroke(),
-            egui::StrokeKind::Middle,
-        );
+        self.p
+            .rect_stroke(r, self.u(rad), self.stroke(), egui::StrokeKind::Middle);
     }
 
     fn rrect_fill(&self, x: f32, y: f32, w: f32, h: f32, rad: f32) {
@@ -259,12 +255,7 @@ fn gear_points(pen: &Pen<'_>, cx: f32, cy: f32, outer: f32, inner: f32, teeth: u
     for i in 0..teeth {
         let a = i as f32 * step;
         // Each tooth: flat top between two shoulders.
-        for (da, r) in [
-            (-0.30, inner),
-            (-0.17, outer),
-            (0.17, outer),
-            (0.30, inner),
-        ] {
+        for (da, r) in [(-0.30, inner), (-0.17, outer), (0.17, outer), (0.30, inner)] {
             let ang = a + da * step * 1.6;
             v.push(pen.pt(cx + r * ang.cos(), cy + r * ang.sin()));
         }
@@ -317,14 +308,26 @@ fn draw(pen: &Pen<'_>, icon: Icon) {
             pen.line(&[(12.5, 13.0), (12.5, 14.8), (14.0, 15.8)]);
         }
         Icon::Duplicates => {
-            pen.line(&[(8.5, 6.5), (8.5, 3.0), (20.5, 3.0), (20.5, 16.5), (16.5, 16.5)]);
+            pen.line(&[
+                (8.5, 6.5),
+                (8.5, 3.0),
+                (20.5, 3.0),
+                (20.5, 16.5),
+                (16.5, 16.5),
+            ]);
             pen.rrect(3.5, 7.0, 12.5, 14.0, 2.0);
             pen.line(&[(6.8, 11.5), (12.7, 11.5)]);
             pen.line(&[(6.8, 15.0), (11.0, 15.0)]);
         }
         Icon::Similar | Icon::Picture => {
             pen.rrect(3.0, 5.0, 18.0, 14.5, 2.5);
-            pen.line(&[(3.8, 17.2), (9.0, 11.8), (13.0, 15.5), (15.5, 13.0), (20.2, 17.2)]);
+            pen.line(&[
+                (3.8, 17.2),
+                (9.0, 11.8),
+                (13.0, 15.5),
+                (15.5, 13.0),
+                (20.2, 17.2),
+            ]);
             pen.circle(15.8, 9.3, 1.6);
             if icon == Icon::Similar {
                 pen.line(&[(6.0, 2.6), (20.5, 2.6)]);
@@ -451,7 +454,13 @@ fn draw(pen: &Pen<'_>, icon: Icon) {
             pen.poly(v, false);
         }
         Icon::Reveal => {
-            pen.line(&[(11.0, 5.5), (4.5, 5.5), (4.5, 19.5), (18.5, 19.5), (18.5, 13.0)]);
+            pen.line(&[
+                (11.0, 5.5),
+                (4.5, 5.5),
+                (4.5, 19.5),
+                (18.5, 19.5),
+                (18.5, 13.0),
+            ]);
             pen.line(&[(11.5, 12.5), (19.5, 4.5)]);
             pen.line(&[(14.0, 4.5), (19.5, 4.5), (19.5, 10.0)]);
         }
@@ -616,7 +625,15 @@ pub fn lerp(a: Color32, b: Color32, t: f32) -> Color32 {
 
 /// A module's start-screen picture: a glowing orb in the section colours, two thin orbit
 /// rings, drifting sparkles and the module's icon in white. `time` drives the drift.
-pub fn illustration(p: &Painter, center: Pos2, side: f32, icon: Icon, a: Color32, b: Color32, time: f64) {
+pub fn illustration(
+    p: &Painter,
+    center: Pos2,
+    side: f32,
+    icon: Icon,
+    a: Color32,
+    b: Color32,
+    time: f64,
+) {
     let r = side / 2.0;
     glow(p, center, r * 1.25, a.gamma_multiply(0.28), 1.0);
     // Orbit rings.
@@ -646,15 +663,17 @@ pub fn illustration(p: &Painter, center: Pos2, side: f32, icon: Icon, a: Color32
         Color32::from_white_alpha(46),
         0.65,
     );
-    p.circle_stroke(
-        center,
-        orb,
-        Stroke::new(1.2, Color32::from_white_alpha(60)),
-    );
+    p.circle_stroke(center, orb, Stroke::new(1.2, Color32::from_white_alpha(60)));
     // The icon.
     let isz = orb * 1.0;
     let ir = Rect::from_center_size(center, Vec2::splat(isz));
-    paint_with(p, ir, icon, Color32::from_black_alpha(60), default_stroke(isz) * 1.05);
+    paint_with(
+        p,
+        ir,
+        icon,
+        Color32::from_black_alpha(60),
+        default_stroke(isz) * 1.05,
+    );
     let ir2 = ir.translate(vec2(0.0, -side * 0.006));
     paint_with(p, ir2, icon, Color32::WHITE, default_stroke(isz) * 0.95);
     // Satellites on the orbits.
@@ -681,7 +700,12 @@ pub fn illustration(p: &Painter, center: Pos2, side: f32, icon: Icon, a: Color32
         w: 1.0,
     };
     let breathe = |o: f32| {
-        0.55 + 0.45 * motion::ease_in_out(((motion::looped(time, motion::DRIFT / 3.0) + o) * 2.0).fract().min(1.0))
+        0.55 + 0.45
+            * motion::ease_in_out(
+                ((motion::looped(time, motion::DRIFT / 3.0) + o) * 2.0)
+                    .fract()
+                    .min(1.0),
+            )
     };
     let s1 = Pen {
         c: Color32::from_white_alpha((200.0 * breathe(0.0)) as u8),

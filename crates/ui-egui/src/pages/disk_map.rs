@@ -438,7 +438,13 @@ fn idle(app: &mut CleanApp, ui: &mut Ui) {
                 let can = !app.disk_map.folder_text.trim().is_empty();
                 let clicked = ui
                     .add_enabled_ui(can, |ui| {
-                        kit::pill(ui, &t, "Map Folder", kit::Kind::Secondary, Some(Icon::Folder))
+                        kit::pill(
+                            ui,
+                            &t,
+                            "Map Folder",
+                            kit::Kind::Secondary,
+                            Some(Icon::Folder),
+                        )
                     })
                     .inner
                     .clicked();
@@ -610,7 +616,11 @@ fn map(app: &mut CleanApp, ui: &mut Ui) {
                 app.disk_map.selected.clear();
             }
             if n == 0 {
-                kit::dim(ui, &t, "Click a block to open it. Tick items in the list to remove them.");
+                kit::dim(
+                    ui,
+                    &t,
+                    "Click a block to open it. Tick items in the list to remove them.",
+                );
             }
         });
     });
@@ -719,7 +729,8 @@ fn treemap(app: &mut CleanApp, ui: &mut Ui, node: &Node, area: egui::Rect) {
                 Stroke::new(3.0, t.warning),
                 egui::StrokeKind::Inside,
             );
-            let cr = egui::Rect::from_min_size(rect.right_top() + vec2(-20.0, 4.0), vec2(16.0, 16.0));
+            let cr =
+                egui::Rect::from_min_size(rect.right_top() + vec2(-20.0, 4.0), vec2(16.0, 16.0));
             if rect.width() > 30.0 && rect.height() > 30.0 {
                 p.circle_filled(cr.center(), 8.0, t.warning);
                 icons::paint_with(p, cr.shrink(3.0), Icon::Check, Color32::BLACK, 1.8);
@@ -743,7 +754,11 @@ fn treemap(app: &mut CleanApp, ui: &mut Ui, node: &Node, area: egui::Rect) {
             );
             let pos = rect.left_top() + vec2(8.0, 7.0);
             let clip = p.with_clip_rect(rect.shrink(2.0));
-            clip.galley(pos + vec2(0.0, 1.0), galley.clone(), Color32::from_black_alpha(90));
+            clip.galley(
+                pos + vec2(0.0, 1.0),
+                galley.clone(),
+                Color32::from_black_alpha(90),
+            );
             clip.galley(pos, galley, Color32::WHITE);
         }
         let resp = match &target {
@@ -794,32 +809,59 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                         let locked = node_lock_reason(&app.env, c);
                         let w = ui.available_width();
                         let (r, row) = ui.allocate_exact_size(vec2(w, 44.0), Sense::hover());
-                        let hov = kit::anim(ui.ctx(), row.id.with("hov"), row.contains_pointer(), motion::HOVER);
+                        let hov = kit::anim(
+                            ui.ctx(),
+                            row.id.with("hov"),
+                            row.contains_pointer(),
+                            motion::HOVER,
+                        );
                         if hov > 0.0 {
-                            ui.painter().rect_filled(r.shrink(2.0), 9.0, Color32::from_white_alpha((9.0 * hov) as u8));
+                            ui.painter().rect_filled(
+                                r.shrink(2.0),
+                                9.0,
+                                Color32::from_white_alpha((9.0 * hov) as u8),
+                            );
                         }
                         let was = app.disk_map.selected.contains(&c.path);
                         let mut on = was;
                         let label = format!("Select {}", c.name);
-                        let cb_rect = egui::Rect::from_center_size(egui::pos2(r.left() + 16.0, r.center().y), vec2(20.0, 20.0));
+                        let cb_rect = egui::Rect::from_center_size(
+                            egui::pos2(r.left() + 16.0, r.center().y),
+                            vec2(20.0, 20.0),
+                        );
                         let cb = kit::place(ui, cb_rect, |ui| {
-                            ui.add_enabled_ui(locked.is_none(), |ui| kit::check(ui, &t, &mut on, &label))
-                                .inner
+                            ui.add_enabled_ui(locked.is_none(), |ui| {
+                                kit::check(ui, &t, &mut on, &label)
+                            })
+                            .inner
                         });
                         if cb.changed() {
                             toggle(app, &c.path, on);
                         }
                         // Colour dot matching the block.
                         let dot = egui::pos2(r.left() + 38.0, r.center().y);
-                        let color = if idx < MAX_BLOCKS { block_color(idx, c.is_dir) } else { Color32::from_rgb(0x44, 0x48, 0x50) };
-                        let ir = egui::Rect::from_center_size(dot + vec2(4.0, 0.0), vec2(16.0, 16.0));
-                        icons::paint(ui.painter(), ir, if c.is_dir { Icon::Folder } else { Icon::File }, color);
+                        let color = if idx < MAX_BLOCKS {
+                            block_color(idx, c.is_dir)
+                        } else {
+                            Color32::from_rgb(0x44, 0x48, 0x50)
+                        };
+                        let ir =
+                            egui::Rect::from_center_size(dot + vec2(4.0, 0.0), vec2(16.0, 16.0));
+                        icons::paint(
+                            ui.painter(),
+                            ir,
+                            if c.is_dir { Icon::Folder } else { Icon::File },
+                            color,
+                        );
                         let size_text = human_size(c.size);
                         let sf = font(13.0, Weight::SemiBold);
                         let size_w = kit::galley(ui, &size_text, sf.clone(), t.text).size().x;
                         kit::text_at(
                             ui,
-                            egui::Rect::from_min_max(egui::pos2(r.right() - size_w - 10.0, r.top()), egui::pos2(r.right() - 6.0, r.top() + 26.0)),
+                            egui::Rect::from_min_max(
+                                egui::pos2(r.right() - size_w - 10.0, r.top()),
+                                egui::pos2(r.right() - 6.0, r.top() + 26.0),
+                            ),
                             &size_text,
                             &size_text,
                             sf,
@@ -830,15 +872,28 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                         let name_w = (r.right() - size_w - 20.0 - x0).max(40.0);
                         let nf = font(13.0, Weight::Medium);
                         let name_s = kit::truncate_middle(ui.ctx(), &c.name, &nf, name_w);
-                        let name_rect = egui::Rect::from_min_size(egui::pos2(x0, r.top() + 4.0), vec2(name_w, 22.0));
+                        let name_rect = egui::Rect::from_min_size(
+                            egui::pos2(x0, r.top() + 4.0),
+                            vec2(name_w, 22.0),
+                        );
                         if c.is_dir {
                             let resp = ui.interact(name_rect, row.id.with("open"), Sense::click());
                             // A folder name opens it: a link, for VoiceOver and tests.
                             resp.widget_info(|| {
                                 egui::WidgetInfo::labeled(egui::WidgetType::Link, true, &c.name)
                             });
-                            let col = if resp.hovered() { icons::lerp(t.sec_a, Color32::WHITE, 0.3) } else { t.text };
-                            ui.painter().text(name_rect.left_center(), egui::Align2::LEFT_CENTER, &name_s, nf, col);
+                            let col = if resp.hovered() {
+                                icons::lerp(t.sec_a, Color32::WHITE, 0.3)
+                            } else {
+                                t.text
+                            };
+                            ui.painter().text(
+                                name_rect.left_center(),
+                                egui::Align2::LEFT_CENTER,
+                                &name_s,
+                                nf,
+                                col,
+                            );
                             let resp = resp.on_hover_text("Open this folder");
                             if resp.clicked() {
                                 open_folder(app, c.path.clone());
@@ -847,15 +902,27 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                             kit::text_at(ui, name_rect, &name_s, &c.name, nf, t.text, Align::Min);
                         }
                         // Share bar, or the reason it is locked.
-                        let line = egui::Rect::from_min_max(egui::pos2(x0, r.top() + 29.0), egui::pos2(r.right() - 10.0, r.top() + 40.0));
+                        let line = egui::Rect::from_min_max(
+                            egui::pos2(x0, r.top() + 29.0),
+                            egui::pos2(r.right() - 10.0, r.top() + 40.0),
+                        );
                         if let Some(why) = &locked {
                             let text = format!("locked: {why}");
                             let lf = font(10.5, Weight::Regular);
                             let s = kit::truncate_middle(ui.ctx(), &text, &lf, line.width());
                             kit::text_at(ui, line, &s, &text, lf, t.text_faint, Align::Min);
                         } else {
-                            let bar = egui::Rect::from_min_size(egui::pos2(line.left(), line.center().y - 2.0), vec2(line.width(), 4.0));
-                            kit::paint_bar(ui.painter(), bar, &t, c.size as f32 / total as f32, color);
+                            let bar = egui::Rect::from_min_size(
+                                egui::pos2(line.left(), line.center().y - 2.0),
+                                vec2(line.width(), 4.0),
+                            );
+                            kit::paint_bar(
+                                ui.painter(),
+                                bar,
+                                &t,
+                                c.size as f32 / total as f32,
+                                color,
+                            );
                         }
                     }
                 });
@@ -941,7 +1008,15 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
             app.act();
             start_undo(app, rep.clone());
         }
-        if kit::pill(ui, &t, "Show History", kit::Kind::Secondary, Some(Icon::History)).clicked() {
+        if kit::pill(
+            ui,
+            &t,
+            "Show History",
+            kit::Kind::Secondary,
+            Some(Icon::History),
+        )
+        .clicked()
+        {
             app.act();
             app.navigate("history");
         }

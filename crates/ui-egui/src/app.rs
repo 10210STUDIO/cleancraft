@@ -217,10 +217,10 @@ impl CleanApp {
             ui.ctx().request_repaint();
         }
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(
-                space::PAGE_X,
-                space::PAGE_Y,
-            )))
+            .frame(
+                egui::Frame::new()
+                    .inner_margin(egui::Margin::symmetric(space::PAGE_X, space::PAGE_Y)),
+            )
             .show(ui, |ui| {
                 self.banners(ui);
                 ui.multiply_opacity(0.25 + 0.75 * k);
@@ -305,7 +305,13 @@ impl CleanApp {
                 );
                 ui.add_space(7.0);
                 let neutral = Section::Neutral.colors().0;
-                if self.nav_row(ui, Icon::History, neutral, "History", self.page == Page::History) {
+                if self.nav_row(
+                    ui,
+                    Icon::History,
+                    neutral,
+                    "History",
+                    self.page == Page::History,
+                ) {
                     self.act();
                     self.navigate("history");
                 }
@@ -424,13 +430,18 @@ impl CleanApp {
         if let Some((msg, err)) = self.notice.clone() {
             let color = if err { t.danger } else { t.success };
             egui::Frame::new()
-                .fill(icons::lerp(Color32::from_rgb(0x1A, 0x1F, 0x29), color, 0.14))
+                .fill(icons::lerp(
+                    Color32::from_rgb(0x1A, 0x1F, 0x29),
+                    color,
+                    0.14,
+                ))
                 .stroke(Stroke::new(1.0, color.gamma_multiply(0.4)))
                 .corner_radius(CornerRadius::same(theme::radius::M))
                 .inner_margin(egui::Margin::symmetric(12, 8))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        let (r, _) = ui.allocate_exact_size(egui::Vec2::splat(18.0), Sense::hover());
+                        let (r, _) =
+                            ui.allocate_exact_size(egui::Vec2::splat(18.0), Sense::hover());
                         icons::paint(
                             ui.painter(),
                             r,
@@ -442,14 +453,19 @@ impl CleanApp {
                                 self.act();
                                 self.notice = None;
                             }
-                            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                                ui.add(
-                                    egui::Label::new(
-                                        RichText::new(&msg).font(font(12.5, Weight::Regular)).color(t.text),
-                                    )
-                                    .wrap(),
-                                );
-                            });
+                            ui.with_layout(
+                                egui::Layout::left_to_right(egui::Align::Center),
+                                |ui| {
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(&msg)
+                                                .font(font(12.5, Weight::Regular))
+                                                .color(t.text),
+                                        )
+                                        .wrap(),
+                                    );
+                                },
+                            );
                         });
                     });
                 });

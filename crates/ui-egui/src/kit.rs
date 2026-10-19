@@ -5,8 +5,8 @@
 use std::sync::Arc;
 
 use egui::{
-    Align2, Color32, CornerRadius, FontId, Frame, Galley, Margin, Pos2, Rect, Response,
-    RichText, Sense, Shape, Stroke, Ui, Vec2, WidgetInfo, WidgetType, pos2, vec2,
+    Align2, Color32, CornerRadius, FontId, Frame, Galley, Margin, Pos2, Rect, Response, RichText,
+    Sense, Shape, Stroke, Ui, Vec2, WidgetInfo, WidgetType, pos2, vec2,
 };
 
 use crate::icons::{self, Icon};
@@ -53,7 +53,12 @@ pub fn pill(ui: &mut Ui, t: &Tokens, label: &str, kind: Kind, icon: Option<Icon>
         return resp;
     }
     let ctx = ui.ctx().clone();
-    let hov = anim(&ctx, resp.id.with("hov"), resp.hovered() && enabled, motion::HOVER);
+    let hov = anim(
+        &ctx,
+        resp.id.with("hov"),
+        resp.hovered() && enabled,
+        motion::HOVER,
+    );
     let down = anim(
         &ctx,
         resp.id.with("down"),
@@ -89,8 +94,16 @@ pub fn pill(ui: &mut Ui, t: &Tokens, label: &str, kind: Kind, icon: Option<Icon>
             t.on_section()
         }
         Kind::Danger => {
-            let a = icons::lerp(Color32::from_rgb(0xFF, 0x76, 0x6E), Color32::WHITE, 0.1 * hov);
-            let b = icons::lerp(Color32::from_rgb(0xE0, 0x3E, 0x5A), Color32::WHITE, 0.1 * hov);
+            let a = icons::lerp(
+                Color32::from_rgb(0xFF, 0x76, 0x6E),
+                Color32::WHITE,
+                0.1 * hov,
+            );
+            let b = icons::lerp(
+                Color32::from_rgb(0xE0, 0x3E, 0x5A),
+                Color32::WHITE,
+                0.1 * hov,
+            );
             icons::gradient_tile(&p, r, round, a, b);
             top_sheen(&p, r, round);
             Color32::WHITE
@@ -101,13 +114,20 @@ pub fn pill(ui: &mut Ui, t: &Tokens, label: &str, kind: Kind, icon: Option<Icon>
             p.rect_stroke(
                 r,
                 round,
-                Stroke::new(1.0, icons::lerp(t.glass_edge, t.sec_a.gamma_multiply(0.7), hov)),
+                Stroke::new(
+                    1.0,
+                    icons::lerp(t.glass_edge, t.sec_a.gamma_multiply(0.7), hov),
+                ),
                 egui::StrokeKind::Inside,
             );
             t.text
         }
         Kind::Ghost => {
-            p.rect_filled(r, round, Color32::from_white_alpha((14.0 + 16.0 * hov) as u8));
+            p.rect_filled(
+                r,
+                round,
+                Color32::from_white_alpha((14.0 + 16.0 * hov) as u8),
+            );
             icons::lerp(t.text_dim, t.text, hov)
         }
     };
@@ -118,11 +138,9 @@ pub fn pill(ui: &mut Ui, t: &Tokens, label: &str, kind: Kind, icon: Option<Icon>
         icons::paint(&p, ir, ic, text_color);
         x += icon_w;
     }
-    let galley = ui.painter().layout_no_wrap(
-        label.to_string(),
-        font(fs * scale, weight),
-        text_color,
-    );
+    let galley =
+        ui.painter()
+            .layout_no_wrap(label.to_string(), font(fs * scale, weight), text_color);
     p.galley(
         pos2(x, r.center().y - galley.size().y / 2.0),
         galley,
@@ -216,12 +234,7 @@ pub fn dialog_frame(t: &Tokens) -> Frame {
 /// glow at the upper right and a fainter one at the lower left.
 pub fn backdrop(p: &egui::Painter, r: Rect, t: &Tokens) {
     p.rect_filled(r, 0.0, t.bg);
-    icons::vertical_gradient(
-        p,
-        r,
-        icons::lerp(t.bg, t.sec_b, 0.10),
-        t.bg,
-    );
+    icons::vertical_gradient(p, r, icons::lerp(t.bg, t.sec_b, 0.10), t.bg);
     icons::glow(
         p,
         pos2(r.right() - r.width() * 0.18, r.top() + r.height() * 0.02),
@@ -568,7 +581,12 @@ pub fn round_action(ui: &mut Ui, t: &Tokens, label: &str, d: f32) -> Response {
     resp.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, label));
     let ctx = ui.ctx().clone();
     let hov = anim(&ctx, resp.id.with("hov"), resp.hovered(), motion::HOVER);
-    let down = anim(&ctx, resp.id.with("down"), resp.is_pointer_button_down_on(), motion::PRESS);
+    let down = anim(
+        &ctx,
+        resp.id.with("down"),
+        resp.is_pointer_button_down_on(),
+        motion::PRESS,
+    );
     let time = ui.input(|i| i.time);
     let p = ui.painter();
     let c = rect.center();
@@ -699,9 +717,7 @@ pub fn progress_ring(p: &egui::Painter, c: Pos2, d: f32, t: &Tokens, time: f64) 
     p.circle_filled(c, r - w * 1.4, Color32::from_black_alpha(70));
     p.circle_stroke(c, r, Stroke::new(w, Color32::from_white_alpha(16)));
     let head = motion::looped(time, motion::SPIN) * 360.0;
-    let stretch = motion::ease_in_out(
-        (motion::looped(time, motion::SPIN * 2.0) * 2.0 - 1.0).abs(),
-    );
+    let stretch = motion::ease_in_out((motion::looped(time, motion::SPIN * 2.0) * 2.0 - 1.0).abs());
     let len = 50.0 + 170.0 * stretch;
     let seg = 40;
     for i in 0..seg {
@@ -711,7 +727,10 @@ pub fn progress_ring(p: &egui::Painter, c: Pos2, d: f32, t: &Tokens, time: f64) 
         let a1 = (head - len + len * f1).to_radians();
         let col = icons::lerp(t.sec_b, t.sec_a, f1).gamma_multiply(0.25 + 0.75 * f1);
         p.line_segment(
-            [c + vec2(a0.cos(), a0.sin()) * r, c + vec2(a1.cos(), a1.sin()) * r],
+            [
+                c + vec2(a0.cos(), a0.sin()) * r,
+                c + vec2(a1.cos(), a1.sin()) * r,
+            ],
             Stroke::new(w, col),
         );
     }
@@ -809,7 +828,10 @@ pub fn gauge(p: &egui::Painter, c: Pos2, r: f32, value: f32, color: Color32) {
             })
             .collect()
     };
-    p.add(Shape::line(arc(180.0, 360.0), Stroke::new(w, Color32::from_white_alpha(18))));
+    p.add(Shape::line(
+        arc(180.0, 360.0),
+        Stroke::new(w, Color32::from_white_alpha(18)),
+    ));
     let v = value.clamp(0.0, 1.0);
     if v > 0.0 {
         let pts = arc(180.0, 180.0 + 180.0 * v);
@@ -983,7 +1005,15 @@ pub fn strip(ui: &mut Ui, icon: Icon, color: Color32, text: &str) {
 
 /// A label placed in `r`, showing `shown` but announcing `full` to accessibility (and
 /// tests), so shortened paths keep their real text.
-pub fn text_at(ui: &mut Ui, r: Rect, shown: &str, full: &str, fid: FontId, color: Color32, align: egui::Align) -> Response {
+pub fn text_at(
+    ui: &mut Ui,
+    r: Rect,
+    shown: &str,
+    full: &str,
+    fid: FontId,
+    color: Color32,
+    align: egui::Align,
+) -> Response {
     let layout = egui::Layout::left_to_right(egui::Align::Center).with_main_align(align);
     let resp = place_with(ui, r, layout, |ui| {
         ui.add(
@@ -998,7 +1028,14 @@ pub fn text_at(ui: &mut Ui, r: Rect, shown: &str, full: &str, fid: FontId, color
 }
 
 /// One line of a confirmation list: kind icon, path (shortened in the middle), reason, size.
-pub fn confirm_line(ui: &mut Ui, t: &Tokens, path: &std::path::Path, shown: &str, reason: &str, size_text: &str) {
+pub fn confirm_line(
+    ui: &mut Ui,
+    t: &Tokens,
+    path: &std::path::Path,
+    shown: &str,
+    reason: &str,
+    size_text: &str,
+) {
     let w = ui.available_width();
     let (r, _) = ui.allocate_exact_size(vec2(w, 26.0), Sense::hover());
     let ir = Rect::from_center_size(pos2(r.left() + 10.0, r.center().y), Vec2::splat(14.0));
@@ -1024,7 +1061,10 @@ pub fn confirm_line(ui: &mut Ui, t: &Tokens, path: &std::path::Path, shown: &str
     );
     text_at(
         ui,
-        Rect::from_min_size(pos2(x0 + path_w + 12.0, r.top()), vec2(reason_w, r.height())),
+        Rect::from_min_size(
+            pos2(x0 + path_w + 12.0, r.top()),
+            vec2(reason_w, r.height()),
+        ),
         &reason_s,
         reason,
         reason_font,
@@ -1033,7 +1073,10 @@ pub fn confirm_line(ui: &mut Ui, t: &Tokens, path: &std::path::Path, shown: &str
     );
     text_at(
         ui,
-        Rect::from_min_size(pos2(r.right() - size_w - 6.0, r.top()), vec2(size_w + 4.0, r.height())),
+        Rect::from_min_size(
+            pos2(r.right() - size_w - 6.0, r.top()),
+            vec2(size_w + 4.0, r.height()),
+        ),
         size_text,
         size_text,
         size_font,
@@ -1062,7 +1105,12 @@ pub fn check(ui: &mut Ui, t: &Tokens, on: &mut bool, name: &str) -> Response {
 pub fn paint_check(ui: &Ui, t: &Tokens, r: Rect, resp: &Response, on: bool, enabled: bool) {
     let ctx = ui.ctx();
     let k = anim(ctx, resp.id.with("on"), on, motion::HOVER);
-    let hov = anim(ctx, resp.id.with("hov"), resp.hovered() && enabled, motion::HOVER);
+    let hov = anim(
+        ctx,
+        resp.id.with("hov"),
+        resp.hovered() && enabled,
+        motion::HOVER,
+    );
     let mut p = ui.painter().clone();
     if !enabled {
         p.set_opacity(0.35);
@@ -1117,7 +1165,11 @@ pub fn check_text_font(
     resp.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, enabled, state, text));
     let br = Rect::from_min_size(r.min + vec2(0.0, 2.0), Vec2::splat(20.0));
     paint_check(ui, t, br, &resp, state, enabled);
-    let color = if resp.hovered() || strong { t.text } else { t.text_dim };
+    let color = if resp.hovered() || strong {
+        t.text
+    } else {
+        t.text_dim
+    };
     let color = if enabled { color } else { t.text_faint };
     ui.painter().galley(
         pos2(r.left() + 26.0, r.center().y - g.size().y / 2.0),

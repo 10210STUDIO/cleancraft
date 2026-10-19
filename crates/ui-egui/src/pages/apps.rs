@@ -352,7 +352,15 @@ fn remover_page(app: &mut CleanApp, ui: &mut Ui) {
         Phase::Working(job, _) => {
             let s = job.status();
             let secs = job.elapsed_secs();
-            kit::progress(ui, &t, Icon::Trash, "Moving to the Trash...", &s, secs, false);
+            kit::progress(
+                ui,
+                &t,
+                Icon::Trash,
+                "Moving to the Trash...",
+                &s,
+                secs,
+                false,
+            );
             return;
         }
         Phase::Done(..) => {
@@ -559,7 +567,11 @@ fn browse(app: &mut CleanApp, ui: &mut Ui) {
                     } else {
                         format!("{n} apps")
                     };
-                    let size_text = if size > 0 { human_size(size) } else { String::new() };
+                    let size_text = if size > 0 {
+                        human_size(size)
+                    } else {
+                        String::new()
+                    };
                     let r = super::plan_page::category_row(
                         ui,
                         &t,
@@ -581,14 +593,16 @@ fn browse(app: &mut CleanApp, ui: &mut Ui) {
     });
     ui.scope_builder(egui::UiBuilder::new().max_rect(right), |ui| {
         ui.set_clip_rect(right.expand(24.0).intersect(ui.clip_rect()));
-        kit::card(&t).inner_margin(egui::Margin::symmetric(6, 8)).show(ui, |ui| {
-            ui.set_min_size(egui::vec2(ui.available_width(), avail_h - 18.0));
-            if file_group {
-                files_list(app, ui, avail_h - 18.0);
-            } else {
-                apps_list(app, ui, avail_h - 18.0);
-            }
-        });
+        kit::card(&t)
+            .inner_margin(egui::Margin::symmetric(6, 8))
+            .show(ui, |ui| {
+                ui.set_min_size(egui::vec2(ui.available_width(), avail_h - 18.0));
+                if file_group {
+                    files_list(app, ui, avail_h - 18.0);
+                } else {
+                    apps_list(app, ui, avail_h - 18.0);
+                }
+            });
     });
 }
 
@@ -622,9 +636,14 @@ fn apps_list(app: &mut CleanApp, ui: &mut Ui, h: f32) {
                 let hov = kit::anim(ui.ctx(), resp.id.with("hov"), resp.hovered(), motion::HOVER);
                 let p = ui.painter().clone();
                 if hov > 0.0 {
-                    p.rect_filled(r.shrink(2.0), 10.0, Color32::from_white_alpha((10.0 * hov) as u8));
+                    p.rect_filled(
+                        r.shrink(2.0),
+                        10.0,
+                        Color32::from_white_alpha((10.0 * hov) as u8),
+                    );
                 }
-                let tile = Rect::from_center_size(pos2(r.left() + 28.0, r.center().y), vec2(38.0, 38.0));
+                let tile =
+                    Rect::from_center_size(pos2(r.left() + 28.0, r.center().y), vec2(38.0, 38.0));
                 kit::initial_tile(&p, tile, &a.name, kit::name_color(&a.name));
                 let mut info = vec![];
                 if !a.version.is_empty() {
@@ -632,11 +651,16 @@ fn apps_list(app: &mut CleanApp, ui: &mut Ui, h: f32) {
                 }
                 info.push(a.vendor.clone());
                 info.push(a.store.label().to_string());
-                info.push(format!("Opened: {}", apps::last_used_text(a.last_used, now)));
+                info.push(format!(
+                    "Opened: {}",
+                    apps::last_used_text(a.last_used, now)
+                ));
                 let info = info.join("  ·  ");
                 let size_text = human_size(a.size);
                 let size_font = font(13.5, Weight::SemiBold);
-                let size_w = kit::galley(ui, &size_text, size_font.clone(), t.text).size().x;
+                let size_w = kit::galley(ui, &size_text, size_font.clone(), t.text)
+                    .size()
+                    .x;
                 kit::text_at(
                     ui,
                     Rect::from_min_max(
@@ -649,8 +673,14 @@ fn apps_list(app: &mut CleanApp, ui: &mut Ui, h: f32) {
                     t.text,
                     Align::Max,
                 );
-                let chev = Rect::from_center_size(pos2(r.right() - 12.0, r.center().y), vec2(12.0, 12.0));
-                icons::paint(&p, chev, Icon::Chevron, icons::lerp(t.text_faint, t.text, hov));
+                let chev =
+                    Rect::from_center_size(pos2(r.right() - 12.0, r.center().y), vec2(12.0, 12.0));
+                icons::paint(
+                    &p,
+                    chev,
+                    Icon::Chevron,
+                    icons::lerp(t.text_faint, t.text, hov),
+                );
                 let x0 = tile.right() + 12.0;
                 let text_w = (r.right() - 40.0 - size_w - x0).max(60.0);
                 let name_font = font(14.0, Weight::SemiBold);
@@ -665,7 +695,10 @@ fn apps_list(app: &mut CleanApp, ui: &mut Ui, h: f32) {
                     t.text,
                 );
                 if a.apple {
-                    let tr = Rect::from_min_size(pos2(x0 + name_w + 10.0, r.top() + 10.0), vec2(110.0, 18.0));
+                    let tr = Rect::from_min_size(
+                        pos2(x0 + name_w + 10.0, r.top() + 10.0),
+                        vec2(110.0, 18.0),
+                    );
                     kit::place(ui, tr, |ui| {
                         kit::tag(ui, "Part of macOS", t.warning);
                     });
@@ -734,7 +767,8 @@ fn file_row(app: &CleanApp, ui: &mut Ui, it: &cleancraft_core::Item) -> Option<b
     let mut on = it.selected;
     let cb_rect = Rect::from_center_size(pos2(r.left() + 16.0, r.center().y), vec2(20.0, 20.0));
     let cb = kit::place(ui, cb_rect, |ui| {
-        ui.add_enabled_ui(toggle, |ui| kit::check(ui, &t, &mut on, &shown)).inner
+        ui.add_enabled_ui(toggle, |ui| kit::check(ui, &t, &mut on, &shown))
+            .inner
     });
     if cb.changed() {
         changed = Some(on);
@@ -743,10 +777,15 @@ fn file_row(app: &CleanApp, ui: &mut Ui, it: &cleancraft_core::Item) -> Option<b
     icons::paint(ui.painter(), ir, kit::kind_icon(&it.path), t.text_faint);
     let size_text = human_size(it.size);
     let size_font = font(13.0, Weight::SemiBold);
-    let size_w = kit::galley(ui, &size_text, size_font.clone(), t.text).size().x;
+    let size_w = kit::galley(ui, &size_text, size_font.clone(), t.text)
+        .size()
+        .x;
     kit::text_at(
         ui,
-        Rect::from_min_max(pos2(r.right() - size_w - 10.0, r.top()), pos2(r.right() - 6.0, r.bottom())),
+        Rect::from_min_max(
+            pos2(r.right() - size_w - 10.0, r.top()),
+            pos2(r.right() - 6.0, r.bottom()),
+        ),
         &size_text,
         &size_text,
         size_font,
@@ -984,7 +1023,8 @@ fn detail(app: &mut CleanApp, ui: &mut Ui) {
                         ui.horizontal(|ui| {
                             ui.add_space(8.0);
                             let (r, _) = ui.allocate_exact_size(vec2(8.0, 8.0), Sense::hover());
-                            ui.painter().circle_filled(r.center(), 4.0, kit::series_color(&t, k));
+                            ui.painter()
+                                .circle_filled(r.center(), 4.0, kit::series_color(&t, k));
                             ui.label(
                                 RichText::new(format!(
                                     "{}  ·  {}",
@@ -1051,7 +1091,11 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, action: Action) {
         kit::dialog_head(
             ui,
             &t,
-            if action == Action::RemoveFiles { Icon::Trash } else { Icon::Remover },
+            if action == Action::RemoveFiles {
+                Icon::Trash
+            } else {
+                Icon::Remover
+            },
             t.sec_a,
             &headline,
             "These exact files will be moved. You can put them back from History.",
@@ -1148,7 +1192,15 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
             rebuild_detail(app, old.as_ref());
             start_load(app);
         }
-        if kit::pill(ui, &t, "Show History", kit::Kind::Secondary, Some(Icon::History)).clicked() {
+        if kit::pill(
+            ui,
+            &t,
+            "Show History",
+            kit::Kind::Secondary,
+            Some(Icon::History),
+        )
+        .clicked()
+        {
             app.act();
             app.apps.phase = Phase::Browse;
             app.navigate("history");
@@ -1299,91 +1351,99 @@ fn update_row(app: &mut CleanApp, ui: &mut Ui, u: &UpdateInfo) {
     kit::card(&t)
         .inner_margin(egui::Margin::symmetric(14, 12))
         .show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.horizontal(|ui| {
-            let (r, _) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::hover());
-            kit::initial_tile(ui.painter(), r, &u.name, kit::name_color(&u.name));
-            ui.vertical(|ui| {
-                ui.spacing_mut().item_spacing.y = 2.0;
-                ui.label(
-                    RichText::new(&u.name)
-                        .font(font(14.5, Weight::SemiBold))
-                        .color(t.text),
-                );
-                ui.horizontal(|ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                let (r, _) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::hover());
+                kit::initial_tile(ui.painter(), r, &u.name, kit::name_color(&u.name));
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 2.0;
                     ui.label(
-                        RichText::new(format!(
-                            "{} -> {}",
-                            u.installed,
-                            u.latest.clone().unwrap_or_default()
-                        ))
-                        .font(font(12.0, Weight::Medium))
-                        .color(icons::lerp(t.sec_a, Color32::WHITE, 0.2)),
+                        RichText::new(&u.name)
+                            .font(font(14.5, Weight::SemiBold))
+                            .color(t.text),
                     );
-                    kit::dim(ui, &t, u.source.label());
-                });
-            });
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let r = kit::pill(ui, &t, "Update", kit::Kind::Primary, None);
-                r.widget_info(|| {
-                    egui::WidgetInfo::labeled(
-                        egui::WidgetType::Button,
-                        true,
-                        format!("Update {}", u.name),
-                    )
-                });
-                if r.clicked() {
-                    app.act();
-                    match updater::start_update(&app.env, u) {
-                        Ok(msg) => app.tell(msg),
-                        Err(e) => app.warn(format!("Could not open {}: {e}", u.name)),
-                    }
-                }
-                if u.source == Source::Sparkle && u.download_url.is_some() {
-                    let r = kit::secondary_resp(ui, &t, "Download");
-                    r.widget_info(|| {
-                        egui::WidgetInfo::labeled(
-                            egui::WidgetType::Button,
-                            true,
-                            format!("Download {}", u.name),
-                        )
-                    });
-                    if r.clicked() {
-                        app.act();
-                        match updater::open_download(&app.env, u) {
-                            Ok(()) => app.tell(format!(
-                                "The download of {} {} opened in your browser.",
-                                u.name,
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(format!(
+                                "{} -> {}",
+                                u.installed,
                                 u.latest.clone().unwrap_or_default()
+                            ))
+                            .font(font(12.0, Weight::Medium))
+                            .color(icons::lerp(
+                                t.sec_a,
+                                Color32::WHITE,
+                                0.2,
                             )),
-                            Err(e) => app.warn(format!("Could not open the download: {e}")),
-                        }
-                    }
-                }
-                if !u.notes.is_empty() {
-                    let open = app.apps.notes_open.contains(&u.app);
-                    let r = kit::secondary_resp(ui, &t, if open { "Hide Notes" } else { "What's New" });
+                        );
+                        kit::dim(ui, &t, u.source.label());
+                    });
+                });
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let r = kit::pill(ui, &t, "Update", kit::Kind::Primary, None);
                     r.widget_info(|| {
                         egui::WidgetInfo::labeled(
                             egui::WidgetType::Button,
                             true,
-                            format!("What's new in {}", u.name),
+                            format!("Update {}", u.name),
                         )
                     });
                     if r.clicked() {
                         app.act();
-                        if open {
-                            app.apps.notes_open.remove(&u.app);
-                        } else {
-                            app.apps.notes_open.insert(u.app.clone());
+                        match updater::start_update(&app.env, u) {
+                            Ok(msg) => app.tell(msg),
+                            Err(e) => app.warn(format!("Could not open {}: {e}", u.name)),
                         }
                     }
-                }
+                    if u.source == Source::Sparkle && u.download_url.is_some() {
+                        let r = kit::secondary_resp(ui, &t, "Download");
+                        r.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::Button,
+                                true,
+                                format!("Download {}", u.name),
+                            )
+                        });
+                        if r.clicked() {
+                            app.act();
+                            match updater::open_download(&app.env, u) {
+                                Ok(()) => app.tell(format!(
+                                    "The download of {} {} opened in your browser.",
+                                    u.name,
+                                    u.latest.clone().unwrap_or_default()
+                                )),
+                                Err(e) => app.warn(format!("Could not open the download: {e}")),
+                            }
+                        }
+                    }
+                    if !u.notes.is_empty() {
+                        let open = app.apps.notes_open.contains(&u.app);
+                        let r = kit::secondary_resp(
+                            ui,
+                            &t,
+                            if open { "Hide Notes" } else { "What's New" },
+                        );
+                        r.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::Button,
+                                true,
+                                format!("What's new in {}", u.name),
+                            )
+                        });
+                        if r.clicked() {
+                            app.act();
+                            if open {
+                                app.apps.notes_open.remove(&u.app);
+                            } else {
+                                app.apps.notes_open.insert(u.app.clone());
+                            }
+                        }
+                    }
+                });
             });
+            if app.apps.notes_open.contains(&u.app) {
+                ui.label(RichText::new(&u.notes).color(t.text_dim));
+            }
         });
-        if app.apps.notes_open.contains(&u.app) {
-            ui.label(RichText::new(&u.notes).color(t.text_dim));
-        }
-    });
     ui.add_space(space::S);
 }

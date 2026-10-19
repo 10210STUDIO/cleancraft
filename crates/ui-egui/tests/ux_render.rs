@@ -15,8 +15,8 @@ use cleancraft_core::permissions::Access;
 use cleancraft_core::testkit::{FakeMac, age};
 use cleancraft_core::testkit_apps::{AppSpec, FakeMacApps};
 use cleancraft_core::testkit_files::{ImageFormat, save_scene};
-use cleancraft_core::{FeatureId, Settings, testkit_cleanup, testkit_monitor};
 use cleancraft_core::testkit_perf as tp;
+use cleancraft_core::{FeatureId, Settings, testkit_cleanup, testkit_monitor};
 use cleancraft_ui_egui::CleanApp;
 use cleancraft_ui_egui::jobs::Job;
 use cleancraft_ui_egui::pages::{plan_page, sweep};
@@ -91,7 +91,15 @@ fn files_mac() -> FakeMac {
     }
     let pics = m.env.home_path("Pictures");
     save_scene(&pics.join("a.png"), 320, 240, 0, 0, 1, ImageFormat::Png);
-    save_scene(&pics.join("a-bright.png"), 400, 300, 0, 5, 3, ImageFormat::Png);
+    save_scene(
+        &pics.join("a-bright.png"),
+        400,
+        300,
+        0,
+        5,
+        3,
+        ImageFormat::Png,
+    );
     m.env.fake_sys().unwrap().answer(
         "df",
         "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk3s1 488245288 300000000 188245288 62% /\n",
@@ -114,7 +122,10 @@ fn remover_mac() -> FakeMac {
     mac.last_opened(&editor, 2);
     mac.last_opened(&viewer, 300);
     mac.spotlight_finds_nothing();
-    mac.home_file("Library/Application Support/com.example.Editor/db.sqlite", 400_000);
+    mac.home_file(
+        "Library/Application Support/com.example.Editor/db.sqlite",
+        400_000,
+    );
     mac.home_file("Library/Caches/com.example.Editor/blob", 900_000);
     mac.home_file("Library/Preferences/com.example.Editor.plist", 3_000);
     base(&mac);
@@ -344,8 +355,14 @@ fn scenes() -> Vec<Scene> {
                 let s = Settings::default();
                 let plan = cleancraft_core::features::scan(&m.env, &s, FeatureId::SystemJunk)
                     .expect("scan");
-                cleancraft_core::features::run_plan(&m.env, &s, &plan, &plan.digest(), &mut |_, _| {})
-                    .expect("clean");
+                cleancraft_core::features::run_plan(
+                    &m.env,
+                    &s,
+                    &plan,
+                    &plan.digest(),
+                    &mut |_, _| {},
+                )
+                .expect("clean");
                 m
             },
             go: |h| nav(h, "history"),
@@ -382,7 +399,8 @@ fn missing_glyphs(h: &H, inter: &egui::Context) -> Vec<String> {
             Shape::Vec(v) => v.iter().for_each(|x| walk(x, out)),
             Shape::Text(t) => {
                 for sec in &t.galley.job.sections {
-                    let text = t.galley.job.text[sec.byte_range.start.0..sec.byte_range.end.0].to_string();
+                    let text =
+                        t.galley.job.text[sec.byte_range.start.0..sec.byte_range.end.0].to_string();
                     out.push((text, sec.format.font_id.clone()));
                 }
             }
@@ -437,7 +455,10 @@ fn outside(h: &H, w: f32, hgt: f32) -> Vec<String> {
             Shape::Text(t) => {
                 let vis = s.visual_bounding_rect().intersect(clip);
                 if vis.is_positive()
-                    && (vis.min.x < -0.5 || vis.min.y < -0.5 || vis.max.x > w + 0.5 || vis.max.y > hgt + 0.5)
+                    && (vis.min.x < -0.5
+                        || vis.min.y < -0.5
+                        || vis.max.x > w + 0.5
+                        || vis.max.y > hgt + 0.5)
                 {
                     out.push(format!("{:?} at {vis:?}", t.galley.job.text));
                 }
@@ -505,7 +526,9 @@ fn module_icons_are_shapes_not_text() {
             cleancraft_ui_egui::kit::badge(ui, color, icon, 32.0);
         }
         for icon in cleancraft_ui_egui::icons::Icon::ALL {
-            let r = ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::hover()).0;
+            let r = ui
+                .allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::hover())
+                .0;
             cleancraft_ui_egui::icons::paint(ui.painter(), r, icon, egui::Color32::WHITE);
         }
     });
@@ -562,7 +585,12 @@ fn pages_render() {
                         seen.insert(img.get_pixel(x, y).0);
                     }
                 }
-                assert!(seen.len() > 200, "{} looks flat ({} colours)", s.name, seen.len());
+                assert!(
+                    seen.len() > 200,
+                    "{} looks flat ({} colours)",
+                    s.name,
+                    seen.len()
+                );
                 if all {
                     let suffix = if ppp > 1.0 { "@2x" } else { "" };
                     let file = out_dir.join(format!("{}-{}x{}{suffix}.png", s.name, w, hgt));
