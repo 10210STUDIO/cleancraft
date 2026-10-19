@@ -167,3 +167,56 @@ fn app_icon_is_a_full_squircle_with_transparent_corners() {
         .unwrap_or(0);
     assert!(brightest > 450, "{brightest}");
 }
+
+#[test]
+fn section_icons_render_on_the_gpu() {
+    use cleancraft_ui_egui::section_icons::{self, SectionIcon};
+    let all = std::env::var("CLEANCRAFT_SNAPSHOTS").is_ok_and(|v| v == "1");
+    let renderer_ok = std::panic::catch_unwind(egui_kittest::wgpu::WgpuTestRenderer::new).is_ok();
+    if !renderer_ok {
+        eprintln!("No wgpu adapter here: rendering skipped.");
+        return;
+    }
+    let out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/screens/v2/heroes");
+    // Rows: rest, hovered, selected. Columns: the nine sidebar icons at 28 pt, on the
+    // sidebar ink, plus a large row at 56 pt to inspect the shapes.
+    let (cell, big) = (48.0, 96.0);
+    let n = SectionIcon::ALL.len() as f32;
+    for ppp in [1.0f32, 2.0] {
+        let mut h = egui_kittest::Harness::builder()
+            .with_size(vec2(cell * n, cell * 3.0 + big))
+            .with_pixels_per_point(ppp)
+            .build_ui(move |ui| {
+                let full = ui.ctx().viewport_rect();
+                ui.painter()
+                    .rect_filled(full, 0.0, Color32::from_rgb(0x14, 0x19, 0x22));
+                for (i, icon) in SectionIcon::ALL.into_iter().enumerate() {
+                    for (row, k) in [0.0f32, 0.5, 1.0].into_iter().enumerate() {
+                        let c = pos2((i as f32 + 0.5) * cell, (row as f32 + 0.5) * cell);
+                        let r = Rect::from_center_size(c, vec2(28.0, 28.0));
+                        section_icons::paint(ui, r, icon, k);
+                    }
+                    let c = pos2((i as f32 + 0.5) * cell, cell * 3.0 + big * 0.5);
+                    section_icons::paint(
+                        ui,
+                        Rect::from_center_size(c, vec2(44.0, 44.0)),
+                        icon,
+                        0.0,
+                    );
+                }
+            });
+        h.step();
+        let img = h.render().expect("render");
+        let mut seen = std::collections::HashSet::new();
+        for p in img.pixels().step_by(5) {
+            seen.insert(p.0);
+        }
+        assert!(seen.len() > 300, "{} colours", seen.len());
+        if all {
+            let suffix = if ppp > 1.0 { "@2x" } else { "" };
+            let file = out_dir.join(format!("section-icons{suffix}.png"));
+            img.save(&file).expect("save png");
+            eprintln!("wrote {}", file.display());
+        }
+    }
+}

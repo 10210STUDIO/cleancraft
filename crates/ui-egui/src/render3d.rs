@@ -1389,13 +1389,42 @@ impl<'a> Scene<'a> {
                     let s = self.sprites[i as usize];
                     let (c, z) = view.project(s.pos);
                     let r = s.radius * view.focal / z;
-                    sprite_mesh(&mut out, c, r, &s, feather);
+                    if let Some((r, alpha)) = fit_sprite(c, r, s.alpha, s.kind, rect) {
+                        let s = Sprite { alpha, ..s };
+                        sprite_mesh(&mut out, c, r, &s, feather);
+                    }
                 }
                 Prim::Group(_) => {}
             }
         }
         (out, stats)
     }
+}
+
+/// Soft sprites end this far inside the rect, in points, so a clipped slot never shows
+/// the edge of a glow as a box (REVIEW-B B3).
+pub const SPRITE_MARGIN: f32 = 8.0;
+
+/// Keeps a sprite inside `rect` less [`SPRITE_MARGIN`]: glows and shadows shrink their
+/// radius (their falloff still reaches zero alpha), dots and glints fade out as they
+/// near the margin. Continuous in the position, so moving sprites never pop.
+fn fit_sprite(c: Pos2, r: f32, alpha: f32, kind: SpriteKind, rect: Rect) -> Option<(f32, f32)> {
+    let margin = SPRITE_MARGIN.min(rect.width().min(rect.height()) * 0.1);
+    let room_x = (c.x - rect.left()).min(rect.right() - c.x) - margin;
+    let room_y = (c.y - rect.top()).min(rect.bottom() - c.y) - margin;
+    let (r, alpha) = match kind {
+        // A shrunk glow also dims, so it stays a soft halo and never turns into a spot.
+        SpriteKind::Glow => {
+            let fit = r.min(room_x).min(room_y);
+            (fit, alpha * (fit / r.max(1e-3)).clamp(0.0, 1.0).sqrt())
+        }
+        SpriteKind::Shadow(squash) => (r.min(room_x).min(room_y / squash.max(0.01)), alpha),
+        SpriteKind::Dot | SpriteKind::Star(_) => {
+            let room = room_x.min(room_y) - r;
+            (r, alpha * (room / 6.0).clamp(0.0, 1.0))
+        }
+    };
+    (r > 0.5 && alpha > 0.0).then_some((r, alpha))
 }
 
 fn fan(out: &mut Mesh, c: Pos2, rings: &[(f32, f32, Color32)], seg: usize) {
@@ -1432,9 +1461,10 @@ fn sprite_mesh(out: &mut Mesh, c: Pos2, r: f32, s: &Sprite, feather: f32) {
                 c,
                 &[
                     (0.0, 0.0, col(1.0)),
-                    (r * 0.18, r * 0.18, col(0.72)),
-                    (r * 0.42, r * 0.42, col(0.3)),
-                    (r * 0.7, r * 0.7, col(0.08)),
+                    (r * 0.2, r * 0.2, col(0.8)),
+                    (r * 0.45, r * 0.45, col(0.38)),
+                    (r * 0.7, r * 0.7, col(0.1)),
+                    (r * 0.88, r * 0.88, col(0.02)),
                     (r, r, col(0.0)),
                 ],
                 seg,
@@ -1807,5 +1837,50 @@ mod tests {
             .filter(|p| p[3] > 10 && p[3] < 245)
             .count();
         assert!(partial > 40, "soft edge pixels: {partial}");
+    }
+
+    #[test]
+    fn soft_sprites_end_inside_the_rect() {
+        // A glow much larger than the rect, a floor shadow, and dots near the edges.
+        let mut s = Scene::new(Camera::front(5.0, 0.2), Rig::studio([0.3, 0.8, 0.7]));
+        s.sprite(
+            v3(0.0, 0.0, -1.0),
+            6.0,
+            [1.0, 0.8, 0.4],
+            1.0,
+            SpriteKind::Glow,
+        );
+        s.sprite(
+            v3(0.0, -1.3, 0.0),
+            4.0,
+            [0.0; 3],
+            0.6,
+            SpriteKind::Shadow(0.25),
+        );
+        s.sprite(v3(1.9, 1.9, 0.0), 0.1, [1.0; 3], 1.0, SpriteKind::Dot);
+        s.sprite(
+            v3(-1.9, 0.0, 0.0),
+            0.1,
+            [1.0; 3],
+            1.0,
+            SpriteKind::Star(0.3),
+        );
+        let side = 100usize;
+        let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(side as f32, side as f32));
+        let mut all = Mesh::default();
+        all.add_colored_rect(rect, Color32::BLACK);
+        all.append(s.render(rect, 1.0).0);
+        let px = rasterize(&all, side, side, 1.0, 2);
+        let m = SPRITE_MARGIN as usize;
+        for y in 0..side {
+            for x in 0..side {
+                if x < m || y < m || x >= side - m || y >= side - m {
+                    let p = &px[(y * side + x) * 4..(y * side + x) * 4 + 3];
+                    assert!(p.iter().all(|&v| v <= 1), "({x}, {y}) = {p:?}");
+                }
+            }
+        }
+        let c = (side / 2 * side + side / 2) * 4;
+        assert!(px[c] > 40, "the glow is still there: {:?}", &px[c..c + 4]);
     }
 }
