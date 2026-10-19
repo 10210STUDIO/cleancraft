@@ -317,9 +317,6 @@ impl Ani {
     fn mat_b(&self) -> Material {
         Material::gloss(self.b, scale(mix(self.b, self.a, 0.3), 0.7))
     }
-    fn light(&self) -> Material {
-        Material::satin(mix(WHITE, self.a, 0.10), mix(WHITE, self.b, 0.32))
-    }
 }
 
 /// Ease 0..1 over [from, from + len] of `x`.
@@ -376,30 +373,34 @@ fn effects(sc: &mut Scene<'static>, a: &'static Assets, an: &Ani) {
     };
     sc.sprite(
         an.look.glint,
-        0.42 + 0.3 * flash,
+        0.3 + 0.25 * flash,
         WHITE,
         (g * 0.9 + flash).min(1.0),
         SpriteKind::Star(0.3),
     );
-    // Orbiting particles while scanning.
+    // Comets orbiting on two tilted rings while scanning, passing in front and behind.
     if an.scan > 0.0 {
-        let n = 18;
-        for i in 0..n {
-            let ring = i % 2;
-            let tilt = if ring == 0 { 0.42 } else { -0.3 };
-            let r = if ring == 0 { 1.55 } else { 1.8 };
-            let dir = if ring == 0 { 1.0 } else { -0.8 };
-            let ang = dir * lp::HERO_ORBIT.angle(an.since as f64) + TAU * i as f32 / n as f32;
-            let p =
-                Xf::ID
-                    .rot_x(tilt)
-                    .rot_z(0.18 * dir)
-                    .apply(v3(r * ang.cos(), 0.0, r * ang.sin()));
-            let tail = (i as f32 * 0.37).fract();
-            let size = 0.035 + 0.03 * tail;
-            let col = mix(an.a, WHITE, 0.25 + 0.4 * tail);
-            sc.sprite(p, size, col, an.scan, SpriteKind::Dot);
-            sc.sprite(p, size * 6.0, an.a, an.scan * 0.35, SpriteKind::Glow);
+        for (ring, count, r, tilt, roll, speed) in [
+            (0, 7, 1.42f32, 0.52f32, 0.2f32, 1.0f32),
+            (1, 5, 1.68, -0.38, -0.25, -0.75),
+        ] {
+            let orbit = Xf::ID.rot_x(tilt).rot_z(roll);
+            for i in 0..count {
+                let head = speed * lp::HERO_ORBIT.angle(an.since as f64)
+                    + TAU * i as f32 / count as f32
+                    + ring as f32 * 0.4;
+                for k in 0..6 {
+                    let ang = head - speed.signum() * k as f32 * 0.022;
+                    let p = orbit.apply(v3(r * ang.cos(), 0.0, r * ang.sin()));
+                    let fall = 1.0 - k as f32 / 6.0;
+                    let size = (0.05 + 0.02 * (i % 2) as f32) * (0.4 + 0.6 * fall);
+                    let col = mix(an.a, WHITE, 0.35 + 0.4 * fall);
+                    sc.sprite(p, size, col, an.scan * fall, SpriteKind::Dot);
+                    if k == 0 {
+                        sc.sprite(p, 0.28, an.a, an.scan * 0.22, SpriteKind::Glow);
+                    }
+                }
+            }
         }
     }
     // The done burst: particles flying out, a flash and a shock ring.
@@ -409,9 +410,9 @@ fn effects(sc: &mut Scene<'static>, a: &'static Assets, an: &Ani) {
         let fade = (1.0 - k).powf(1.4);
         sc.sprite(
             V3::ZERO,
-            0.8 + 2.4 * e,
+            0.8 + 2.2 * e,
             mix(an.a, WHITE, 0.3),
-            fade * 0.7,
+            fade * 0.45,
             SpriteKind::Glow,
         );
         let n = 22;
@@ -434,12 +435,12 @@ fn effects(sc: &mut Scene<'static>, a: &'static Assets, an: &Ani) {
                 sc.sprite(p, 0.05 * (1.0 - 0.6 * k), col, fade, SpriteKind::Dot);
             }
         }
-        let ring = Xf::scale(0.7 + 1.5 * e).rot_x(FRAC_PI_2 - 0.35);
+        let ring = Xf::scale(0.8 + 1.0 * e).rot_x(FRAC_PI_2 - 0.35);
         sc.add_faded(
             &a.shock,
             ring,
             Material::glass(mix(an.a, WHITE, 0.5), 0.5).with_emissive(scale(an.a, 0.9)),
-            fade * 0.8,
+            fade * fade * 0.6,
         );
     }
 }
@@ -530,7 +531,7 @@ fn system_junk(sc: &mut Scene<'static>, a: &'static Assets, an: &Ani, root: Xf) 
 }
 
 fn mail(sc: &mut Scene<'static>, a: &'static Assets, an: &Ani, root: Xf) {
-    let body = Material::satin(mix(WHITE, an.a, 0.18), mix(WHITE, an.b, 0.45));
+    let body = Material::satin(mix(an.a, WHITE, 0.62), mix(an.b, WHITE, 0.25));
     sc.add(&a.env_body, root, body);
     // A letter rises out while scanning.
     let rise = if an.scanning() {
@@ -546,6 +547,8 @@ fn mail(sc: &mut Scene<'static>, a: &'static Assets, an: &Ani, root: Xf) {
             Xf::ID.at(v3(0.0, -0.12 + rise, 0.02)).then(root),
             Material::satin(WHITE, mix(WHITE, an.a, 0.2)).with_emissive(an.glow(0.15)),
         );
+        // Inside the envelope: drawn before the body so only the part above it shows.
+        sc.bias_last(-0.4);
     }
     // The flap opens around its top hinge while scanning, closes with a bounce when done.
     let open = if an.scanning() {
@@ -555,11 +558,11 @@ fn mail(sc: &mut Scene<'static>, a: &'static Assets, an: &Ani, root: Xf) {
     } else {
         0.0
     };
-    let hinge = v3(0.0, 0.6, 0.17);
+    let hinge = v3(0.0, 0.6, 0.18);
     let flap = Xf::ID.at(-hinge).rot_x(-open).at(hinge).then(root);
     sc.add(
         &a.env_flap,
-        flap,
+        Xf::ID.at(v3(0.0, 0.0, 0.18)).then(flap),
         Material::gloss(mix(an.a, WHITE, 0.2), an.b).with_emissive(an.glow(0.3)),
     );
     let seal_pop = if an.done() {
@@ -569,7 +572,7 @@ fn mail(sc: &mut Scene<'static>, a: &'static Assets, an: &Ani, root: Xf) {
     };
     sc.add(
         &a.seal,
-        Xf::scale(seal_pop).at(v3(0.0, -0.02, 0.22)).then(flap),
+        Xf::scale(seal_pop).at(v3(0.0, 0.0, 0.23)).then(flap),
         Material::gloss(mix(an.b, WHITE, 0.1), scale(an.b, 0.7)),
     );
 }
@@ -585,10 +588,12 @@ fn trash(sc: &mut Scene<'static>, a: &'static Assets, an: &Ani, root: Xf) {
         // Ribs follow the tapered wall.
         let rib = Xf::ID.rot_z(-0.115).at(v3(0.66, -0.15, 0.0)).rot_y(ang);
         sc.add(&a.rib, rib.then(root), an.mat_a());
+        // Ribs sit on the wall: let the ones at the edge draw over it.
+        sc.bias_last(0.12);
     }
     let (lift, tilt) = if an.scanning() {
         let w = 0.5 + 0.5 * an.sin(1.1, 0.0);
-        (an.scan * (0.18 + 0.12 * w), an.scan * (0.35 + 0.25 * w))
+        (an.scan * (0.02 + 0.02 * w), an.scan * (0.1 + 0.1 * w))
     } else if an.done() {
         let k = 1.0 - an.settle;
         (0.3 * k, 0.6 * k)
@@ -640,7 +645,7 @@ fn threat(sc: &mut Scene<'static>, a: &'static Assets, an: &Ani, root: Xf) {
     );
     sc.add(
         &a.shield_inner,
-        Xf::ID.at(v3(0.0, 0.03, 0.19)).then(root),
+        Xf::ID.at(v3(0.0, 0.03, 0.2)).then(root),
         Material::satin(mix(WHITE, an.a, 0.15), mix(WHITE, an.b, 0.35)),
     );
     let check = if an.done() {
@@ -1063,6 +1068,8 @@ fn monitor(sc: &mut Scene<'static>, a: &'static Assets, an: &Ani, root: Xf) {
             body,
             Material::gloss(mix(c, WHITE, 0.15), scale(c, 0.7)).with_emissive(an.glow(0.3)),
         );
+        // The lit gauge wraps its track.
+        sc.bias_last(0.3);
     }
     sc.add(
         &a.pulse_line,
@@ -1389,7 +1396,7 @@ fn build_assets() -> Assets {
             .rot_x(FRAC_PI_2),
     );
     Assets {
-        shock: Mesh3::torus(1.0, 0.025, 72, 6, 0.0, TAU),
+        shock: Mesh3::torus(1.0, 0.018, 72, 6, 0.0, TAU),
         gem: Mesh3::gem(9, 0.78, 0.5, 1.0).transformed(Xf::ID.at(v3(0.0, 0.15, 0.0))),
         spark: Mesh3::gem(4, 1.0, 0.7, 0.7),
         glass_cube: Mesh3::rounded_box(v3(0.82, 0.82, 0.82), 0.16, 9),
@@ -1401,7 +1408,7 @@ fn build_assets() -> Assets {
         bin: Mesh3::lathe(&bin, 56, 0.0, TAU),
         rib: Mesh3::rounded_box(v3(0.035, 0.52, 0.035), 0.034, 3),
         lid: Mesh3::puck(0.85, 0.14, 0.06, 56),
-        handle: Mesh3::torus(0.22, 0.055, 24, 10, 0.0, PI).transformed(Xf::ID.rot_x(-FRAC_PI_2)),
+        handle: Mesh3::tube(0.22, 0.055, 24, 10, 0.0, PI).transformed(Xf::ID.rot_x(-FRAC_PI_2)),
         shield: Mesh3::extrude(&shield_outline(1.0), 0.34, 0.12, 4),
         shield_inner: Mesh3::extrude(&shield_outline(0.66), 0.08, 0.035, 2),
         check: Mesh3::extrude(&check, 0.1, 0.04, 2),
@@ -1427,7 +1434,7 @@ fn build_assets() -> Assets {
         hub: puck_z(0.16, 0.12, 0.04, 32),
         puck: puck_z(0.95, 0.42, 0.16, 72),
         groove: facing(Mesh3::torus(0.78, 0.03, 72, 8, 0.0, TAU)),
-        power_arc: facing(Mesh3::torus(
+        power_arc: facing(Mesh3::tube(
             0.42,
             0.075,
             56,
@@ -1441,7 +1448,7 @@ fn build_assets() -> Assets {
                 .transformed(Xf::ID.rot_x(-FRAC_PI_2)),
         ),
         app_glyph: Mesh3::puck(0.2, 0.06, 0.025, 32),
-        refresh_arc: facing(Mesh3::torus(0.78, 0.12, 48, 14, 0.3, 150f32.to_radians())),
+        refresh_arc: facing(Mesh3::tube(0.78, 0.12, 48, 14, 0.3, 150f32.to_radians())),
         arrow: retint(arrow),
         ball: Mesh3::icosphere(3),
         slabs: [(0.95, 0.68), (0.85, 0.6), (0.74, 0.52), (0.6, 0.42)]
@@ -1460,7 +1467,7 @@ fn build_assets() -> Assets {
         gauge_track: facing(Mesh3::torus(0.82, 0.11, 96, 12, 0.0, TAU)),
         gauge,
         pulse_line: Mesh3::extrude(&pulse, 0.08, 0.025, 2),
-        icon_ring: facing(Mesh3::torus(
+        icon_ring: facing(Mesh3::tube(
             0.78,
             0.235,
             96,
@@ -1509,6 +1516,16 @@ pub fn app_icon(px: f32, ppp: f32) -> Mesh {
         }
     }
     let nn = n as u32;
+    // Fill the inside of the shadow too (it shows below the tile where it is offset).
+    let shadow_c = push(
+        &mut out,
+        c + shadow_off,
+        Color32::from_black_alpha((rings[0].1 * 255.0) as u8),
+    );
+    for j in 0..nn {
+        out.indices
+            .extend_from_slice(&[shadow_c, base + j, base + (j + 1) % nn]);
+    }
     for r in 0..rings.len() as u32 - 1 {
         for j in 0..nn {
             let j1 = (j + 1) % nn;
@@ -1579,10 +1596,10 @@ pub fn app_icon(px: f32, ppp: f32) -> Mesh {
     let (a, b) = (lin(ca), lin(cb));
     let mut sc = Scene::new(Camera::front(6.0, 0.18), Rig::studio(a));
     sc.sprite(
-        v3(0.0, -0.1, -1.5),
-        2.6,
+        v3(0.0, -0.05, -1.5),
+        1.55,
         mix(a, b, 0.3),
-        0.55,
+        0.6,
         SpriteKind::Glow,
     );
     sc.sprite(
@@ -1599,20 +1616,17 @@ pub fn app_icon(px: f32, ppp: f32) -> Mesh {
         ..Material::gloss(mix(a, WHITE, 0.2), b)
     };
     sc.add(&ast.icon_ring, root, ring);
-    for end in [ICON_GAP, TAU - ICON_GAP] {
-        let p = v3(0.78 * end.cos(), -0.78 * end.sin(), 0.0);
-        sc.add(&ast.ball, Xf::scale(0.235).at(p).then(root), ring);
-    }
+
     let gem = Material {
         spec: 1.1,
         shine: 70.0,
         rim: 0.9,
-        ..Material::gloss(mix(a, WHITE, 0.55), mix(a, b, 0.4))
+        ..Material::gloss(mix(a, WHITE, 0.35), mix(a, b, 0.55))
     }
     .with_emissive(scale(a, 0.12));
     sc.add(
         &ast.gem,
-        Xf::scale(0.42)
+        Xf::scale(0.5)
             .rot_y(0.5)
             .rot_x(0.15)
             .at(v3(0.05, 0.02, 0.15))

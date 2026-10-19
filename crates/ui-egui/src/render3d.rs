@@ -19,7 +19,7 @@
 use egui::epaint::{Vertex, WHITE_UV};
 use egui::{Color32, Mesh, Pos2, Rect, Rgba};
 use std::collections::HashMap;
-use std::f32::consts::{PI, TAU};
+use std::f32::consts::{FRAC_PI_2, PI, TAU};
 use std::ops::{Add, Mul, Neg, Sub};
 
 // ---------------------------------------------------------------- math
@@ -464,6 +464,8 @@ pub struct Mesh3 {
     pub tris: Vec<[u32; 3]>,
     /// (a, b, front triangle, other triangle or NONE): every edge once, for silhouettes.
     edges: Vec<[u32; 4]>,
+    /// Centre of the bounding box (the depth an opaque object is sorted by).
+    pub center: V3,
 }
 
 impl Mesh3 {
@@ -582,6 +584,23 @@ impl Mesh3 {
             }
         }
         self.edges = edges;
+        let (lo, hi) = self.pos.iter().fold(
+            (
+                v3(f32::MAX, f32::MAX, f32::MAX),
+                v3(f32::MIN, f32::MIN, f32::MIN),
+            ),
+            |(l, h), p| {
+                (
+                    v3(l.x.min(p.x), l.y.min(p.y), l.z.min(p.z)),
+                    v3(h.x.max(p.x), h.y.max(p.y), h.z.max(p.z)),
+                )
+            },
+        );
+        self.center = if self.pos.is_empty() {
+            V3::ZERO
+        } else {
+            (lo + hi) * 0.5
+        };
         self
     }
 
@@ -650,6 +669,7 @@ impl Mesh3 {
             tint: Vec::new(),
             tris: f,
             edges: Vec::new(),
+            center: V3::ZERO,
         }
         .finish()
     }
@@ -761,6 +781,23 @@ impl Mesh3 {
     /// Torus around Y: ring radius `big`, tube radius `small`, swept over `arc` radians from
     /// angle `start`; open arcs get flat round caps.
     pub fn torus(big: f32, small: f32, seg: usize, sides: usize, start: f32, arc: f32) -> Mesh3 {
+        Mesh3::ring(big, small, seg, sides, start, arc, false)
+    }
+
+    /// An open torus arc whose ends are rounded (half spheres), like a bent tube.
+    pub fn tube(big: f32, small: f32, seg: usize, sides: usize, start: f32, arc: f32) -> Mesh3 {
+        Mesh3::ring(big, small, seg, sides, start, arc, true)
+    }
+
+    fn ring(
+        big: f32,
+        small: f32,
+        seg: usize,
+        sides: usize,
+        start: f32,
+        arc: f32,
+        round: bool,
+    ) -> Mesh3 {
         let mut m = Mesh3::default();
         let full = (arc - TAU).abs() < 1e-4;
         let cols = if full { seg } else { seg + 1 };
@@ -787,7 +824,35 @@ impl Mesh3 {
                 m.tri(a, c, d);
             }
         }
-        if !full {
+        if !full && round {
+            let k_steps = (sides / 3).max(3) as u32;
+            for (end, sign, ring0) in [(start, -1.0f32, 0u32), (start + arc, 1.0, seg as u32 * sd)]
+            {
+                let (s, c) = end.sin_cos();
+                let tangent = v3(-s, 0.0, c) * sign;
+                let centre = v3(big * c, 0.0, big * s);
+                let radial = v3(c, 0.0, s);
+                let mut prev: Vec<u32> = (0..sd).map(|j| ring0 + j).collect();
+                for k in 1..=k_steps {
+                    let phi = FRAC_PI_2 * k as f32 / k_steps as f32;
+                    let (sp, cp) = phi.sin_cos();
+                    let cur: Vec<u32> = (0..sides)
+                        .map(|j| {
+                            let b = TAU * j as f32 / sides as f32;
+                            let (sb, cb) = b.sin_cos();
+                            let n = (radial * cb + V3::Y * sb) * cp + tangent * sp;
+                            m.vertex(centre + n * small, n)
+                        })
+                        .collect();
+                    for j in 0..sd as usize {
+                        let j1 = (j + 1) % sd as usize;
+                        m.tri(prev[j], cur[j], cur[j1]);
+                        m.tri(prev[j], cur[j1], prev[j1]);
+                    }
+                    prev = cur;
+                }
+            }
+        } else if !full {
             for (end, sign) in [(start, -1.0f32), (start + arc, 1.0)] {
                 let (s, c) = end.sin_cos();
                 let tangent = v3(-s, 0.0, c) * sign;
@@ -1037,6 +1102,9 @@ pub struct Item<'a> {
     pub mat: Material,
     /// Multiplies the material alpha (fading whole objects in and out).
     pub fade: f32,
+    /// Moves the object's sorting depth towards the camera (world units), for parts that sit
+    /// on or around another part (decals, a gauge over its track).
+    pub bias: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1084,6 +1152,8 @@ enum Prim {
     /// Feather strip: four vertices starting here.
     Strip(u32),
     Sprite(u32),
+    /// An opaque object's primitives, already sorted among themselves.
+    Group(u32),
 }
 
 impl<'a> Scene<'a> {
@@ -1102,6 +1172,7 @@ impl<'a> Scene<'a> {
             xf,
             mat,
             fade: 1.0,
+            bias: 0.0,
         });
     }
 
@@ -1112,7 +1183,15 @@ impl<'a> Scene<'a> {
                 xf,
                 mat,
                 fade,
+                bias: 0.0,
             });
+        }
+    }
+
+    /// Sort the last added object as if it were `b` world units nearer.
+    pub fn bias_last(&mut self, b: f32) {
+        if let Some(i) = self.items.last_mut() {
+            i.bias = b;
         }
     }
 
@@ -1136,6 +1215,7 @@ impl<'a> Scene<'a> {
         let mut out = Mesh::default();
         let mut tri_idx: Vec<u32> = Vec::new();
         let mut prims: Vec<(f32, Prim)> = Vec::new();
+        let mut groups: Vec<Vec<(f32, Prim)>> = Vec::new();
         let mut stats = Stats::default();
         let lights = &self.rig.lights;
         for item in &self.items {
@@ -1145,6 +1225,9 @@ impl<'a> Scene<'a> {
             let nm = item.xf.m.normal_matrix();
             let glass = mat.alpha < 0.999;
             let fade = item.fade.clamp(0.0, 1.0);
+            // Opaque objects sort as a whole (by their centre) so parts resting on each other
+            // never interleave; glass sorts per triangle so it wraps what is inside it.
+            let mut local: Vec<(f32, Prim)> = Vec::new();
             let mut depth: Vec<f32> = Vec::with_capacity(mesh.pos.len());
             let mut screen: Vec<Pos2> = Vec::with_capacity(mesh.pos.len());
             for (i, &p) in mesh.pos.iter().enumerate() {
@@ -1207,7 +1290,7 @@ impl<'a> Scene<'a> {
                 let z = (depth[t[0] as usize] + depth[t[1] as usize] + depth[t[2] as usize]) / 3.0;
                 let at = tri_idx.len() as u32;
                 tri_idx.extend(t.iter().map(|&i| base + i));
-                prims.push((z, Prim::Tri(at)));
+                local.push((z, Prim::Tri(at)));
                 stats.triangles += 1;
             }
             // Silhouette feather strips.
@@ -1265,8 +1348,16 @@ impl<'a> Scene<'a> {
                 }
                 let z = (depth[tri[0] as usize] + depth[tri[1] as usize] + depth[tri[2] as usize])
                     / 3.0;
-                prims.push((z - 1e-5, Prim::Strip(first)));
+                local.push((z - 1e-5, Prim::Strip(first)));
                 stats.silhouette_edges += 1;
+            }
+            if glass {
+                prims.append(&mut local);
+            } else {
+                local.sort_by(|a, b| b.0.total_cmp(&a.0));
+                let (_, z) = view.project(item.xf.apply(mesh.center));
+                prims.push((z - item.bias, Prim::Group(groups.len() as u32)));
+                groups.push(local);
             }
         }
         for (i, s) in self.sprites.iter().enumerate() {
@@ -1277,7 +1368,14 @@ impl<'a> Scene<'a> {
         // Far first; ties keep insertion order.
         prims.sort_by(|a, b| b.0.total_cmp(&a.0));
         out.indices.reserve(tri_idx.len() + prims.len() * 6);
-        for (_, p) in prims {
+        let flat: Vec<Prim> = prims
+            .into_iter()
+            .flat_map(|(_, p)| match p {
+                Prim::Group(g) => groups[g as usize].iter().map(|q| q.1).collect::<Vec<_>>(),
+                p => vec![p],
+            })
+            .collect();
+        for p in flat {
             match p {
                 Prim::Tri(at) => {
                     let at = at as usize;
@@ -1293,6 +1391,7 @@ impl<'a> Scene<'a> {
                     let r = s.radius * view.focal / z;
                     sprite_mesh(&mut out, c, r, &s, feather);
                 }
+                Prim::Group(_) => {}
             }
         }
         (out, stats)
@@ -1504,7 +1603,12 @@ pub fn rasterize(mesh: &Mesh, w: usize, h: usize, scale: f32, ss: usize) -> Vec<
                 let a = acc[3] / n;
                 let o = ((y0 + yy) * w + x) * 4;
                 for i in 0..3 {
-                    let v = if a > 1e-6 { acc[i] / n / a } else { 0.0 };
+                    // Additive light over transparency cannot be stored: clamp to coverage.
+                    let v = if a > 1e-6 {
+                        acc[i].min(acc[3]) / n / a
+                    } else {
+                        0.0
+                    };
                     px[o + i] = (v.clamp(0.0, 1.0) * 255.0).round() as u8;
                 }
                 px[o + 3] = (a.clamp(0.0, 1.0) * 255.0).round() as u8;
@@ -1563,6 +1667,7 @@ mod tests {
             ("puck", Mesh3::puck(1.0, 0.5, 0.15, 48)),
             ("torus", Mesh3::torus(1.0, 0.25, 48, 16, 0.0, TAU)),
             ("arc", Mesh3::torus(1.0, 0.25, 48, 16, 0.3, 4.0)),
+            ("tube", Mesh3::tube(1.0, 0.25, 48, 16, 0.3, 4.0)),
             ("extrude", Mesh3::extrude(&star, 0.4, 0.06, 3)),
             ("gem", Mesh3::gem(8, 1.0, 0.5, 1.0)),
         ];
@@ -1570,7 +1675,7 @@ mod tests {
             assert!(!m.tris.is_empty(), "{name}");
             assert!(closed(m), "{name} has open edges");
             assert!(outward(m) > 0.999, "{name}: {}", outward(m));
-            if *name != "torus" && *name != "arc" && *name != "extrude" {
+            if !["torus", "arc", "tube", "extrude"].contains(name) {
                 assert!(
                     centroid_outward(m) > 0.99,
                     "{name}: {}",
