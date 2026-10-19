@@ -160,6 +160,7 @@ impl CleanApp {
             self.fonts_pass = ctx.cumulative_pass_nr();
             ctx.request_repaint();
         }
+        crate::images::ensure(ctx, &self.env, self.sync);
         let mut busy = false;
         let ids: Vec<FeatureId> = self.plans.keys().copied().collect();
         for f in ids {
