@@ -300,6 +300,10 @@ fn login_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot) {
             }
             Ok(list) => {
                 for it in list {
+                    let icon = it
+                        .path
+                        .as_deref()
+                        .map(|p| cleancraft_core::apps::resolve(&app.env, p));
                     ui.horizontal(|ui| {
                         ui.set_height(44.0);
                         split_row(
@@ -309,12 +313,17 @@ fn login_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot) {
                                     egui::Vec2::splat(crate::theme::icon::APP_ROW),
                                     egui::Sense::hover(),
                                 );
-                                kit::initial_tile(
-                                    ui.painter(),
-                                    r,
-                                    &it.name,
-                                    kit::name_color(&it.name),
-                                );
+                                match &icon {
+                                    Some(p) => {
+                                        crate::images::paint_app_icon(ui, r, p);
+                                    }
+                                    None => kit::initial_tile(
+                                        ui.painter(),
+                                        r,
+                                        &it.name,
+                                        kit::name_color(&it.name),
+                                    ),
+                                }
                                 short(ui, &it.name, size::BODY, Weight::SemiBold, t.text);
                                 short(
                                     ui,
@@ -386,10 +395,33 @@ fn launch_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot, d: Domain) {
         }
         let n = items.len();
         for (k, it) in items.into_iter().enumerate() {
+            // The app that owns the agent, when its program is inside one.
+            let owner = it
+                .program
+                .as_deref()
+                .and_then(|p| cleancraft_core::sys::app_bundle_of(std::path::Path::new(p)))
+                .map(|a| cleancraft_core::apps::resolve(&app.env, &a.to_string_lossy()));
             ui.horizontal(|ui| {
                 split_row(
                     ui,
                     |ui| {
+                        match &owner {
+                            Some(a) => {
+                                crate::images::app_icon(ui, a, 28.0);
+                            }
+                            None => {
+                                let (r, _) = ui.allocate_exact_size(
+                                    egui::Vec2::splat(28.0),
+                                    egui::Sense::hover(),
+                                );
+                                kit::icon_tile(
+                                    ui.painter(),
+                                    r,
+                                    crate::icons::Icon::Gear,
+                                    egui::Color32::from_gray(96),
+                                );
+                            }
+                        }
                         ui.vertical(|ui| {
                             ui.spacing_mut().item_spacing.y = 2.0;
                             short(ui, &it.label, size::BODY, Weight::SemiBold, t.text);
@@ -500,6 +532,10 @@ fn heavy_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot) {
             }
             Ok(v) => {
                 for p in v {
+                    let icon = p
+                        .app
+                        .as_deref()
+                        .map(|a| cleancraft_core::apps::resolve(&app.env, a));
                     ui.horizontal(|ui| {
                         ui.set_height(44.0);
                         split_row(
@@ -509,12 +545,17 @@ fn heavy_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot) {
                                     egui::Vec2::splat(crate::theme::icon::APP_ROW),
                                     egui::Sense::hover(),
                                 );
-                                kit::initial_tile(
-                                    ui.painter(),
-                                    r,
-                                    &p.name,
-                                    kit::name_color(&p.name),
-                                );
+                                match &icon {
+                                    Some(a) => {
+                                        crate::images::paint_app_icon(ui, r, a);
+                                    }
+                                    None => kit::initial_tile(
+                                        ui.painter(),
+                                        r,
+                                        &p.name,
+                                        kit::name_color(&p.name),
+                                    ),
+                                }
                                 short(ui, &p.name, size::BODY, Weight::SemiBold, t.text);
                                 ui.label(
                                     RichText::new(format!(

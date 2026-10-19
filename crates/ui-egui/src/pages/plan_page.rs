@@ -894,12 +894,12 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
         egui::Vec2::splat(isz::ROW_TILE),
     );
     p.rect_filled(tile, 10.0, Color32::from_white_alpha(14));
-    let kind = kit::kind_icon(&it.path);
-    icons::paint(
-        &p,
-        Rect::from_center_size(tile.center(), egui::Vec2::splat(isz::ROW)),
-        kind,
-        icons::lerp(t.sec_a, t.text, 0.25),
+    // The file's own kind (folder, archive, log, picture preview...), from images.rs.
+    crate::images::paint_file_icon(
+        ui,
+        Rect::from_center_size(tile.center(), egui::Vec2::splat(isz::ROW + 4.0)),
+        &it.path,
+        crate::file_icons::FileKind::of(&it.path),
     );
     // Size on the right; Reveal and Ignore show over the end of the text on hover (they
     // are always there for the keyboard, VoiceOver and tests), so names, reasons and paths

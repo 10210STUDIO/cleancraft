@@ -674,10 +674,7 @@ fn apps_list(app: &mut CleanApp, ui: &mut Ui, h: f32) {
                 }
                 info.push(a.vendor.clone());
                 info.push(a.store.label().to_string());
-                info.push(format!(
-                    "Opened: {}",
-                    apps::last_used_text(a.last_used, now)
-                ));
+                info.push(apps::opened_text(a, now));
                 let info = info.join("  ·  ");
                 let size_text = human_size(a.size);
                 let size_font = font(size::BODY, Weight::SemiBold);
@@ -807,8 +804,8 @@ fn file_row(app: &CleanApp, ui: &mut Ui, it: &cleancraft_core::Item) -> Option<b
     if cb.changed() {
         changed = Some(on);
     }
-    let ir = Rect::from_center_size(pos2(r.left() + 48.0, r.center().y), vec2(18.0, 18.0));
-    icons::paint(ui.painter(), ir, kit::kind_icon(&it.path), t.text_dim);
+    let ir = Rect::from_center_size(pos2(r.left() + 48.0, r.center().y), vec2(20.0, 20.0));
+    crate::images::paint_file_icon(ui, ir, &it.path, crate::file_icons::FileKind::of(&it.path));
     let size_text = human_size(it.size);
     let size_font = font(size::BODY, Weight::SemiBold);
     let size_w = kit::galley(ui, &size_text, size_font.clone(), t.text)
@@ -945,7 +942,7 @@ fn detail(app: &mut CleanApp, ui: &mut Ui) {
                     ui,
                     &t,
                     &format!(
-                        "Version {}  ·  {}  ·  {}  ·  {}  ·  Opened: {}",
+                        "Version {}  ·  {}  ·  {}  ·  {}  ·  {}",
                         if a.version.is_empty() {
                             "?"
                         } else {
@@ -954,7 +951,7 @@ fn detail(app: &mut CleanApp, ui: &mut Ui) {
                         a.bundle_id,
                         a.vendor,
                         a.store.label(),
-                        apps::last_used_text(a.last_used, now())
+                        apps::opened_text(a, now())
                     ),
                 );
             }
@@ -1109,9 +1106,8 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, action: Action) {
         Method::Trash => "the Trash",
         Method::Quarantine | Method::AdminQuarantine => "the CleanCraft quarantine",
     };
-    let name = app
-        .apps
-        .selected
+    let selected = app.apps.selected.clone();
+    let name = selected
         .as_ref()
         .and_then(|p| p.file_stem())
         .map(|s| s.to_string_lossy().into_owned())
@@ -1134,18 +1130,24 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, action: Action) {
     let max_list = (ui.ctx().content_rect().height() - 330.0).clamp(120.0, 360.0);
     let resp = kit::modal(egui::Id::new("apps-confirm"), &t).show(ui.ctx(), |ui| {
         ui.set_width(width);
-        kit::dialog_head(
-            ui,
-            &t,
-            if action == Action::RemoveFiles {
-                Icon::Trash
-            } else {
-                Icon::Remover
-            },
-            t.sec_a,
-            &headline,
-            "These exact files will be moved. You can put them back from History.",
-        );
+        let sub = "These exact files will be moved. You can put them back from History.";
+        match (&selected, action) {
+            (Some(p), Action::Uninstall | Action::Reset) => {
+                crate::images::dialog_head_app(ui, &t, p, &headline, sub)
+            }
+            _ => kit::dialog_head(
+                ui,
+                &t,
+                if action == Action::RemoveFiles {
+                    Icon::Trash
+                } else {
+                    Icon::Remover
+                },
+                t.sec_a,
+                &headline,
+                sub,
+            ),
+        }
         ui.add_space(space::M);
         if let Some(note) =
             super::plan_page::admin_note(cleancraft_core::features::admin_count(&plan))

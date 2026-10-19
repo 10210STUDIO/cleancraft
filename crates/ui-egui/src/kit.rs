@@ -469,11 +469,16 @@ pub fn initial_tile(p: &egui::Painter, r: Rect, name: &str, color: Color32) {
     );
 }
 
-/// An app's picture in `r`. Today the coloured initial tile; the real icon from
-/// `images::app_icon` takes this slot once it is loaded (the tile stays as its placeholder).
+/// An app's picture in `r`: the real icon (`images::paint_app_icon`, which shows the initial
+/// tile while it loads and fades the icon in), or the coloured initial tile when there is no
+/// bundle to read it from.
 pub fn app_icon(ui: &Ui, r: Rect, name: &str, bundle: Option<&std::path::Path>) {
-    let _ = bundle;
-    initial_tile(ui.painter(), r, name, name_color(name));
+    match bundle {
+        Some(p) => {
+            crate::images::paint_app_icon(ui, r, p);
+        }
+        None => initial_tile(ui.painter(), r, name, name_color(name)),
+    }
 }
 
 /// A centred, wrapping row of painted chips (small module tile and name), for "what this
@@ -1266,7 +1271,7 @@ pub fn confirm_line(
         pos2(r.left() + 10.0, r.center().y),
         Vec2::splat(isz::INLINE),
     );
-    icons::paint(ui.painter(), ir, kind_icon(path), t.text_dim);
+    crate::images::paint_file_icon(ui, ir, path, crate::file_icons::FileKind::of(path));
     let size_font = font(size::CALLOUT, Weight::SemiBold);
     // Fixed columns, so reasons start on one line from row to row.
     let size_w = galley(ui, size_text, size_font.clone(), t.text)
