@@ -33,19 +33,19 @@ material is file names and paths.
 | Token (`theme::size`) | Size | Weight | Line height | HIG role | Used for |
 |---|---|---|---|---|---|
 | `DISPLAY` | 52 | Bold | 1.1 | (none) | the total found on a results page |
-| `NUMBER` | 30 | Bold | 1.15 | (none) | values in Quick Sweep tiles and Live Monitor cards, App Remover detail total |
-| `LARGE_TITLE` | 30 | Bold | 1.2 | Large Title (26) | start-screen title, Done headline |
+| `NUMBER` | 34 | Bold | 1.15 | (none) | values in Quick Sweep tiles and Live Monitor cards, App Remover detail total |
+| `LARGE_TITLE` | 34 | Bold | 1.2 | Large Title (26) | start-screen title, Done headline |
 | `NUMBER_S` | 24 | Bold | 1.2 | (none) | selected size in the bottom bar (same size as `TITLE`) |
 | `TITLE` | 24 | Bold | 1.2 | Title 1 (22) | page title in the header, app name in App Remover detail |
 | `TITLE2` | 19 | SemiBold / Bold | 1.25 | Title 2 (17) | dialog headline, progress headline, app name in the sidebar logo, empty states |
 | `TITLE3` | 16 | SemiBold | 1.3 | Title 3 (15) | card titles, "found in" and "ready to clean" next to the total |
 | `BODY_L` | 16 | Regular | 1.4 | (none) | lead text under a start-screen title, Done summary (same size as `TITLE3`) |
-| `BODY` | 14 | Regular / Medium / SemiBold | 1.35 | Body (13) | row names (SemiBold), sidebar entries (Medium, SemiBold when active), sizes in rows, primary buttons |
+| `BODY` | 15 | Regular / Medium / SemiBold | 1.35 | Body (13) | row names (SemiBold), sidebar entries (Medium, SemiBold when active), sizes in rows, primary buttons |
 | `CALLOUT` | 13 | Regular / Medium | 1.35 | Callout (12) | page subtitles, secondary lines, secondary buttons, banners, strips, confirmation lines |
 | `FOOTNOTE` | 12 | Regular / Medium | 1.3 | Footnote (10) | paths, tags, counts, app meta lines, row actions (Reveal, Ignore) |
 | `CAPTION` | 11.5 | SemiBold, upper case, +0.6 to 0.8 letter spacing | 1.2 | Caption (10) | sidebar group labels and eyebrows only |
 
-Nine sizes in all (`theme::SCALE`: 52, 30, 24, 19, 16, 14, 13, 12, 11.5); `theme::snap`
+Nine sizes in all (`theme::SCALE`: 52, 34, 24, 19, 16, 15, 13, 12, 11.5; round 3 raised the start-screen title to 34 and body text to 15 at the lead's request); `theme::snap`
 puts text sized from a shape (the initial in an app tile) on the nearest one.
 
 Rules:
@@ -79,7 +79,7 @@ icons agent's `images::app_icon` when loaded, the coloured initial tile as place
 `XXS 2`, `XS 4`, `S 8`, `M 12`, `L 16`, `XL 24`, `XXL 32`, `XXXL 48`.
 
 - Content margin: 32 left/right, 24 top/bottom (`PAGE_X`, `PAGE_Y`).
-- Sidebar: 232 wide, inner margin 12 x 16.
+- Sidebar: 240 wide, inner margin 12 left and right; the top 40 pt are the title band and its air (titlebar.rs).
 - Gutter between cards and between the two columns of a results page: 16 (`GUTTER`).
 - Header to content: 16. Card inner margin: 16 to 18. Dialog inner margin: 24.
 - Results left column: 272 wide (236 under 760 pt of content width).
@@ -187,18 +187,27 @@ Neutral slate (History and Settings).
   fits a 14 inch MacBook Pro at its default scaling (1512 x 982) with room for the Dock.
 - Nothing overlaps, clips or scrolls sideways at any of those sizes (checked by
   `ux_render::no_page_uses_a_glyph_inter_cannot_draw_and_nothing_leaves_the_window`).
-- Every module page shows its header (badge, title, one line) in every phase: start screen,
-  scanning, results, Done. Clicking Scan never moves the title. The start screen under it is
-  the module's object, optional controls, the round action and one note; the title and
-  explanation are not repeated in it.
 - Start screens centre their block vertically (85% of the free space above, so the block
   sits slightly high), with the picture sized by what is left.
 - Done screens, Quick Sweep's included, are one centred composition: object with check badge,
   headline, buttons, then any per-module cards.
-- The sidebar's top 28 pt are the title band: on macOS the traffic lights sit at its left
-  (transparent title bar), the logo and "CleanCraft" right of them. Group labels get 8 pt
-  above and 4 pt under them (22 pt at the 680 pt minimum, 26 to 30 in taller windows); rows
-  never go under 28 pt.
+- Sidebar (lead decision, round 3): the macOS traffic lights sit in the top 28 pt
+  (transparent title bar, `titlebar.rs`), the logo (`logo.rs`) under them, then seven
+  entries, one per section: Quick Sweep, Clean, Protect, Speed, Apps, Files, Live Monitor; a
+  divider; History and Settings. Rows are 44 pt with a 28 pt 3D section icon
+  (`section_icons.rs`: rest, half lit on hover, lit and lifted when selected) and a 15 pt
+  Medium label; the selected entry sits on a soft pill. No small-caps group labels. A
+  section opens the tool it showed last.
+- Sections with several tools show a segmented switcher at the top of the page in every
+  phase (one segment per tool, icon and name, selected state for VoiceOver); it stands in
+  for the compact page header, so nothing at the top of the page moves from start screen to
+  results. Page headings are painted (no second accessibility node with the tool's name).
+- Start screens: from 900 pt of content width, two columns: the 3D object on the left
+  (42% of the width, up to 480 pt), and on the right the 34 pt title, the explanation, what
+  the scan covers (`pages::covers`), controls, the round action and the note. Narrower, one
+  centred column without the coverage list; a short window gets a smaller object (none
+  under 64 pt) and an 88 pt round action. Renders at 1060 x 680, 1280 x 820 and
+  1600 x 1000.
 - Results rows: line 1 is the name, the path (shortened in the middle) and the size; line 2
   is the reason tag, which runs under the size to the row's end. A reason that repeats the
   row's name drops it ("Trash of USB: 1 item" on the row "Trash of USB" reads "1 item").

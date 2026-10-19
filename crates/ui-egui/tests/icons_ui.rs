@@ -494,6 +494,8 @@ fn the_loading_placeholder_is_a_neutral_tile_not_a_coloured_letter() {
     let mut h = harness(&m.mac);
     let ctx = h.ctx.clone();
     images::install(&ctx, &m.mac.env, Mode::Manual);
+    // The tool sits in the "Apps" section of the sidebar.
+    click(&mut h, "Apps");
     click(&mut h, "App Remover");
     assert_eq!(images::shown(&ctx, &m.editor), Some(Shown::Placeholder));
     for name in ["Editor", "Notes Pro"] {
@@ -522,6 +524,8 @@ fn an_app_without_an_icon_keeps_its_initial_tile() {
     mac.spotlight_finds_nothing();
     let mut h = harness(&mac);
     images::install(&h.ctx.clone(), &mac.env, Mode::Sync);
+    // The tool sits in the "Apps" section of the sidebar.
+    click(&mut h, "Apps");
     click(&mut h, "App Remover");
     let (tile, row) = tile_and_row_pixels(&mut h, "Broken");
     assert!(
@@ -590,6 +594,8 @@ fn metadata_mac() -> FakeMac {
 fn app_remover_shows_real_developers_and_part_of_macos_only_for_system_apps() {
     let mac = metadata_mac();
     let mut h = harness(&mac);
+    // The tool sits in the "Apps" section of the sidebar.
+    click(&mut h, "Apps");
     click(&mut h, "App Remover");
     let row = |name: &str| h.get_by_label(name).rect();
     let info_in_row = |name: &str, dev: &str| {
@@ -654,6 +660,9 @@ fn metadata_render() {
                 h.step();
             }
             images::install(&h.ctx.clone(), &mac.env, Mode::Manual);
+            // App Remover sits in the "Apps" section of the sidebar.
+            h.get_by_label("Apps").click();
+            h.run();
             h.get_by_label("App Remover").click();
             for _ in 0..6 {
                 h.step();
