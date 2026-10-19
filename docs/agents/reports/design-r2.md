@@ -96,24 +96,37 @@ Dock and menu bar, and the minimum is what every layout test checks. No edit was
 - `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings` and
   `cargo fmt --all`: see the last commit.
 
-## REVIEW-A status (design items)
+## REVIEW-A and REVIEW-B status (design items)
 
-Fixed: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 19, 20, 21, 22, 25, 27, 28, 29, 30, 31 (bottom
-bar), 32, 33, 35, 36, 37 (Esc), 38, 39, 40, 41, 46, 47, 49, 52, 53, 54, 55, 57, 58, 59, 60, 61,
-62, 63, 65, 67, 69 (scenes); 18, 40, 43 partly through the heroes (the scanning screen now
-shows the module at work; it still has no per-module list).
+designqa's checks pass on this branch: `review_design_a -- --include-ignored` (A1, A2, A3,
+A4, A57) and `review_design_b -- --include-ignored` (B1, B2, A31); they can lose their
+`#[ignore]`.
+
+Fixed: A 1, 2, 3, 4 (danger pill label is ink, 6.6:1), 5, 6, 7, 8 (Select Copies is a pill
+menu), 9, 10, 11, 13, 14, 19, 20, 21, 22, 25, 27, 28, 29 (padlock on locked result rows), 30,
+31 (bottom bar), 32, 33, 35, 36, 37 (Esc), 38, 39, 40, 41, 46, 47, 49, 52, 54, 55 (96 pt
+gauges, value inside), 57, 58, 59, 60, 61, 62, 63, 65, 67, 69; B 1 (module buttons go to a
+second row when they do not fit), 2 (memory figure "7.78 GB" big, "of 16.0 GB" beside it), 3
+(hero glow drawn over the page margin, not clipped into a box), 4 (clippy clean after
+motion's b70af47), 5 (empty results: the Done object, "Nothing to clean here.", notes, Scan
+Again), 7 (group labels sit with their group), 8 (tile lines wrap), 9 (macOS version once,
+"Restart required" tag).
+
+Partly: 18, 43 (the scanning screen shows the module's object at work; no per-module list),
+53 (a dashed "Collecting" baseline until two samples; with few samples the line is short).
 
 Open:
 - 12 Title bar: a full-size content view with a transparent title bar needs viewport flags
   in `main.rs` (`with_fullsize_content_view`, `with_titlebar_shown(false)`,
   `with_title_shown(false)`) plus a 28 pt top inset in the sidebar for the traffic lights. My
   brief allows only size edits there; proposed to the lead.
-- 17 backdrop dithering, 23 "Run" label (tests click "Run"), 24 bottom fade on lists, 26 one
-  Done layout for Quick Sweep (it keeps its cards under the headline), 34 Trash Bins item
-  naming ("0" is the folder name core reports), 42 Disk Map start screen density, 43 a
-  per-module progress list, 50 switches for Startup Items (tests click "Turn Off <name>"), 51
-  middle truncation in Startup Items, 56 core formatters ("375 d 5 h", "Zero KB/s",
-  "discharging" are asserted by core and UI tests).
+- 15 icon weight balance, 17 backdrop dithering, 23 "Run" label (tests click "Run"), 24
+  bottom fade on lists, 26 one Done layout for Quick Sweep (it keeps its cards under the
+  headline), 29 on Disk Map rows, 34 Trash Bins item naming ("0" is the folder name core
+  reports), 42 Disk Map start screen density, 50 switches for Startup Items (tests click
+  "Turn Off <name>"), 51 middle truncation in Startup Items, 56 core formatters ("375 d 5 h",
+  "discharging" are asserted by tests), B6 plain-language error banner, B10 "1 items" (core
+  text).
 
 ## Shared-file changes
 
