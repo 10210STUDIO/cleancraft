@@ -89,7 +89,6 @@ fn cache_rows(h: &H, mac: &FakeMac) -> usize {
 /// a full disk) the dialog lays out every row on every frame and the window stalls; the item list
 /// behind it is virtualised and stays light.
 #[test]
-#[ignore = "REL-7: confirm dialog lays out every selected item each frame (no show_rows); big plans stall the UI"]
 fn confirm_dialog_with_thousands_of_items_lays_out_only_visible_rows() {
     let mac = many_caches(3000);
     let mut h = harness(&mac);
@@ -117,7 +116,6 @@ fn confirm_dialog_with_thousands_of_items_lays_out_only_visible_rows() {
 /// no warning, and the ignore list is gone. The next scan proposes and preselects what the user
 /// had put on the ignore list, and the next settings save overwrites the old file for good.
 #[test]
-#[ignore = "REL-8: truncated settings.json silently resets the ignore list; ignored items are proposed and preselected again"]
 fn damaged_settings_are_reported_and_the_ignore_list_survives() {
     let mac = FakeMac::sample();
     let editor = mac.env.home_path("Library/Caches/com.example.Editor");
@@ -155,7 +153,6 @@ fn damaged_settings_are_reported_and_the_ignore_list_survives() {
 /// keeps showing "Moving the selected items..." with a spinner forever: no error, no way back to
 /// the list. Scans handle this case ("The scan stopped unexpectedly."), cleanups do not.
 #[test]
-#[ignore = "REL-10: a cleanup job that dies leaves the page spinning on 'Moving the selected items...' forever"]
 fn dead_cleanup_job_is_reported() {
     let mac = FakeMac::sample();
     let mut h = async_harness(&mac);

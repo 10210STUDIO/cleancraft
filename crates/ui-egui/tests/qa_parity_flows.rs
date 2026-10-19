@@ -110,7 +110,10 @@ fn quick_sweep_runs_the_real_modules_and_undoes_one() {
     for p in &all {
         assert_eq!(p.exists(), !listed.contains(p), "{}", p.display());
     }
-    assert!(has(&h, &format!("{} freed", human_size(j + m))));
+    assert!(has(
+        &h,
+        &format!("{} moved to the Trash", human_size(j + m))
+    ));
     let moved = executor::history(&mac.env).len();
     assert_eq!(moved, n, "one journal line per moved item");
 

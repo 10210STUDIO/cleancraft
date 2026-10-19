@@ -121,11 +121,9 @@ fn settings_are_saved_and_change_what_happens() {
     assert_eq!(Settings::load(&mac.env).ignore, vec![browser.clone()]);
     assert!(has(&h, &mac.env.display(&browser)));
 
-    // Agents may clean, menu bar off, a threshold: each saved.
+    // Agents may clean and a threshold: each saved.
     click(&mut h, "Let AI agents (MCP) carry out confirmed cleanups");
     assert!(Settings::load(&mac.env).agents_may_clean);
-    click(&mut h, "Show the live monitor in the menu bar");
-    assert!(!Settings::load(&mac.env).menu_bar);
     h.get_by_role_and_label(Role::Slider, "Large file minimum (MB)")
         .click();
     steps(&mut h);
@@ -149,7 +147,7 @@ fn settings_are_saved_and_change_what_happens() {
     assert!(!editor.exists());
     assert!(browser.exists(), "ignored folder moved");
     let quarantined = executor::history(&mac.env).iter().any(|r| {
-        matches!(&r.kind, ActionKind::Moved { original, stored, method: Method::Quarantine }
+        matches!(&r.kind, ActionKind::Moved { original, stored, method: Method::Quarantine, .. }
             if *original == editor && stored.starts_with(mac.env.quarantine_dir()) && stored.exists())
     });
     assert!(quarantined, "editor cache not in the quarantine");

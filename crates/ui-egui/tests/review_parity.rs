@@ -12,7 +12,6 @@ use common::*;
 /// that changes nothing: a dead control. Either show the status item, or leave the option out
 /// until there is one (rule 6: no controls for things that cannot work).
 #[test]
-#[ignore = "PAR-3: menu bar setting has no effect"]
 fn menu_bar_option_only_when_there_is_a_menu_bar_item() {
     let mac = FakeMac::new();
     let mut h = harness(&mac);

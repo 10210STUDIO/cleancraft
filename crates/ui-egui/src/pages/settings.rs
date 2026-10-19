@@ -140,15 +140,6 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
             {
                 changed = true;
             }
-            if ui
-                .checkbox(
-                    &mut app.settings.menu_bar,
-                    "Show the live monitor in the menu bar",
-                )
-                .changed()
-            {
-                changed = true;
-            }
         });
     });
     if changed {

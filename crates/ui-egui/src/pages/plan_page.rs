@@ -148,8 +148,15 @@ pub fn poll(app: &mut CleanApp, f: FeatureId) -> bool {
                     }
                 }
                 false
+            } else if job.is_dead() {
+                st.error = Some(
+                    "The cleanup stopped unexpectedly. History shows what was moved before it stopped."
+                        .into(),
+                );
+                st.phase = Phase::Results;
+                false
             } else {
-                !job.is_dead()
+                true
             }
         }
         _ => false,
@@ -737,21 +744,21 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         if let Some(note) = admin_note(features::admin_count(&plan)) {
             ui.label(RichText::new(note).color(t.warning));
         }
+        // Only the visible rows are laid out: plans can hold thousands of items.
+        let rows: Vec<&cleancraft_core::Item> = plan.selected().collect();
         egui::ScrollArea::both()
+            .id_salt("confirm-list")
             .max_width(640.0)
             .max_height(360.0)
-            .show(ui, |ui| {
-                egui::Grid::new("confirm-list")
-                    .striped(true)
-                    .num_columns(3)
-                    .show(ui, |ui| {
-                        for it in plan.selected() {
-                            ui.label(app.env.display(&it.path));
-                            ui.label(human_size(it.size));
-                            ui.label(RichText::new(&it.reason).color(t.text_dim));
-                            ui.end_row();
-                        }
+            .show_rows(ui, 20.0, rows.len(), |ui, range| {
+                for it in &rows[range] {
+                    ui.horizontal(|ui| {
+                        ui.set_height(18.0);
+                        ui.label(app.env.display(&it.path));
+                        ui.label(human_size(it.size));
+                        ui.label(RichText::new(&it.reason).color(t.text_dim));
                     });
+                }
             });
         ui.add_space(8.0);
         ui.horizontal(|ui| {

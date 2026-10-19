@@ -69,7 +69,7 @@ pub struct CleanApp {
 
 impl CleanApp {
     pub fn new(env: Env) -> CleanApp {
-        let settings = Settings::load(&env);
+        let (settings, settings_warning) = Settings::load_checked(&env);
         let fda = permissions::full_disk_access(&env);
         CleanApp {
             env,
@@ -87,7 +87,7 @@ impl CleanApp {
             disk_map: Default::default(),
             monitor: Default::default(),
             fda,
-            notice: None,
+            notice: settings_warning.map(|m| (m, true)),
             actions: 0,
             fonts_installed: false,
             fonts_pass: 0,

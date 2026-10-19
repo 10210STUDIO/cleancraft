@@ -52,6 +52,35 @@ impl Settings {
         env.data_dir().join("settings.json")
     }
 
+    /// Load settings; when the file exists but cannot be read as settings (cut short by a crash
+    /// or a full disk), keep a copy of it next to it and return a warning to show, so the user
+    /// knows their ignore list and choices were not applied.
+    pub fn load_checked(env: &Env) -> (Settings, Option<String>) {
+        let path = Self::path(env);
+        let Ok(bytes) = std::fs::read(&path) else {
+            return (Settings::default(), None);
+        };
+        match serde_json::from_slice(&bytes) {
+            Ok(s) => (s, None),
+            Err(_) => {
+                let copy = path.with_extension(format!(
+                    "damaged-{}.json",
+                    chrono::Utc::now().format("%Y%m%d%H%M%S")
+                ));
+                let kept = std::fs::write(&copy, &bytes).is_ok();
+                let msg = if kept {
+                    format!(
+                        "Your settings file could not be read, so default settings are in use (ignore list empty). A copy of the damaged file is at {}.",
+                        env.display(&copy)
+                    )
+                } else {
+                    "Your settings file could not be read, so default settings are in use (ignore list empty).".to_string()
+                };
+                (Settings::default(), Some(msg))
+            }
+        }
+    }
+
     pub fn load(env: &Env) -> Settings {
         std::fs::read(Self::path(env))
             .ok()
