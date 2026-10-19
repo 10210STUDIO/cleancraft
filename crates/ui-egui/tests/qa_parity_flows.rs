@@ -83,7 +83,7 @@ fn quick_sweep_runs_the_real_modules_and_undoes_one() {
         .sum();
     assert!(has(&h, &human_size(t)), "trash tile {}", human_size(t));
 
-    click(&mut h, "Run");
+    click(&mut h, "Review and Clean");
     let listed: Vec<_> = junk
         .selected()
         .chain(mail.selected())

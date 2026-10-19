@@ -15,7 +15,7 @@ use egui::{RichText, Ui};
 use crate::app::CleanApp;
 use crate::jobs::Job;
 use crate::kit;
-use crate::theme::{Weight, font, size};
+use crate::theme::{Weight, font, size, space};
 
 /// Everything the page shows, read in one go.
 #[derive(Clone, Debug)]
@@ -176,18 +176,23 @@ fn start(app: &mut CleanApp, a: Action) {
 /// A small button whose accessible name says which item it acts on.
 fn row_button(ui: &mut Ui, text: &str, name: String) -> bool {
     let t = crate::theme::Tokens::dark();
-    let r = kit::ghost(ui, &t, text, None);
+    let icon = (text == "Remove").then_some(crate::icons::Icon::Trash);
+    let r = kit::ghost(ui, &t, text, icon);
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name.clone()));
     r.clicked()
 }
 
-/// On or Off, as a coloured tag.
-fn state_tag(ui: &mut Ui, t: &crate::theme::Tokens, on: bool) {
-    if on {
-        kit::tag(ui, "On", t.success);
-    } else {
-        kit::tag(ui, "Off", t.text_faint);
-    }
+/// On or Off as one switch; its accessible name is the action a click takes ("Turn Off
+/// Dropbox"). Returns true when clicked.
+fn state_switch(ui: &mut Ui, t: &crate::theme::Tokens, on: bool, name: &str) -> bool {
+    let action = if on { "Turn Off" } else { "Turn On" };
+    kit::switch(ui, t, on, &format!("{action} {name}"))
+        .on_hover_text(if on {
+            "On: starts with your Mac. Click to turn off."
+        } else {
+            "Off. Click to turn on."
+        })
+        .clicked()
 }
 
 /// Lay out a row: `right` first (from the right edge), then `left` in what is left, so long
@@ -203,6 +208,22 @@ fn split_row(ui: &mut Ui, left: impl FnOnce(&mut Ui), right: impl FnOnce(&mut Ui
 
 fn short(ui: &mut Ui, text: &str, size: f32, w: Weight, color: egui::Color32) {
     ui.add(egui::Label::new(RichText::new(text).font(font(size, w)).color(color)).truncate());
+}
+
+/// A path line shortened in the middle, so the executable's name at the end stays readable
+/// ("Runs /Applications/Example.app/...ExampleHelper"); the whole path is in the tooltip and
+/// read by VoiceOver.
+fn path_line(ui: &mut Ui, text: &str, color: egui::Color32) {
+    let fid = font(size::FOOTNOTE, Weight::Regular);
+    let shown = kit::truncate_middle(ui.ctx(), text, &fid, ui.available_width().max(40.0));
+    let r = ui.add(
+        egui::Label::new(RichText::new(shown).font(fid).color(color))
+            .truncate()
+            .selectable(false),
+    );
+    let full = text.to_string();
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, full.clone()));
+    r.on_hover_text(text);
 }
 
 pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
@@ -252,7 +273,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     for n in &data.notes {
         kit::dim(ui, &t, n);
     }
-    egui::ScrollArea::vertical()
+    let fade_out = egui::ScrollArea::vertical()
         .id_salt("startup")
         .auto_shrink([false, false])
         .show(ui, |ui| {
@@ -262,6 +283,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             }
             heavy_section(app, ui, &data);
         });
+    kit::scroll_fade_page(ui, &fade_out, &t);
     if app.startup.confirm_quit.is_some() {
         confirm_quit(app, ui);
     }
@@ -334,11 +356,10 @@ fn login_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot) {
                                 );
                             },
                             |ui| {
-                                if row_button(ui, "Turn Off", format!("Turn Off {}", it.name)) {
+                                if state_switch(ui, &t, true, &it.name) {
                                     app.act();
                                     start(app, Action::RemoveLogin(it.clone()));
                                 }
-                                state_tag(ui, &t, true);
                             },
                         );
                     });
@@ -369,11 +390,10 @@ fn login_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot) {
                                 );
                             },
                             |ui| {
-                                if row_button(ui, "Turn On", format!("Turn On {}", it.name)) {
+                                if state_switch(ui, &t, false, &it.name) {
                                     app.act();
                                     start(app, Action::RestoreLogin(id.clone(), it.name.clone()));
                                 }
-                                state_tag(ui, &t, false);
                             },
                         );
                     });
@@ -426,13 +446,7 @@ fn launch_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot, d: Domain) {
                             ui.spacing_mut().item_spacing.y = 2.0;
                             short(ui, &it.label, size::BODY, Weight::SemiBold, t.text);
                             let prog = it.program.as_deref().unwrap_or("no program named");
-                            short(
-                                ui,
-                                &format!("Runs {prog}"),
-                                size::FOOTNOTE,
-                                Weight::Regular,
-                                t.text_faint,
-                            );
+                            path_line(ui, &format!("Runs {prog}"), t.text_faint);
                             let (sig, col) = if !it.program_exists && it.program.is_some() {
                                 (
                                     "Program missing: this item does nothing".to_string(),
@@ -454,20 +468,17 @@ fn launch_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot, d: Domain) {
                             kit::tag(ui, "Part of macOS", t.text_dim);
                             return;
                         }
+                        if state_switch(ui, &t, it.enabled, &it.label) {
+                            app.act();
+                            start(app, Action::Launch(it.clone(), !it.enabled));
+                        }
+                        ui.add_space(space::XS);
+                        // Removing moves the file: a quieter, separate action with the
+                        // Trash glyph, never next to the switch's own spot.
                         if removable && row_button(ui, "Remove", format!("Remove {}", it.label)) {
                             app.act();
                             open_remove(app, it);
                         }
-                        let (text, on) = if it.enabled {
-                            ("Turn Off", false)
-                        } else {
-                            ("Turn On", true)
-                        };
-                        if row_button(ui, text, format!("{text} {}", it.label)) {
-                            app.act();
-                            start(app, Action::Launch(it.clone(), on));
-                        }
-                        state_tag(ui, &t, it.enabled);
                         if d.admin() {
                             kit::dim(ui, &t, "needs password");
                         }
@@ -593,7 +604,7 @@ fn confirm_quit(app: &mut CleanApp, ui: &mut Ui) {
         .join(" ");
     let mut go = false;
     let mut close = false;
-    kit::modal(egui::Id::new("startup-quit"), &t).show(ui.ctx(), |ui| {
+    let dlg = kit::modal(egui::Id::new("startup-quit"), &t).show(ui.ctx(), |ui| {
         ui.set_width(560.0);
         kit::dialog_head(
             ui,
@@ -622,6 +633,9 @@ fn confirm_quit(app: &mut CleanApp, ui: &mut Ui) {
             }
         });
     });
+    if dlg.should_close() {
+        close = true;
+    }
     if go {
         app.act();
         app.startup.confirm_quit = None;
@@ -645,7 +659,7 @@ fn confirm_remove(app: &mut CleanApp, ui: &mut Ui) {
     };
     let mut go = false;
     let mut close = false;
-    kit::modal(egui::Id::new("startup-remove"), &t).show(ui.ctx(), |ui| {
+    let dlg = kit::modal(egui::Id::new("startup-remove"), &t).show(ui.ctx(), |ui| {
         ui.set_width(600.0);
         kit::dialog_head(
             ui,
@@ -676,6 +690,9 @@ fn confirm_remove(app: &mut CleanApp, ui: &mut Ui) {
             }
         });
     });
+    if dlg.should_close() {
+        close = true;
+    }
     if go {
         app.act();
         app.startup.confirm_remove = None;

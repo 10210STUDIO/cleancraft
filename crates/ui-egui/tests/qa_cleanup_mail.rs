@@ -105,7 +105,7 @@ fn mail_running_locks_and_blocks() {
     assert!(has(&h, "Mail is open. Quit Mail and scan again to clean."));
     assert!(has_text(&h, "(cannot be selected: Quit Mail first)"));
     assert!(!has(&h, "Review and Clean"), "nothing can be selected");
-    assert!(has(&h, "0 selected, Zero KB"));
+    assert!(has(&h, "0 selected, 0 KB"));
 
     // Mail opened between the scan and the cleanup: the cleanup is refused.
     let mac = mail_mac();

@@ -108,7 +108,7 @@ fn trash_toolbar(app: &mut CleanApp, ui: &mut Ui) {
     if let Some(size) = st.confirm_empty {
         let mut go = false;
         let mut cancel = false;
-        kit::modal(Id::new("confirm-empty-trash"), &t).show(ui.ctx(), |ui| {
+        let dlg = kit::modal(Id::new("confirm-empty-trash"), &t).show(ui.ctx(), |ui| {
             ui.set_width(520.0);
             kit::dialog_head(
                 ui,
@@ -128,6 +128,9 @@ fn trash_toolbar(app: &mut CleanApp, ui: &mut Ui) {
                 }
             });
         });
+        if dlg.should_close() {
+            cancel = true;
+        }
         if cancel {
             app.act();
             st.confirm_empty = None;
@@ -208,7 +211,7 @@ fn privacy_toolbar(app: &mut CleanApp, ui: &mut Ui) {
         let mut go = false;
         let mut cancel = false;
         let mut toggled = false;
-        kit::modal(Id::new("reset-permissions"), &t).show(ui.ctx(), |ui| {
+        let dlg = kit::modal(Id::new("reset-permissions"), &t).show(ui.ctx(), |ui| {
             ui.set_width(560.0);
             kit::dialog_head(
                 ui,
@@ -242,6 +245,9 @@ fn privacy_toolbar(app: &mut CleanApp, ui: &mut Ui) {
                 }
             });
         });
+        if dlg.should_close() {
+            cancel = true;
+        }
         if toggled {
             app.act();
         }

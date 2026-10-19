@@ -52,7 +52,7 @@ fn downloads_scan_select_clean_undo() {
     assert!(paths.contains(&big) && paths.contains(&old) && !paths.contains(&clip));
     let total = tree_size(&big).0 + tree_size(&old).0;
     assert!(has(&h, &human_size(total)), "total {}", human_size(total));
-    assert!(has(&h, "0 selected, Zero KB"), "something was preselected");
+    assert!(has(&h, "0 selected, 0 KB"), "something was preselected");
     assert!(has(
         &h,
         &format!("Archives  {}", human_size(tree_size(&big).0))
@@ -133,7 +133,7 @@ fn downloads_by_source_app() {
         &h,
         &format!("No source recorded  {}", human_size(none))
     ));
-    assert!(has(&h, "0 selected, Zero KB"));
+    assert!(has(&h, "0 selected, 0 KB"));
     // Show one category, select it whole, clean it.
     click(&mut h, "Select Saved by Safari");
     assert!(has(&h, &format!("2 selected, {}", human_size(safari))));

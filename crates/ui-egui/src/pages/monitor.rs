@@ -123,7 +123,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         kit::progress(ui, &t, f, "Reading...", "", 0, false);
         return;
     };
-    egui::ScrollArea::vertical()
+    let out = egui::ScrollArea::vertical()
         .id_salt("monitor")
         .auto_shrink([false, false])
         .show(ui, |ui| {
@@ -149,6 +149,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             }
             ui.add_space(space::M);
         });
+    kit::scroll_fade_page(ui, &out, &t);
     if app.monitor.confirm_purge {
         confirm_purge(app, ui);
     }
@@ -180,10 +181,12 @@ fn big(app: &CleanApp, ui: &mut Ui, text: &str) {
 
 /// A semicircle gauge with the value inside it.
 fn gauge_big(app: &CleanApp, ui: &mut Ui, frac: f32, color: Color32, text: &str) {
-    let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 78.0), Sense::hover());
-    let c = egui::pos2(r.left() + 56.0, r.bottom() - 8.0);
-    kit::gauge(ui.painter(), c, 48.0, frac, color);
-    let tr = egui::Rect::from_center_size(c - vec2(0.0, 15.0), vec2(80.0, 30.0));
+    // A 128 pt arc with the number inside it: a gauge, not a loading indicator.
+    const R: f32 = 64.0;
+    let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), R + 22.0), Sense::hover());
+    let c = egui::pos2(r.left() + R + 6.0, r.bottom() - 6.0);
+    kit::gauge(ui.painter(), c, R, frac, color);
+    let tr = egui::Rect::from_center_size(c - vec2(0.0, 20.0), vec2(R * 1.5, 34.0));
     ui.put(
         tr,
         egui::Label::new(
@@ -393,7 +396,7 @@ fn battery_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
                 app.t.success
             };
             gauge_big(app, ui, frac, color, &format!("{}%", b.percent));
-            row(app, ui, "State", &b.state);
+            row(app, ui, "State", &sentence_case(&b.state));
             row(
                 app,
                 ui,
@@ -455,7 +458,7 @@ fn confirm_purge(app: &mut CleanApp, ui: &mut Ui) {
     let t = app.t;
     let mut go = false;
     let mut close = false;
-    kit::modal(egui::Id::new("confirm-purge"), &t).show(ui.ctx(), |ui| {
+    let dlg = kit::modal(egui::Id::new("confirm-purge"), &t).show(ui.ctx(), |ui| {
         ui.set_width(480.0);
         kit::dialog_head(
             ui,
@@ -476,6 +479,9 @@ fn confirm_purge(app: &mut CleanApp, ui: &mut Ui) {
             }
         });
     });
+    if dlg.should_close() {
+        close = true;
+    }
     if go {
         app.act();
         app.monitor.confirm_purge = false;
@@ -484,5 +490,14 @@ fn confirm_purge(app: &mut CleanApp, ui: &mut Ui) {
     } else if close {
         app.act();
         app.monitor.confirm_purge = false;
+    }
+}
+
+/// "discharging" as "Discharging": pmset's words start lower case.
+fn sentence_case(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        Some(f) => f.to_uppercase().chain(c).collect(),
+        None => String::new(),
     }
 }

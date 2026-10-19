@@ -77,7 +77,9 @@ fn cards_show_the_parsed_reading() {
         panic!("battery");
     };
     assert!(has(&h, "64%"));
-    assert!(has(&h, "discharging"));
+    // pmset says "discharging"; the card says it in sentence case.
+    assert_eq!(b.state, "discharging");
+    assert!(has(&h, "Discharging"));
     assert!(has(&h, &uptime_text(252 * 60)));
     assert_eq!(b.health, Some(95));
     assert!(has(&h, "95%"));
@@ -117,7 +119,7 @@ fn unreadable_tools_show_unknown_not_zero() {
     // CPU, uptime, memory, storage, battery, network.
     assert!(unknown >= 6, "only {unknown} Unknown labels");
     assert!(!has(&h, "0%"));
-    assert!(!has(&h, "Zero KB free"));
+    assert!(!has(&h, "0 KB free"));
     assert!(has_text(&h, "Not read:"));
 }
 

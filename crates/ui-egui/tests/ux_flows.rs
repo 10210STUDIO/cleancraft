@@ -139,7 +139,7 @@ fn quick_sweep_flow_fits_the_smallest_window() {
     h.state_mut().sweep.sources = Some(testkit_monitor::sweep_sources());
     click(&mut h, "Scan");
     assert!(has_text(&h, "ready to clean"));
-    click(&mut h, "Run");
+    click(&mut h, "Review and Clean");
     click(&mut h, "Move to Trash");
     assert!(has_text(&h, "moved to the Trash"));
     click(&mut h, "Done");

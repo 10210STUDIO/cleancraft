@@ -29,6 +29,10 @@ fn every_trash_is_measured_and_locked() {
     assert!(by(&user).reason.ends_with("2 items"));
     assert_eq!(by(&usb).size, tree_size(&usb.join("movie.mov")).0);
     assert_eq!(by(&usb).category, "external_trash");
+    // One entry reads "1 item" (REVIEW-B 10), and the item is named after its Trash, not the
+    // numeric user-id folder it lives in (REVIEW-A 34).
+    assert_eq!(by(&usb).reason, "Trash of USB: 1 item");
+    assert_eq!(by(&usb).group.as_deref(), Some("Trash of USB"));
     assert_eq!(by(&mail).size, tree_size(&mail).0);
     assert!(by(&mail).reason.ends_with("2 messages"));
     assert_eq!(by(&user).locked.as_deref(), Some(trash::LOCK_IN_TRASH));

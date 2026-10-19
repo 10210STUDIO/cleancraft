@@ -188,12 +188,16 @@ impl Feature for TrashBins {
                 )
             };
             plan.add_category(cat, title, desc, Risk::Medium);
-            let what = if t.mail { "messages" } else { "items" };
+            let what = if t.mail {
+                crate::fsutil::count(t.entries, "message", "messages")
+            } else {
+                crate::fsutil::items(t.entries)
+            };
             let id = plan.push(
                 t.path.clone(),
                 t.size,
                 cat,
-                format!("{}: {} {what}", t.label, t.entries),
+                format!("{}: {what}", t.label),
                 Risk::Medium,
                 false,
             );

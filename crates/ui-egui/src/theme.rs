@@ -284,6 +284,24 @@ impl Tokens {
     }
 }
 
+/// The Danger pill's gradient (the button that moves files): coral to rose.
+pub const DANGER_A: Color32 = Color32::from_rgb(0xFF, 0x76, 0x6E);
+pub const DANGER_B: Color32 = Color32::from_rgb(0xEE, 0x5A, 0x64);
+
+/// The Danger pill's label: ink, which reads at least 4.5:1 on both ends of its gradient
+/// (white would read 2.7:1 at the light end).
+pub fn danger_label() -> Color32 {
+    on_color(icons_mid(DANGER_A, DANGER_B))
+}
+
+fn icons_mid(a: Color32, b: Color32) -> Color32 {
+    Color32::from_rgb(
+        ((a.r() as u16 + b.r() as u16) / 2) as u8,
+        ((a.g() as u16 + b.g() as u16) / 2) as u8,
+        ((a.b() as u16 + b.b() as u16) / 2) as u8,
+    )
+}
+
 /// Dark ink for text on colour fills.
 pub const INK: Color32 = Color32::from_rgb(0x08, 0x16, 0x1C);
 

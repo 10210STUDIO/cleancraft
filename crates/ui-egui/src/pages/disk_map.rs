@@ -283,9 +283,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: cleancraft_core::FeatureId) {
         Phase::Working(_) => 4,
         Phase::Done(_) => 5,
     };
-    if phase != 0 {
-        kit::header(ui, &t, icon, f.title(), SUBTITLE);
-    }
+    kit::header(ui, &t, icon, f.title(), SUBTITLE);
     if phase != 0 && phase != 5 {
         storage_bar(app, ui);
         ui.add_space(theme::space::S);
@@ -405,8 +403,6 @@ fn idle(app: &mut CleanApp, ui: &mut Ui) {
         ui,
         &t,
         cleancraft_core::FeatureId::SpaceLens,
-        cleancraft_core::FeatureId::SpaceLens.title(),
-        SUBTITLE,
         "Map Home Folder",
         "Measuring only looks. Nothing moves until you review the list and confirm.",
         |ui| {
@@ -839,11 +835,24 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                             vec2(22.0, 22.0),
                         );
                         let cb = kit::place(ui, cb_rect, |ui| {
+                            if locked.is_some() {
+                                // Still a (disabled) checkbox for VoiceOver and tests; a
+                                // padlock on screen, like the module result lists.
+                                ui.multiply_opacity(0.0);
+                            }
                             ui.add_enabled_ui(locked.is_none(), |ui| {
                                 kit::check(ui, &t, &mut on, &label)
                             })
                             .inner
                         });
+                        if locked.is_some() {
+                            icons::paint(
+                                ui.painter(),
+                                egui::Rect::from_center_size(cb_rect.center(), vec2(18.0, 18.0)),
+                                Icon::Lock,
+                                t.text_faint,
+                            );
+                        }
                         if cb.changed() {
                             toggle(app, &c.path, on);
                         }
@@ -918,9 +927,27 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                         if let Some(why) = &locked {
                             let text = format!("locked: {why}");
                             let lf = font(size::FOOTNOTE, Weight::Regular);
-                            let s = kit::truncate_end(ui.ctx(), &text, &lf, line.width());
-                            kit::text_at(ui, line, &s, &text, lf, t.text_faint, Align::Min)
-                                .on_hover_text(&text);
+                            // The whole reason when it fits; else its first clause (never a
+                            // sentence cut mid-way with an open parenthesis); the tooltip
+                            // has it all.
+                            let short = match why.split_once(" (") {
+                                Some((head, _)) => format!("Locked: {head}"),
+                                None => format!("Locked: {why}"),
+                            };
+                            let full_shown = format!("Locked: {why}");
+                            let fits = |s: &str| {
+                                kit::galley(ui, s, lf.clone(), t.text_faint).size().x
+                                    <= line.width()
+                            };
+                            let s = if fits(&full_shown) {
+                                full_shown
+                            } else if fits(&short) {
+                                short
+                            } else {
+                                kit::truncate_end(ui.ctx(), &short, &lf, line.width())
+                            };
+                            kit::text_at(ui, line, &s, &text, lf, t.text_dim, Align::Min)
+                                .on_hover_text(format!("Locked: {why}"));
                         } else {
                             let bar = egui::Rect::from_min_size(
                                 egui::pos2(line.left(), line.center().y - 2.0),

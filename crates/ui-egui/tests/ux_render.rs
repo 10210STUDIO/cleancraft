@@ -224,7 +224,7 @@ fn scenes() -> Vec<Scene> {
             go: |h| {
                 h.state_mut().sweep.sources = Some(testkit_monitor::sweep_sources());
                 click(h, "Scan");
-                click(h, "Run");
+                click(h, "Review and Clean");
             },
         },
         Scene {
@@ -233,7 +233,7 @@ fn scenes() -> Vec<Scene> {
             go: |h| {
                 h.state_mut().sweep.sources = Some(testkit_monitor::sweep_sources());
                 click(h, "Scan");
-                click(h, "Run");
+                click(h, "Review and Clean");
                 click(h, "Move to Trash");
             },
         },
@@ -660,7 +660,12 @@ fn module_icons_are_shapes_not_text() {
 fn pages_render() {
     let all = std::env::var("CLEANCRAFT_SNAPSHOTS").is_ok_and(|v| v == "1");
     let only = std::env::var("CLEANCRAFT_SNAPSHOT_ONLY").unwrap_or_default();
-    let out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/screens/v2");
+    // CLEANCRAFT_SNAPSHOT_DIR writes elsewhere while iterating (docs/screens/v2 by default).
+    let out_dir = std::env::var("CLEANCRAFT_SNAPSHOT_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/screens/v2")
+        });
     if all {
         std::fs::create_dir_all(&out_dir).expect("make docs/screens/v2");
     }

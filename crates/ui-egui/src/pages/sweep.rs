@@ -1,6 +1,6 @@
 //! Quick Sweep: one Scan across the cleanup, protection and app modules, one tile per module
 //! (only modules that exist get a tile), Review opens a module with its plan already loaded,
-//! Run carries out every included module's preselection after ONE confirmation that lists
+//! Review and Clean carries out every included module's preselection after ONE confirmation that lists
 //! every file, and each module's cleanup can be undone on its own.
 
 use cleancraft_core::executor::{self, Method};
@@ -40,6 +40,9 @@ pub struct State {
     pub undone: Vec<FeatureId>,
     /// Set to stop the running scan.
     pub cancel: Arc<AtomicBool>,
+    /// Index (in `Sources::ids`) of the module the running scan is in. Modules scan one
+    /// after the other, so the ones before it are done.
+    pub scan_at: usize,
 }
 
 fn sources(app: &CleanApp) -> Sources {
@@ -55,6 +58,7 @@ fn start_scan(app: &mut CleanApp) {
     let src = sources(app);
     let cancel = Arc::new(AtomicBool::new(false));
     app.sweep.cancel = cancel.clone();
+    app.sweep.scan_at = 0;
     let job = Job::start(app.sync, move |status| {
         sweep::scan(&env, &settings, &src, &cancel, status)
     });
@@ -127,20 +131,42 @@ const SUBTITLE: &str = "One scan across junk, mail downloads, the Trash, threats
 pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     let t = app.t;
     let (icon, _) = kit::feature_look(&t, f);
-    if !matches!(app.sweep.phase, Phase::Idle) {
-        kit::header(ui, &t, icon, f.title(), SUBTITLE);
-    }
+    kit::header(ui, &t, icon, f.title(), SUBTITLE);
     match &app.sweep.phase {
         Phase::Idle => idle(app, ui),
         Phase::Scanning(j) => {
             let s = j.status();
             let secs = j.elapsed_secs();
+            // Which module the scan is in: its title is the status when it starts (a module
+            // then reports its own places, which leave the index where it is).
+            let ids = sources(app).ids();
+            if let Some(i) = ids.iter().position(|id| id.title() == s)
+                && i > app.sweep.scan_at
+            {
+                app.sweep.scan_at = i;
+            }
+            let at = app.sweep.scan_at.min(ids.len().saturating_sub(1));
             let place = if s.is_empty() {
                 "Getting ready...".to_string()
             } else {
                 format!("Looking at {s}")
             };
-            if kit::progress(
+            let looks: Vec<(Icon, Color32, &str)> = ids
+                .iter()
+                .map(|id| {
+                    let (i, c) = kit::feature_look(&t, *id);
+                    (i, c, id.title())
+                })
+                .collect();
+            let states: Vec<kit::ChipState> = (0..ids.len())
+                .map(|i| match i.cmp(&at) {
+                    std::cmp::Ordering::Less => kit::ChipState::Done,
+                    std::cmp::Ordering::Equal => kit::ChipState::Working,
+                    std::cmp::Ordering::Greater => kit::ChipState::Waiting,
+                })
+                .collect();
+            let share = at as f32 / ids.len().max(1) as f32;
+            if kit::progress_with(
                 ui,
                 &t,
                 FeatureId::SmartCare,
@@ -148,6 +174,11 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                 &place,
                 secs,
                 true,
+                share,
+                |ui| {
+                    ui.add_space(space::M);
+                    kit::chips_with_state(ui, &t, &looks, &states, 760.0);
+                },
             ) {
                 app.act();
                 app.sweep.cancel.store(true, Ordering::Relaxed);
@@ -191,8 +222,6 @@ fn idle(app: &mut CleanApp, ui: &mut Ui) {
         ui,
         &t,
         FeatureId::SmartCare,
-        FeatureId::SmartCare.title(),
-        SUBTITLE,
         "Scan",
         "Scanning only looks. You see every file before anything moves.",
         |ui| {
@@ -213,7 +242,7 @@ fn results(app: &mut CleanApp, ui: &mut Ui) {
     let skip = app.settings.sweep_skip.clone();
     let ready = res.ready_bytes(&skip);
     ui.horizontal_top(|ui| {
-        kit::display(ui, &t, &human_size(ready));
+        kit::display_count(ui, &t, "sweep-ready", ready);
         ui.vertical(|ui| {
             ui.add_space(kit::baseline_offset(size::DISPLAY, size::TITLE3));
             ui.label(
@@ -226,7 +255,7 @@ fn results(app: &mut CleanApp, ui: &mut Ui) {
             vec2(ui.available_width(), kit::DISPLAY_ROW_H),
             egui::Layout::right_to_left(egui::Align::Center),
             |ui| {
-                if ready > 0 && kit::primary(ui, &t, "Run") {
+                if ready > 0 && kit::primary(ui, &t, "Review and Clean") {
                     app.act();
                     app.sweep.phase = Phase::Confirm;
                 }
@@ -243,7 +272,7 @@ fn results(app: &mut CleanApp, ui: &mut Ui) {
     }
     ui.add_space(space::L);
     let gap = space::GUTTER;
-    egui::ScrollArea::vertical()
+    let out = egui::ScrollArea::vertical()
         .id_salt("sweep-tiles")
         .auto_shrink([false, false])
         .show(ui, |ui| {
@@ -263,18 +292,30 @@ fn results(app: &mut CleanApp, ui: &mut Ui) {
                 .clamp(TILE_MIN_H, TILE_MAX_H)
                 .floor();
             ui.spacing_mut().item_spacing.y = 0.0;
+            // Tiles fade in one after the other each time new results arrive.
+            let key = res.tiles.iter().fold(String::new(), |mut k, tile| {
+                if let TileData::Plan(p) = &tile.data {
+                    k.push_str(&p.id);
+                }
+                k
+            });
             for (i, chunk) in res.tiles.chunks(per_row).enumerate() {
                 if i > 0 {
                     ui.add_space(gap);
                 }
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = gap;
-                    for tile in chunk {
-                        tile_ui(app, ui, tile, tile_w, tile_h);
+                    for (j, tile) in chunk.iter().enumerate() {
+                        let (k, _) = kit::appear(ui, ("sweep-tiles", &key), i * per_row + j);
+                        ui.scope(|ui| {
+                            ui.multiply_opacity(k);
+                            tile_ui(app, ui, tile, tile_w, tile_h);
+                        });
                     }
                 });
             }
         });
+    kit::scroll_fade_page(ui, &out, &t);
 }
 
 const TILE_MIN_H: f32 = 184.0;
@@ -449,7 +490,7 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
     let mut close = false;
     let width = (ui.ctx().content_rect().width() - 120.0).clamp(420.0, 680.0);
     let max_list = (ui.ctx().content_rect().height() - 330.0).clamp(120.0, 380.0);
-    kit::modal(egui::Id::new("sweep-confirm"), &t).show(ui.ctx(), |ui| {
+    let dlg = kit::modal(egui::Id::new("sweep-confirm"), &t).show(ui.ctx(), |ui| {
         ui.set_width(width);
         kit::dialog_head(
             ui,
@@ -530,11 +571,10 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
                 close = true;
             }
         });
-        // Esc cancels, Return is left alone (the action moves files: it takes a click).
-        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-            close = true;
-        }
     });
+    if dlg.should_close() {
+        close = true;
+    }
     if go {
         app.act();
         start_run(app);
@@ -558,122 +598,133 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
         .collect();
     let started = kit::first_seen(ui, ("sweep-done", key));
     let mut undo: Option<(FeatureId, String)> = None;
-    ui.vertical_centered(|ui| {
-        let d = if ui.available_height() < 480.0 {
-            120.0
-        } else {
-            160.0
-        };
-        kit::done_hero(ui, &t, FeatureId::SmartCare, d, started);
-        ui.add_space(space::M);
-        ui.label(
-            RichText::new(headline)
-                .font(font(size::LARGE_TITLE, Weight::Bold))
-                .color(t.text),
-        );
-        if runs
-            .iter()
-            .filter_map(|r| r.result.as_ref().ok())
-            .any(|r| !r.moved.is_empty())
-        {
-            kit::dim(ui, &t, cleancraft_core::features::SPACE_NOTE);
-        }
-        ui.add_space(space::L);
-        kit::centered_row(ui, egui::Id::new("sweep-done-buttons"), |ui| {
-            if kit::pill(
-                ui,
-                &t,
-                "Show History",
-                kit::Kind::Secondary,
-                Some(Icon::History),
-            )
-            .clicked()
-            {
-                app.act();
-                app.navigate("history");
-            }
-            if kit::primary(ui, &t, "Done") {
-                app.act();
-                app.sweep.phase = Phase::Idle;
-                app.sweep.result = None;
-            }
-        });
-    });
-    ui.add_space(space::XL);
+    // One centred composition like every module's Done screen: the object, the headline,
+    // the buttons, then a card per module, all centred in the page (scrolls when long).
     egui::ScrollArea::vertical()
+        .id_salt("sweep-done")
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            // A centred column, not full width: short rows read better.
-            let col = ui.available_width().min(760.0);
-            let pad = ((ui.available_width() - col) / 2.0).max(0.0);
-            for r in &runs {
-                let (icon, color) = kit::feature_look(&t, r.id);
-                ui.horizontal(|ui| {
-                    ui.add_space(pad);
-                    kit::card(&t)
-                        .inner_margin(egui::Margin::symmetric(16, 12))
-                        .show(ui, |ui| {
-                            ui.set_width(col - 34.0);
-                            ui.horizontal(|ui| {
-                                kit::badge(ui, color, icon, isz::CARD);
-                                ui.add_space(space::XS);
-                                ui.label(
-                                    RichText::new(r.id.title())
-                                        .font(font(size::TITLE3, Weight::SemiBold))
-                                        .color(t.text),
-                                );
-                                match &r.result {
-                                    Ok(rep) => {
-                                        ui.label(
-                                            RichText::new(format!(
-                                                "{} moved, {} skipped, {}",
-                                                rep.moved.len(),
-                                                rep.skipped.len(),
-                                                human_size(rep.freed)
-                                            ))
-                                            .font(font(size::CALLOUT, Weight::Regular))
-                                            .color(t.text_dim),
-                                        );
-                                        ui.with_layout(
-                                            egui::Layout::right_to_left(egui::Align::Center),
-                                            |ui| {
-                                                if app.sweep.undone.contains(&r.id) {
-                                                    kit::tag(ui, "Put back", t.success);
-                                                } else if !rep.moved.is_empty()
-                                                    && kit::pill(
-                                                        ui,
-                                                        &t,
-                                                        "Undo",
-                                                        kit::Kind::Secondary,
-                                                        Some(Icon::Undo),
-                                                    )
-                                                    .clicked()
-                                                {
-                                                    undo = Some((r.id, rep.plan_id.clone()));
-                                                }
-                                            },
-                                        );
-                                    }
-                                    Err(e) => {
-                                        ui.label(RichText::new(e).color(t.danger));
-                                    }
-                                }
-                            });
-                            if let Ok(rep) = &r.result {
-                                for (p, why) in &rep.skipped {
-                                    ui.horizontal(|ui| {
-                                        ui.add_space(44.0);
-                                        ui.label(
-                                            RichText::new(app.env.display(p)).color(t.text_dim),
-                                        );
-                                        ui.label(RichText::new(why.to_string()).color(t.warning));
-                                    });
-                                }
-                            }
-                        });
+            kit::centered_block(ui, egui::Id::new("sweep-done-block"), |ui| {
+                let d = if ui.available_height() < 480.0 {
+                    120.0
+                } else {
+                    160.0
+                };
+                kit::done_hero(ui, &t, FeatureId::SmartCare, d, started);
+                ui.add_space(space::M);
+                ui.label(
+                    RichText::new(headline)
+                        .font(font(size::LARGE_TITLE, Weight::Bold))
+                        .color(t.text),
+                );
+                if runs
+                    .iter()
+                    .filter_map(|r| r.result.as_ref().ok())
+                    .any(|r| !r.moved.is_empty())
+                {
+                    kit::dim(ui, &t, cleancraft_core::features::SPACE_NOTE);
+                }
+                ui.add_space(space::L);
+                kit::centered_row(ui, egui::Id::new("sweep-done-buttons"), |ui| {
+                    if kit::pill(
+                        ui,
+                        &t,
+                        "Show History",
+                        kit::Kind::Secondary,
+                        Some(Icon::History),
+                    )
+                    .clicked()
+                    {
+                        app.act();
+                        app.navigate("history");
+                    }
+                    if kit::primary(ui, &t, "Done") {
+                        app.act();
+                        app.sweep.phase = Phase::Idle;
+                        app.sweep.result = None;
+                    }
                 });
-                ui.add_space(space::S);
-            }
+                ui.add_space(space::XL);
+                // A centred column, not full width: short rows read better.
+                let col = ui.available_width().min(760.0);
+                for r in &runs {
+                    let (icon, color) = kit::feature_look(&t, r.id);
+                    ui.allocate_ui_with_layout(
+                        vec2(col, 0.0),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            kit::card(&t)
+                                .inner_margin(egui::Margin::symmetric(16, 12))
+                                .show(ui, |ui| {
+                                    ui.set_width(col - 34.0);
+                                    ui.horizontal(|ui| {
+                                        kit::badge(ui, color, icon, isz::CARD);
+                                        ui.add_space(space::XS);
+                                        ui.label(
+                                            RichText::new(r.id.title())
+                                                .font(font(size::TITLE3, Weight::SemiBold))
+                                                .color(t.text),
+                                        );
+                                        match &r.result {
+                                            Ok(rep) => {
+                                                ui.label(
+                                                    RichText::new(format!(
+                                                        "{} moved, {} skipped, {}",
+                                                        rep.moved.len(),
+                                                        rep.skipped.len(),
+                                                        human_size(rep.freed)
+                                                    ))
+                                                    .font(font(size::CALLOUT, Weight::Regular))
+                                                    .color(t.text_dim),
+                                                );
+                                                ui.with_layout(
+                                                    egui::Layout::right_to_left(
+                                                        egui::Align::Center,
+                                                    ),
+                                                    |ui| {
+                                                        if app.sweep.undone.contains(&r.id) {
+                                                            kit::tag(ui, "Put back", t.success);
+                                                        } else if !rep.moved.is_empty()
+                                                            && kit::pill(
+                                                                ui,
+                                                                &t,
+                                                                "Undo",
+                                                                kit::Kind::Secondary,
+                                                                Some(Icon::Undo),
+                                                            )
+                                                            .clicked()
+                                                        {
+                                                            undo =
+                                                                Some((r.id, rep.plan_id.clone()));
+                                                        }
+                                                    },
+                                                );
+                                            }
+                                            Err(e) => {
+                                                ui.label(RichText::new(e).color(t.danger));
+                                            }
+                                        }
+                                    });
+                                    if let Ok(rep) = &r.result {
+                                        for (p, why) in &rep.skipped {
+                                            ui.horizontal(|ui| {
+                                                ui.add_space(44.0);
+                                                ui.label(
+                                                    RichText::new(app.env.display(p))
+                                                        .color(t.text_dim),
+                                                );
+                                                ui.label(
+                                                    RichText::new(why.to_string()).color(t.warning),
+                                                );
+                                            });
+                                        }
+                                    }
+                                });
+                        },
+                    );
+                    ui.add_space(space::S);
+                }
+            });
         });
     if let Some((id, plan_id)) = undo {
         app.act();

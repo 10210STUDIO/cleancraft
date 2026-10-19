@@ -133,7 +133,10 @@ fn netstat_counters_and_rate() {
 
 #[test]
 fn texts() {
-    assert_eq!(uptime_text(3 * 86_400 + 4 * 3600 + 5), "3 d 4 h");
+    assert_eq!(uptime_text(3 * 86_400 + 4 * 3600 + 5), "3 days 4 h");
+    assert_eq!(uptime_text(86_400 + 2 * 3600), "1 day 2 h");
+    assert_eq!(uptime_text(375 * 86_400 + 5 * 3600), "375 days");
+    assert_eq!(uptime_text(2 * 86_400 + 59), "2 days");
     assert_eq!(uptime_text(5 * 3600 + 12 * 60), "5 h 12 min");
     assert_eq!(uptime_text(720), "12 min");
     assert_eq!(rate_text(1_200_000), "1.20 MB/s");

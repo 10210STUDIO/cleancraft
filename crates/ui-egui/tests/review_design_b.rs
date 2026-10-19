@@ -1,6 +1,5 @@
 //! Design review B (docs/design/REVIEW-B.md): defects found or left open in round B, as tests.
-//! `#[ignore]` while open; run with
-//! `cargo test -p cleancraft-ui-egui --test review_design_b -- --ignored`.
+//! All fixed and on by default since design round 3 (they were `#[ignore]` while open).
 
 use cleancraft_core::testkit::FakeMac;
 use cleancraft_core::{testkit_cleanup, testkit_monitor};
@@ -87,7 +86,6 @@ fn controls(h: &H) -> Vec<(String, egui::Rect)> {
 /// REVIEW-B 1 (S1): at 1060 x 680 the Privacy Traces toolbar draws "Reset Permissions" over
 /// "Sort by size". No two buttons may overlap on any results toolbar.
 #[test]
-#[ignore = "REVIEW-B 1 open: Privacy Traces toolbar buttons overlap at 1060 x 680"]
 fn review_b1_results_toolbar_buttons_never_overlap() {
     let mut bad = Vec::new();
     for (w, hgt) in [(1060.0, 680.0), (1280.0, 820.0)] {
@@ -122,7 +120,6 @@ fn review_b1_results_toolbar_buttons_never_overlap() {
 
 /// REVIEW-B 2: Live Monitor's key figures ("7.78 GB of 16.0 GB") are never cut at 1060 x 680.
 #[test]
-#[ignore = "REVIEW-B 2 open: Memory figure elided to \"7.78 GB of 1...\" at 1060 x 680"]
 fn review_b2_monitor_figures_are_not_elided() {
     let m = FakeMac::new();
     testkit_monitor::answer_all(m.env.fake_sys().expect("fake sys"));
@@ -145,7 +142,6 @@ fn review_b2_monitor_figures_are_not_elided() {
 
 /// REVIEW-A 31 (left open): sizes read "0 KB", never "Zero KB".
 #[test]
-#[ignore = "REVIEW-A 31 open: \"Zero KB\" in bottom bars, group headers, Disk Map, Monitor"]
 fn review_a31_no_zero_kb_wording() {
     let mut bad = std::collections::BTreeSet::new();
     let m = FakeMac::sample();

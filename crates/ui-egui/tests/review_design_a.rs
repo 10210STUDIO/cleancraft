@@ -1,7 +1,5 @@
 //! Design review A (docs/design/REVIEW-A.md): the measurable defects as tests.
-//! They are `#[ignore]` while the defect is open; run them with
-//! `cargo test -p cleancraft-ui-egui --test review_design_a -- --ignored`.
-//! A test that passes means the numbered defect is fixed; remove its `#[ignore]` then.
+//! All fixed and on by default since design round 3 (they were `#[ignore]` while open).
 
 use cleancraft_core::testkit::FakeMac;
 use cleancraft_core::{FeatureId, testkit_monitor};
@@ -154,7 +152,6 @@ fn tour(w: f32, hgt: f32, mut each: impl FnMut(&str, &H)) {
 
 /// REVIEW-A 3: text_faint carries captions; it must reach 4.5:1 on every surface it sits on.
 #[test]
-#[ignore = "REVIEW-A 3 open: text_faint below 4.5:1 on glass and selected rows"]
 fn review_a3_faint_text_meets_aa_on_bg_card_and_glass() {
     let t = Tokens::dark();
     let surfaces = [
@@ -176,7 +173,6 @@ fn review_a3_faint_text_meets_aa_on_bg_card_and_glass() {
 
 /// REVIEW-A 4: the label on a section-coloured button must reach 4.5:1 at both gradient ends.
 #[test]
-#[ignore = "REVIEW-A 4 open: white on Protect and Apps gradients is 2.5 to 3:1"]
 fn review_a4_text_on_section_gradients_meets_aa() {
     let mut bad = Vec::new();
     for s in [
@@ -203,7 +199,6 @@ fn review_a4_text_on_section_gradients_meets_aa() {
 
 /// REVIEW-A 2 and 13: no text under 11 pt anywhere (sidebar headers were 9.5, tags 10.5).
 #[test]
-#[ignore = "REVIEW-A 2 open: 9.5 and 10.5 pt texts"]
 fn review_a2_no_text_under_11pt() {
     let mut bad = std::collections::BTreeSet::new();
     tour(1060.0, 680.0, |page, h| {
@@ -223,7 +218,6 @@ fn review_a2_no_text_under_11pt() {
 
 /// REVIEW-A 1: a type scale of at most 9 sizes is what pages actually use.
 #[test]
-#[ignore = "REVIEW-A 1 open: about 20 distinct sizes on screen"]
 fn review_a1_pages_stay_on_the_type_scale() {
     let mut sizes = std::collections::BTreeMap::<i32, String>::new();
     tour(1280.0, 820.0, |page, h| {
@@ -247,7 +241,6 @@ fn review_a1_pages_stay_on_the_type_scale() {
 
 /// REVIEW-A 57: page explanations are never cut with an ellipsis at 1060 x 680.
 #[test]
-#[ignore = "REVIEW-A 57 open: Tune-up Tasks header ends in an ellipsis"]
 fn review_a57_page_headers_are_not_truncated() {
     let mut bad = Vec::new();
     let mac = FakeMac::sample();
