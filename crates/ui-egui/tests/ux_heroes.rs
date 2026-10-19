@@ -9,7 +9,7 @@ use std::time::Instant;
 
 use cleancraft_core::FeatureId;
 use cleancraft_ui_egui::heroes::{self, HeroPhase, HeroState};
-use cleancraft_ui_egui::theme::Section;
+
 use egui::{Color32, Rect, pos2, vec2};
 
 const STATES: [(&str, HeroPhase, f32, f32); 4] = [
@@ -28,12 +28,10 @@ fn state(phase: HeroPhase, progress: f32, since: f32) -> HeroState {
     }
 }
 
-/// Page-like backdrop: the dark ink with a hint of the section colour.
-fn backdrop(ui: &egui::Ui, rect: Rect, f: FeatureId) {
-    let p = ui.painter();
-    p.rect_filled(rect, 0.0, Color32::from_rgb(0x0E, 0x13, 0x1B));
-    let (a, _) = Section::of(f).colors();
-    p.circle_filled(rect.center(), rect.width() * 0.48, a.gamma_multiply(0.05));
+/// Page-like backdrop: the dark ink of the content area (the hero brings its own glow).
+fn backdrop(ui: &egui::Ui, rect: Rect, _f: FeatureId) {
+    ui.painter()
+        .rect_filled(rect, 0.0, Color32::from_rgb(0x0E, 0x13, 0x1B));
 }
 
 #[test]
