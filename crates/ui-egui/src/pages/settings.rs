@@ -6,20 +6,54 @@ use egui::{RichText, Sense, Ui, vec2};
 use crate::app::CleanApp;
 use crate::icons::{self, Icon};
 use crate::kit;
-use crate::theme::{Weight, font, space};
+use crate::theme::{Weight, font, size, space};
 
 /// A card's heading with its icon.
 fn heading(ui: &mut Ui, t: &crate::theme::Tokens, icon: Icon, text: &str) {
     ui.horizontal(|ui| {
-        let (r, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
-        icons::paint(ui.painter(), r, icon, t.sec_a);
+        kit::badge(ui, t.sec_a, icon, 28.0);
+        ui.add_space(2.0);
         ui.label(
             RichText::new(text)
-                .font(font(14.5, Weight::SemiBold))
+                .font(font(size::TITLE3, Weight::SemiBold))
                 .color(t.text),
         );
     });
     ui.add_space(2.0);
+}
+
+/// A form row: the label in a leading column, the slider and its value with the unit after
+/// it. The slider keeps `name` as its accessible name.
+fn slider_row(
+    ui: &mut Ui,
+    t: &crate::theme::Tokens,
+    name: &str,
+    label: &str,
+    value: &mut u32,
+    range: std::ops::RangeInclusive<u32>,
+    unit: &str,
+) -> bool {
+    ui.horizontal(|ui| {
+        let (r, _) = ui.allocate_exact_size(vec2(260.0, crate::theme::hit::FIELD), Sense::hover());
+        ui.painter().text(
+            r.right_center() - vec2(12.0, 0.0),
+            egui::Align2::RIGHT_CENTER,
+            label,
+            font(size::BODY, Weight::Regular),
+            t.text_dim,
+        );
+        ui.spacing_mut().slider_width = (ui.available_width() - 140.0).clamp(160.0, 360.0);
+        let r = ui.add(
+            egui::Slider::new(value, range)
+                .suffix(unit)
+                .trailing_fill(true),
+        );
+        let v = *value as f64;
+        let name = name.to_string();
+        r.widget_info(|| egui::WidgetInfo::slider(true, v, name.clone()));
+        r.changed()
+    })
+    .inner
 }
 
 #[derive(Default)]
@@ -45,16 +79,17 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                 ui.set_width(ui.available_width());
                 heading(ui, &t, Icon::Trash, "Removed items go to");
                 let mut m = app.settings.method;
-                ui.radio_value(
-                    &mut m,
-                    Method::Trash,
-                    "The Trash (empty it yourself when you are sure)",
-                );
-                ui.radio_value(
-                    &mut m,
-                    Method::Quarantine,
-                    "CleanCraft quarantine (~/Library/Application Support/CleanCraft/Quarantine)",
-                );
+                for (value, text) in [
+                    (Method::Trash, "The Trash (empty it yourself when you are sure)"),
+                    (
+                        Method::Quarantine,
+                        "CleanCraft quarantine (~/Library/Application Support/CleanCraft/Quarantine)",
+                    ),
+                ] {
+                    if kit::radio(ui, &t, m == value, text).clicked() {
+                        m = value;
+                    }
+                }
                 if m != app.settings.method {
                     app.settings.method = m;
                     changed = true;
@@ -74,7 +109,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                     ui.horizontal(|ui| {
                         let shown = app.env.display(p);
                         let (r, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
-                        icons::paint(ui.painter(), r, Icon::Folder, t.text_faint);
+                        icons::paint(ui.painter(), r, Icon::Folder, t.text_dim);
                         ui.label(RichText::new(&shown).color(t.text));
                         let r = kit::ghost(ui, &t, "Remove", Some(Icon::Close));
                         r.widget_info(|| {
@@ -91,10 +126,12 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                     });
                 }
                 ui.horizontal(|ui| {
-                    let r = ui.add(
-                        egui::TextEdit::singleline(&mut app.settings_page.new_ignore)
-                            .hint_text("Path to ignore")
-                            .desired_width(380.0),
+                    let r = kit::text_field(
+                        ui,
+                        &t,
+                        &mut app.settings_page.new_ignore,
+                        "Path to ignore",
+                        380.0,
                     );
                     r.widget_info(|| {
                         egui::WidgetInfo::labeled(
@@ -129,31 +166,17 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                 ui.set_width(ui.available_width());
                 heading(ui, &t, Icon::LargeOld, "Thresholds");
                 let mut mb = (app.settings.large_min_bytes / 1_000_000) as u32;
-                if ui
-                    .add(egui::Slider::new(&mut mb, 10..=5000).text("Large file minimum (MB)"))
-                    .changed()
-                {
+                if slider_row(ui, &t, "Large file minimum (MB)", "Large files start at", &mut mb, 10..=5000, " MB") {
                     app.settings.large_min_bytes = mb as u64 * 1_000_000;
                     changed = true;
                 }
                 let mut days = app.settings.old_days as u32;
-                if ui
-                    .add(
-                        egui::Slider::new(&mut days, 30..=1825)
-                            .text("Old means not opened for (days)"),
-                    )
-                    .changed()
-                {
+                if slider_row(ui, &t, "Old means not opened for (days)", "Old means not opened for", &mut days, 30..=1825, " days") {
                     app.settings.old_days = days as u64;
                     changed = true;
                 }
                 let mut dl = app.settings.downloads_days as u32;
-                if ui
-                    .add(
-                        egui::Slider::new(&mut dl, 7..=730).text("Unused disk images after (days)"),
-                    )
-                    .changed()
-                {
+                if slider_row(ui, &t, "Unused disk images after (days)", "Disk images count as unused after", &mut dl, 7..=730, " days") {
                     app.settings.downloads_days = dl as u64;
                     changed = true;
                 }
@@ -162,12 +185,13 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
             kit::card(&t).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 heading(ui, &t, Icon::Sweep, "AI agents");
-                if ui
-                    .checkbox(
-                        &mut app.settings.agents_may_clean,
-                        "Let AI agents (MCP) carry out confirmed cleanups",
-                    )
-                    .changed()
+                if kit::check_text(
+                    ui,
+                    &t,
+                    &mut app.settings.agents_may_clean,
+                    "Let AI agents (MCP) carry out confirmed cleanups",
+                )
+                .changed()
                 {
                     changed = true;
                 }

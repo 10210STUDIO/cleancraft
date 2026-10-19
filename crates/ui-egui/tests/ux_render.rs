@@ -5,7 +5,8 @@
 //! - the pages render (wgpu, software rasterizer when there is no GPU).
 //!
 //! `CLEANCRAFT_SNAPSHOTS=1 cargo test -p cleancraft-ui-egui --test ux_render -- --nocapture`
-//! also writes a PNG of every scene to `docs/screens/v1/` for review.
+//! also writes a PNG of every scene at 1x and 2x to `docs/screens/v2/` for review
+//! (`CLEANCRAFT_SNAPSHOT_ONLY=quick-sweep` limits it to scenes whose name contains that text).
 
 mod common;
 
@@ -13,7 +14,7 @@ use std::path::PathBuf;
 
 use cleancraft_core::permissions::Access;
 use cleancraft_core::testkit::{FakeMac, age};
-use cleancraft_core::testkit_apps::{AppSpec, FakeMacApps};
+use cleancraft_core::testkit_apps::{AppSpec, FakeMacApps, appcast};
 use cleancraft_core::testkit_files::{ImageFormat, save_scene};
 use cleancraft_core::testkit_perf as tp;
 use cleancraft_core::{FeatureId, Settings, testkit_cleanup, testkit_monitor};
@@ -132,6 +133,43 @@ fn remover_mac() -> FakeMac {
     mac
 }
 
+fn updates_mac() -> FakeMac {
+    const CAST: &str = "https://example.com/editor/cast.xml";
+    let mac = FakeMac::new();
+    mac.app_spec(&AppSpec {
+        build: "200",
+        feed: Some(CAST),
+        ..AppSpec::new("Editor", "com.example.Editor", "2.0")
+    });
+    mac.app_spec(&AppSpec {
+        mas: true,
+        ..AppSpec::new("Notes Pro", "com.maker.NotesPro", "3.1")
+    });
+    mac.app_spec(&AppSpec {
+        mas: true,
+        ..AppSpec::new("Sketchbook", "com.maker.Sketchbook", "5.0")
+    });
+    mac.web(
+        CAST,
+        &appcast(&[("210", "2.1", "<ul><li>Faster search</li></ul>")]),
+    );
+    mac.web(
+        &cleancraft_core::updater::lookup_url("com.maker.NotesPro"),
+        r#"{"resultCount":1,"results":[{"version":"3.2","releaseNotes":"Sync fixes"}]}"#,
+    );
+    mac.web(
+        &cleancraft_core::updater::lookup_url("com.maker.Sketchbook"),
+        r#"{"resultCount":1,"results":[{"version":"5.0","releaseNotes":""}]}"#,
+    );
+    let fs = mac.env.fake_sys().unwrap();
+    fs.answer(
+        "/usr/sbin/softwareupdate --list",
+        "* Label: macOS 15.1-24B83\n\tTitle: macOS Sequoia 15.1, Version: 15.1, Size: 2000000KiB, Recommended: YES, Action: restart,\n",
+    );
+    base(&mac);
+    mac
+}
+
 fn monitor_mac() -> FakeMac {
     let m = FakeMac::new();
     testkit_monitor::answer_all(m.env.fake_sys().unwrap());
@@ -242,6 +280,28 @@ fn scenes() -> Vec<Scene> {
             },
         },
         Scene {
+            name: "system-junk-empty",
+            mac: || {
+                let m = FakeMac::new();
+                base(&m);
+                m
+            },
+            go: |h| {
+                nav(h, "system_junk");
+                click(h, "Scan");
+            },
+        },
+        Scene {
+            name: "system-junk-error",
+            mac: testkit_cleanup::junk_mac,
+            go: |h| {
+                nav(h, "system_junk");
+                h.state_mut().plan_state(FeatureId::SystemJunk).error =
+                    Some("Could not read ~/Library/Caches: permission denied (os error 13)".into());
+                settle(h);
+            },
+        },
+        Scene {
             name: "mail-downloads-idle",
             mac: testkit_cleanup::mail_mac,
             go: |h| nav(h, "mail_attachments"),
@@ -299,9 +359,48 @@ fn scenes() -> Vec<Scene> {
             },
         },
         Scene {
+            name: "app-remover-no-match",
+            mac: remover_mac,
+            go: |h| {
+                nav(h, "uninstaller");
+                h.state_mut().apps.search = "zzz".into();
+                settle(h);
+            },
+        },
+        Scene {
             name: "app-updates-idle",
             mac: FakeMac::new,
             go: |h| nav(h, "updater"),
+        },
+        Scene {
+            name: "app-updates-results",
+            mac: updates_mac,
+            go: |h| {
+                nav(h, "updater");
+                click(h, "Check for Updates");
+            },
+        },
+        Scene {
+            name: "app-remover-leftovers",
+            mac: remover_mac,
+            go: |h| {
+                nav(h, "uninstaller");
+                h.get_all_by_label_contains("Leftovers")
+                    .next()
+                    .expect("Leftovers group")
+                    .click();
+                settle(h);
+            },
+        },
+        Scene {
+            name: "disk-map-scanning",
+            mac: files_mac,
+            go: |h| {
+                nav(h, "disk_map");
+                h.state_mut().disk_map.phase =
+                    cleancraft_ui_egui::pages::disk_map::Phase::Scanning(Job::waiting(WAIT_PLACE));
+                settle(h);
+            },
         },
         Scene {
             name: "large-old-files-idle",
@@ -363,6 +462,15 @@ fn scenes() -> Vec<Scene> {
                     &mut |_, _| {},
                 )
                 .expect("clean");
+                m
+            },
+            go: |h| nav(h, "history"),
+        },
+        Scene {
+            name: "history-empty",
+            mac: || {
+                let m = FakeMac::new();
+                base(&m);
                 m
             },
             go: |h| nav(h, "history"),
@@ -551,9 +659,10 @@ fn module_icons_are_shapes_not_text() {
 #[test]
 fn pages_render() {
     let all = std::env::var("CLEANCRAFT_SNAPSHOTS").is_ok_and(|v| v == "1");
-    let out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/screens/v1");
+    let only = std::env::var("CLEANCRAFT_SNAPSHOT_ONLY").unwrap_or_default();
+    let out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/screens/v2");
     if all {
-        std::fs::create_dir_all(&out_dir).expect("make docs/screens/v1");
+        std::fs::create_dir_all(&out_dir).expect("make docs/screens/v2");
     }
     let picked = ["quick-sweep-idle", "system-junk-results"];
     let renderer_ok = std::panic::catch_unwind(egui_kittest::wgpu::WgpuTestRenderer::new).is_ok();
@@ -566,11 +675,12 @@ fn pages_render() {
             if !all && !picked.contains(&s.name) {
                 continue;
             }
-            let ppps: &[f32] = if all && s.name == "quick-sweep-idle" && w > 1200.0 {
-                &[1.0, 2.0]
-            } else {
-                &[1.0]
-            };
+            if all && !s.name.contains(only.as_str()) {
+                continue;
+            }
+            // CLEANCRAFT_SNAPSHOT_1X=1 skips the 2x pass while iterating.
+            let one = std::env::var("CLEANCRAFT_SNAPSHOT_1X").is_ok_and(|v| v == "1");
+            let ppps: &[f32] = if all && !one { &[1.0, 2.0] } else { &[1.0] };
             for &ppp in ppps {
                 let mac = (s.mac)();
                 let mut h = harness(&mac, w, hgt, ppp);

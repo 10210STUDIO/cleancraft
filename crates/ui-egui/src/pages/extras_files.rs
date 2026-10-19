@@ -66,7 +66,11 @@ fn location_picker(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     }
     kit::card(&t).show(ui, |ui| {
         ui.set_max_width(520.0);
-        ui.label(RichText::new("Where to look").strong());
+        ui.label(
+            RichText::new("Where to look")
+                .font(crate::theme::font(crate::theme::size::TITLE3, crate::theme::Weight::SemiBold))
+                .color(t.text),
+        );
         let mut choices: Vec<Location> = Location::PRESETS.to_vec();
         if f == FeatureId::LargeOldFiles {
             choices.push(Location::DownloadsBySource);
@@ -74,7 +78,7 @@ fn location_picker(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         ui.horizontal_wrapped(|ui| {
             for loc in choices {
                 let on = !p.other && current == loc;
-                if ui.radio(on, loc.label(&app.env)).clicked() {
+                if kit::radio(ui, &t, on, &loc.label(&app.env)).clicked() {
                     app.act();
                     p.other = false;
                     p.error = None;
@@ -82,7 +86,7 @@ fn location_picker(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                 }
             }
             let folder_on = p.other || matches!(current, Location::Folder(_));
-            if ui.radio(folder_on, "Another folder").clicked() {
+            if kit::radio(ui, &t, folder_on, "Another folder").clicked() {
                 app.act();
                 p.other = true;
                 p.error = None;
@@ -91,11 +95,7 @@ fn location_picker(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         if p.other || matches!(current, Location::Folder(_)) {
             let mut apply = false;
             ui.horizontal(|ui| {
-                let r = ui.add(
-                    egui::TextEdit::singleline(&mut p.text)
-                        .hint_text("~/Projects")
-                        .desired_width(300.0),
-                );
+                let r = kit::text_field(ui, &t, &mut p.text, "~/Projects", 300.0);
                 r.widget_info(|| {
                     egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Folder path")
                 });
@@ -119,8 +119,8 @@ fn location_picker(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                 }
                 let can = !p.text.trim().is_empty();
                 if ui
-                    .add_enabled(can, egui::Button::new("Use Folder"))
-                    .clicked()
+                    .add_enabled_ui(can, |ui| kit::secondary(ui, &t, "Use Folder"))
+                    .inner
                 {
                     apply = true;
                 }

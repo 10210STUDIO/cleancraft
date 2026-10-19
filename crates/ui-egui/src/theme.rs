@@ -8,23 +8,34 @@ use egui::{
     TextStyle, Visuals,
 };
 
-/// Spacing scale (points).
+/// Spacing scale (points), on a 4 pt grid. See docs/design/SYSTEM.md.
 pub mod space {
+    pub const XXS: f32 = 2.0;
     pub const XS: f32 = 4.0;
     pub const S: f32 = 8.0;
     pub const M: f32 = 12.0;
     pub const L: f32 = 16.0;
     pub const XL: f32 = 24.0;
     pub const XXL: f32 = 32.0;
+    pub const XXXL: f32 = 48.0;
     /// Width of the sidebar.
-    pub const SIDEBAR: f32 = 236.0;
+    pub const SIDEBAR: f32 = 232.0;
+    /// Inner margin of the sidebar (left/right, top/bottom).
+    pub const SIDEBAR_X: i8 = 12;
+    pub const SIDEBAR_Y: i8 = 16;
     /// Margin around the content area.
-    pub const PAGE_X: i8 = 28;
-    pub const PAGE_Y: i8 = 20;
+    pub const PAGE_X: i8 = 32;
+    pub const PAGE_Y: i8 = 24;
+    /// Gap between cards in a grid and between the two columns of a results page.
+    pub const GUTTER: f32 = 16.0;
+    /// Widest a line of running text may get (hero descriptions, dialogs).
+    pub const MEASURE: f32 = 560.0;
 }
 
 /// Corner radii.
 pub mod radius {
+    /// Tags, checkboxes, small tiles.
+    pub const XS: u8 = 6;
     pub const S: u8 = 8;
     pub const M: u8 = 12;
     pub const L: u8 = 16;
@@ -33,18 +44,90 @@ pub mod radius {
     pub const PILL: u8 = 255;
 }
 
-/// Type scale (points).
+/// Type scale (points), Inter. Tuned for a Mac utility on Retina: nothing a person must read
+/// is below `FOOTNOTE` (12), and `CAPTION` (11.5) is only used for upper-case labels.
+/// Weights and line heights per role are in docs/design/SYSTEM.md.
 pub mod size {
-    /// Big numbers: totals, freed space.
-    pub const DISPLAY: f32 = 46.0;
-    /// Numbers inside cards and tiles.
-    pub const NUMBER: f32 = 26.0;
-    pub const HERO_TITLE: f32 = 28.0;
-    pub const TITLE: f32 = 21.0;
-    pub const H2: f32 = 15.0;
-    pub const BODY: f32 = 13.5;
-    pub const SMALL: f32 = 11.5;
-    pub const TINY: f32 = 10.5;
+    /// Big numbers: the total found, freed space. Bold.
+    pub const DISPLAY: f32 = 52.0;
+    /// Numbers inside cards and tiles. Bold.
+    pub const NUMBER: f32 = 30.0;
+    /// Numbers in the bottom bar and small stats. Bold.
+    pub const NUMBER_S: f32 = 22.0;
+    /// Start-screen title, Done headline. Bold.
+    pub const LARGE_TITLE: f32 = 30.0;
+    /// Page title in the header. Bold.
+    pub const TITLE: f32 = 24.0;
+    /// Dialog headline, progress headline. SemiBold.
+    pub const TITLE2: f32 = 19.0;
+    /// Card and section titles. SemiBold.
+    pub const TITLE3: f32 = 16.0;
+    /// Lead text under a hero title. Regular.
+    pub const BODY_L: f32 = 15.0;
+    /// Body text, row names (SemiBold), sidebar entries (Medium).
+    pub const BODY: f32 = 14.0;
+    /// Secondary lines: subtitles, meta, buttons. Regular or Medium.
+    pub const CALLOUT: f32 = 13.0;
+    /// Paths, tags, counts. The smallest text a person must read.
+    pub const FOOTNOTE: f32 = 12.0;
+    /// Upper-case group labels only (SemiBold, letter spaced).
+    pub const CAPTION: f32 = 11.5;
+
+    // Earlier names, kept so code written against round 1 still builds.
+    pub const HERO_TITLE: f32 = LARGE_TITLE;
+    pub const H2: f32 = TITLE3;
+    pub const SMALL: f32 = FOOTNOTE;
+    pub const TINY: f32 = CAPTION;
+}
+
+/// Icon and picture sizes (points) per context.
+pub mod icon {
+    /// Small icons inside text, buttons and strips.
+    pub const INLINE: f32 = 16.0;
+    /// Sidebar entries.
+    pub const SIDEBAR: f32 = 18.0;
+    /// File-kind icon inside its row tile (the tile is `ROW_TILE`).
+    pub const ROW: f32 = 20.0;
+    pub const ROW_TILE: f32 = 36.0;
+    /// App icons in list rows (App Remover, Startup Items, App Updates).
+    pub const APP_ROW: f32 = 32.0;
+    /// App icon in the App Remover detail head.
+    pub const APP_LARGE: f32 = 64.0;
+    /// Module tile in a card head (Quick Sweep tiles, Live Monitor cards).
+    pub const CARD: f32 = 36.0;
+    /// Module tile in the page header.
+    pub const HEADER: f32 = 48.0;
+    /// Icon tile in a dialog head.
+    pub const DIALOG: f32 = 48.0;
+    /// Hero picture on start, scanning and Done screens: between these, by window height.
+    pub const HERO_MIN: f32 = 150.0;
+    pub const HERO_MAX: f32 = 240.0;
+}
+
+/// Hit targets and fixed control heights (points).
+pub mod hit {
+    /// The smallest clickable thing (HIG: 28 pt on macOS).
+    pub const MIN: f32 = 28.0;
+    /// Sidebar row: grows to `NAV_MAX` in tall windows.
+    pub const NAV: f32 = 30.0;
+    pub const NAV_MAX: f32 = 36.0;
+    /// Item row in a results list.
+    pub const ROW: f32 = 60.0;
+    /// Category row in the left column of a results page.
+    pub const CATEGORY: f32 = 56.0;
+    /// Line in a confirmation list.
+    pub const CONFIRM_LINE: f32 = 30.0;
+    /// Button heights. Primary, secondary and danger share one height so a row of buttons
+    /// lines up; the primary stands out by its fill. Only the start screen's round action
+    /// is bigger.
+    pub const PRIMARY: f32 = 32.0;
+    pub const SECONDARY: f32 = 32.0;
+    /// Row actions (Reveal, Ignore, Dismiss).
+    pub const GHOST: f32 = 28.0;
+    /// Text fields and pop-up menus in toolbars: the same height as the buttons beside them.
+    pub const FIELD: f32 = 32.0;
+    /// Checkbox box (the hit area is `MIN`).
+    pub const CHECK: f32 = 18.0;
 }
 
 /// Motion: every animation's duration and easing. `REDUCE_MOTION` turns movement off
@@ -210,19 +293,48 @@ impl Tokens {
         self
     }
 
+    /// The glass card colour as it looks over the backdrop (opaque), for things that must
+    /// hide what is under them inside a card.
+    pub fn glass_solid(&self) -> Color32 {
+        Color32::from_rgb(0x21, 0x27, 0x33)
+    }
+
     /// Text colour that reads well on the section gradient.
     pub fn on_section(&self) -> Color32 {
         on_color(self.sec_a)
     }
 }
 
-/// Dark ink on light colours, white on deep ones.
+/// Dark ink for text on colour fills.
+pub const INK: Color32 = Color32::from_rgb(0x08, 0x16, 0x1C);
+
+/// WCAG relative luminance of a colour (0 black, 1 white).
+pub fn luminance(c: Color32) -> f32 {
+    fn lin(v: u8) -> f32 {
+        let v = v as f32 / 255.0;
+        if v <= 0.039_28 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    }
+    0.2126 * lin(c.r()) + 0.7152 * lin(c.g()) + 0.0722 * lin(c.b())
+}
+
+/// WCAG contrast ratio of two opaque colours (1 to 21).
+pub fn contrast(a: Color32, b: Color32) -> f32 {
+    let (la, lb) = (luminance(a), luminance(b));
+    (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+}
+
+/// Text colour for a fill: white or dark ink, whichever has more WCAG contrast. Every section
+/// colour, the danger gradient and the treemap blocks get ink (at least 5.5:1); only deep
+/// fills get white.
 pub fn on_color(c: Color32) -> Color32 {
-    let l = 0.2126 * c.r() as f32 + 0.7152 * c.g() as f32 + 0.0722 * c.b() as f32;
-    if l > 150.0 {
-        Color32::from_rgb(0x08, 0x16, 0x1C)
-    } else {
+    if contrast(Color32::WHITE, c) >= contrast(INK, c) {
         Color32::WHITE
+    } else {
+        INK
     }
 }
 
@@ -235,15 +347,16 @@ impl Tokens {
             card_hover: Color32::from_rgb(0x23, 0x29, 0x35),
             border: Color32::from_rgba_unmultiplied(255, 255, 255, 22),
             well: Color32::from_rgb(0x11, 0x14, 0x18),
-            text: Color32::from_rgb(0xEC, 0xEF, 0xF1),
-            text_dim: Color32::from_rgb(0xA9, 0xB1, 0xBA),
-            text_faint: Color32::from_rgb(0x6E, 0x78, 0x83),
+            // WCAG contrast on glass (#1F2530): text 13.9, dim 8.9, faint 5.6.
+            text: Color32::from_rgb(0xF0, 0xF2, 0xF5),
+            text_dim: Color32::from_rgb(0xBE, 0xC6, 0xD0),
+            text_faint: Color32::from_rgb(0x93, 0x9D, 0xAA),
             accent: Color32::from_rgb(0x2E, 0xC4, 0xA6),
             accent_dim: Color32::from_rgba_unmultiplied(0x2E, 0xC4, 0xA6, 40),
             on_accent: Color32::from_rgb(0x06, 0x1A, 0x16),
-            danger: Color32::from_rgb(0xEF, 0x5B, 0x5B),
+            danger: Color32::from_rgb(0xFF, 0x7A, 0x74),
             warning: Color32::from_rgb(0xF2, 0xB1, 0x3C),
-            success: Color32::from_rgb(0x4C, 0xC9, 0x7A),
+            success: Color32::from_rgb(0x5A, 0xD6, 0x8A),
             overlay: Color32::from_black_alpha(150),
             glass: Color32::from_rgba_unmultiplied(0x2A, 0x31, 0x40, 150),
             glass_hover: Color32::from_rgba_unmultiplied(0x34, 0x3C, 0x4E, 175),
@@ -392,19 +505,20 @@ pub fn apply(ctx: &egui::Context, t: &Tokens) {
     ctx.set_visuals(visuals);
     ctx.global_style_mut(|style| {
         style.spacing.item_spacing = egui::vec2(space::S, space::S);
-        style.spacing.button_padding = egui::vec2(12.0, 6.0);
-        style.spacing.interact_size.y = 26.0;
-        style.spacing.icon_width = 16.0;
-        style.spacing.icon_width_inner = 9.0;
+        style.spacing.button_padding = egui::vec2(14.0, 7.0);
+        style.spacing.interact_size.y = hit::MIN;
+        style.spacing.icon_width = 18.0;
+        style.spacing.icon_width_inner = 10.0;
+        style.spacing.combo_height = 320.0;
         style.animation_time = motion::HOVER;
         style.text_styles = [
-            (TextStyle::Small, font(size::SMALL, Weight::Regular)),
+            (TextStyle::Small, font(size::FOOTNOTE, Weight::Regular)),
             (TextStyle::Body, font(size::BODY, Weight::Regular)),
-            (TextStyle::Button, font(13.0, Weight::Medium)),
+            (TextStyle::Button, font(size::CALLOUT, Weight::Medium)),
             (TextStyle::Heading, font(size::TITLE, Weight::Bold)),
             (
                 TextStyle::Monospace,
-                FontId::new(12.0, FontFamily::Monospace),
+                FontId::new(size::FOOTNOTE, FontFamily::Monospace),
             ),
         ]
         .into();

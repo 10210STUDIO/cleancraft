@@ -1,0 +1,158 @@
+# CleanCraft design system (round 2)
+
+The single source of these numbers is `crates/ui-egui/src/theme.rs` (`space`, `radius`,
+`size`, `icon`, `hit`, `Tokens`). Components that use them live in `kit.rs`. Pages never
+write their own font sizes, icon sizes or colours; when a page needs a new role, the role is
+added to `theme.rs` first and to this file.
+
+Units are points (pt). On a Retina Mac one point is two pixels; snapshots are rendered at
+`pixels_per_point` 1 and 2 (`docs/screens/v2/*.png` and `*@2x.png`).
+
+## Audit of v1 (what the owner saw on his Mac)
+
+From `docs/screens/real-mac-v1` and `docs/screens/v1`:
+
+- Sidebar group labels were 9.5 pt upper case in a grey with 4.1:1 contrast; on Retina they
+  read as noise.
+- Paths, counts, tags and app meta lines were 10.5 to 11.5 pt in `text_faint` (#6E7883), which
+  measures 3.4:1 on a glass card and 3.0:1 on a selected row: below WCAG AA for small text.
+- Sidebar icons were 16 pt with 13 pt labels in 28 pt rows: a dense, small sidebar for a
+  1280 pt window.
+- Page header tile 40 pt with a 21 pt title: weak hierarchy against the 46 pt result total.
+- Quick Sweep start screen: the picture, title and button sat in the middle of a large empty
+  field; the results grid used 170 pt tiles and left the lower half of the page empty.
+- Live Monitor: two rows of three columns with an empty sixth slot.
+- Done screens: small check, small summary text, the "space is freed" note above the summary.
+
+## Type scale (Inter, SIL OFL)
+
+Mapped to the macOS Human Interface Guidelines roles for a Mac utility, one step larger
+than the HIG defaults for body and secondary text, because CleanCraft's own reading
+material is file names and paths.
+
+| Token (`theme::size`) | Size | Weight | Line height | HIG role | Used for |
+|---|---|---|---|---|---|
+| `DISPLAY` | 52 | Bold | 1.1 | (none) | the total found on a results page |
+| `NUMBER` | 30 | Bold | 1.15 | (none) | values in Quick Sweep tiles and Live Monitor cards, App Remover detail total |
+| `LARGE_TITLE` | 30 | Bold | 1.2 | Large Title (26) | start-screen title, Done headline |
+| `NUMBER_S` | 22 | Bold | 1.2 | (none) | selected size in the bottom bar |
+| `TITLE` | 24 | Bold | 1.2 | Title 1 (22) | page title in the header, app name in App Remover detail |
+| `TITLE2` | 19 | SemiBold / Bold | 1.25 | Title 2 (17) | dialog headline, progress headline, app name in the sidebar logo, empty states |
+| `TITLE3` | 16 | SemiBold | 1.3 | Title 3 (15) | card titles, "found in" and "ready to clean" next to the total |
+| `BODY_L` | 15 | Regular | 1.4 | (none) | lead text under a start-screen title, Done summary |
+| `BODY` | 14 | Regular / Medium / SemiBold | 1.35 | Body (13) | row names (SemiBold), sidebar entries (Medium, SemiBold when active), sizes in rows, primary buttons |
+| `CALLOUT` | 13 | Regular / Medium | 1.35 | Callout (12) | page subtitles, secondary lines, secondary buttons, banners, strips, confirmation lines |
+| `FOOTNOTE` | 12 | Regular / Medium | 1.3 | Footnote (10) | paths, tags, counts, app meta lines, row actions (Reveal, Ignore) |
+| `CAPTION` | 11.5 | SemiBold, upper case, +0.6 to 0.8 letter spacing | 1.2 | Caption (10) | sidebar group labels and eyebrows only |
+
+Rules:
+- Nothing a person must read is under 12 pt. 11.5 pt exists only as spaced upper case.
+- Weights: Bold for numbers and titles, SemiBold for names and card titles, Medium for
+  controls and sidebar entries, Regular for running text.
+- One `DISPLAY` number per screen at most.
+- Running text is at most `space::MEASURE` (560 pt) wide.
+
+## Icon and picture sizes (`theme::icon`)
+
+| Context | Token | Size |
+|---|---|---|
+| Inline icons (buttons, strips, banners) | `INLINE` | 16 |
+| Sidebar entries | `SIDEBAR` | 18 (stroke 1.6) |
+| File-kind icon in a results row | `ROW` in `ROW_TILE` | 20 in a 36 tile |
+| App icon in list rows (App Remover, Startup Items) | `APP_ROW` | 32 (36 in App Remover rows, 40 in App Updates cards, where the macOS icon's own margin makes it read as 32) |
+| App icon in App Remover detail | `APP_LARGE` | 64 |
+| Module tile in a card head | `CARD` | 36 (28 in Live Monitor card heads) |
+| Module tile in the page header | `HEADER` | 48 |
+| Dialog head tile | `DIALOG` | 48 |
+| Hero picture (start, scanning) | `HERO_MIN` to `HERO_MAX` | 110 to 240, by window height; progress ring 160 or 210 |
+| Done check | | 96 or 132 (Quick Sweep 80 or 108, it has cards under it) |
+
+App icons go through `kit::app_icon(ui, rect, name, bundle_path)`: the real icon from the
+icons agent's `images::app_icon` when loaded, the coloured initial tile as placeholder.
+
+## Spacing (`theme::space`), 4 pt grid
+
+`XXS 2`, `XS 4`, `S 8`, `M 12`, `L 16`, `XL 24`, `XXL 32`, `XXXL 48`.
+
+- Content margin: 32 left/right, 24 top/bottom (`PAGE_X`, `PAGE_Y`).
+- Sidebar: 232 wide, inner margin 12 x 16.
+- Gutter between cards and between the two columns of a results page: 16 (`GUTTER`).
+- Header to content: 16. Card inner margin: 16 to 18. Dialog inner margin: 24.
+- Results left column: 272 wide (236 under 760 pt of content width).
+
+## Corner radii (`theme::radius`)
+
+`XS 6` tags and checkboxes, `S 8` sidebar rows and small tiles, `M 12` strips, wells and list
+rows, `L 16` cards, `XL 22` dialogs and the bottom bar, `PILL` buttons. Icon tiles use 30% of
+their side (a squircle-like tile), app initial tiles 26%.
+
+## Elevation
+
+| Level | Where | Shadow |
+|---|---|---|
+| 0 | backdrop, sidebar | none |
+| 1 | glass cards, tiles | `card_shadow`: y 6, blur 22, black 27% |
+| 2 | bottom action bar, dialogs, popups | `float_shadow`: y 10, blur 36, spread 2, black 47% |
+| Modal scrim | behind dialogs | #04060A at 67% |
+
+Glass cards are `glass` (#2A3140 at 59%) over the section backdrop, with a 1 pt hairline
+(`glass_stroke`, white 8%) and a top edge highlight (`glass_edge`, white 13%).
+
+## Colour roles and contrast
+
+Surfaces (as composited): `bg` #10131A, `sidebar` #0B0E14, glass card #1F2530, well
+(black 24% on glass), selected row (section colour 9% on glass), dialog #1A1F2A, bottom bar
+#1C222E.
+
+WCAG 2.1 contrast ratios, measured with `docs/design/contrast.py`:
+
+| Text | Colour | bg | sidebar | glass | well | selected row | dialog | bar |
+|---|---|---|---|---|---|---|---|---|
+| `text` | #F0F2F5 | 16.5 | 17.1 | 13.6 | 15.1 | 11.8 | 14.6 | 14.3 |
+| `text_dim` | #BEC6D0 | 10.8 | 11.2 | 8.9 | 9.9 | 7.7 | 9.6 | 9.4 |
+| `text_faint` | #939DAA | 6.8 | 7.0 | 5.6 | 6.2 | 4.9 | 6.0 | 5.9 |
+| `accent` | #2EC4A6 | 8.5 | 8.8 | 7.0 | 7.8 | 6.1 | 7.5 | 7.4 |
+| `danger` | #FF7A74 | 7.3 | 7.6 | 6.1 | 6.7 | 5.3 | 6.5 | 6.4 |
+| `warning` | #F2B13C | 9.9 | 10.2 | 8.2 | 9.0 | 7.1 | 8.7 | 8.6 |
+| `success` | #5AD68A | 10.1 | 10.5 | 8.4 | 9.3 | 7.3 | 9.0 | 8.8 |
+| Clean blue (section) | #4EA8FF | 7.4 | 7.7 | 6.1 | 6.8 | 5.3 | 6.6 | 6.4 |
+
+Every text/background pair is at least 4.5:1 (AA for small text). v1's `text_faint`
+(#6E7883) was 3.0 to 4.3 and is gone.
+
+Tags draw their text in the full role colour on a 16% tint of it; the tint lowers the
+background by under 1 point of contrast, so tag text stays above 5:1.
+
+Text on gradient fills (primary buttons, the round action, checkbox ticks) uses
+`theme::on_color`: dark ink #08161C on light section colours, white on deep ones.
+
+Section colour pairs (start, end) give each sidebar section its own field: Overview mint,
+Clean glacier blue, Protect coral, Speed lime, Apps periwinkle, Files amber, System sky,
+Neutral slate (History and Settings).
+
+## Hit targets and control heights (`theme::hit`)
+
+- Minimum hit target 28 pt (HIG). Ghost row actions (Reveal, Ignore) are 28 tall.
+- Secondary buttons 32, primary and danger buttons 40, text fields 32.
+- Checkbox: 18 pt box in a 22 pt hit area inside a 28 pt line.
+- Sidebar row 28 to 36 (adapts to the window height so all 17 entries fit at 680 pt, never
+  under 28).
+- Results item row 60, category row 56, app row 58, confirmation line 30.
+
+## Components (kit.rs)
+
+`pill` (Primary, Secondary, Danger, Ghost), `check`, `check_text`, `card`, `well`,
+`bar_frame`, `bottom_bar`, `dialog_frame`, `modal`, `dialog_head`, `strip`, `header`,
+`card_head`, `hero`, `round_action`, `chips`, `progress`, `progress_ring`, `done_check`, `tag`,
+`bar`, `gauge`, `sparkline`, `badge`, `icon_tile`, `app_icon`, `initial_tile`, `confirm_line`,
+`text_at`, `place`.
+
+## Layout
+
+- Supported window sizes: 1060 x 680 (minimum) to 1920 x 1200; default 1280 x 820, which
+  fits a 14 inch MacBook Pro at its default scaling (1512 x 982) with room for the Dock.
+- Nothing overlaps, clips or scrolls sideways at any of those sizes (checked by
+  `ux_render::no_page_uses_a_glyph_inter_cannot_draw_and_nothing_leaves_the_window`).
+- Start screens centre their block vertically (85% of the free space above, so the block
+  sits slightly high), with the picture sized by what is left.
+- Grids (Quick Sweep tiles) share the page height between rows so they fill the page.

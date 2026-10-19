@@ -10,7 +10,9 @@ use egui::{
 };
 
 use crate::icons::{self, Icon};
-use crate::theme::{self, Section, Tokens, Weight, font, motion, radius, size, space};
+use crate::theme::{
+    self, Section, Tokens, Weight, font, hit, icon as isz, motion, radius, size, space,
+};
 
 // ---------------------------------------------------------------------------------------
 // Buttons
@@ -31,9 +33,9 @@ pub enum Kind {
 /// A pill button. Accessible name = `label`. Respects a disabled `ui`.
 pub fn pill(ui: &mut Ui, t: &Tokens, label: &str, kind: Kind, icon: Option<Icon>) -> Response {
     let (h, fs, pad, min_w) = match kind {
-        Kind::Primary | Kind::Danger => (38.0, 14.0, 20.0, 120.0),
-        Kind::Secondary => (32.0, 13.0, 14.0, 72.0),
-        Kind::Ghost => (26.0, 12.0, 9.0, 0.0),
+        Kind::Primary | Kind::Danger => (hit::PRIMARY, size::BODY, 20.0, 104.0),
+        Kind::Secondary => (hit::SECONDARY, size::CALLOUT, 16.0, 76.0),
+        Kind::Ghost => (hit::GHOST, size::FOOTNOTE, 11.0, 0.0),
     };
     let weight = match kind {
         Kind::Ghost => Weight::Medium,
@@ -100,13 +102,13 @@ pub fn pill(ui: &mut Ui, t: &Tokens, label: &str, kind: Kind, icon: Option<Icon>
                 0.1 * hov,
             );
             let b = icons::lerp(
-                Color32::from_rgb(0xE0, 0x3E, 0x5A),
+                Color32::from_rgb(0xEE, 0x5A, 0x64),
                 Color32::WHITE,
                 0.1 * hov,
             );
             icons::gradient_tile(&p, r, round, a, b);
             top_sheen(&p, r, round);
-            Color32::WHITE
+            theme::on_color(icons::lerp(a, b, 0.5))
         }
         Kind::Secondary => {
             let fill = icons::lerp(t.glass, t.glass_hover, hov);
@@ -216,7 +218,7 @@ pub fn bar_frame(t: &Tokens) -> Frame {
         .fill(Color32::from_rgba_unmultiplied(0x1C, 0x22, 0x2E, 235))
         .stroke(Stroke::new(1.0, t.glass_edge))
         .corner_radius(CornerRadius::same(radius::XL))
-        .inner_margin(Margin::symmetric(18, 10))
+        .inner_margin(Margin::symmetric(20, 10))
         .shadow(theme::float_shadow())
 }
 
@@ -266,7 +268,7 @@ pub fn title(ui: &mut Ui, t: &Tokens, text: &str) {
 pub fn subtitle(ui: &mut Ui, t: &Tokens, text: &str) {
     ui.label(
         RichText::new(text)
-            .font(font(13.0, Weight::Regular))
+            .font(font(size::CALLOUT, Weight::Regular))
             .color(t.text_dim),
     );
 }
@@ -275,7 +277,7 @@ pub fn dim(ui: &mut Ui, t: &Tokens, text: &str) {
     ui.label(
         RichText::new(text)
             .color(t.text_faint)
-            .font(font(size::SMALL, Weight::Regular)),
+            .font(font(size::FOOTNOTE, Weight::Regular)),
     );
 }
 
@@ -283,7 +285,8 @@ pub fn dim(ui: &mut Ui, t: &Tokens, text: &str) {
 pub fn eyebrow(ui: &mut Ui, t: &Tokens, text: &str) {
     ui.label(
         RichText::new(text.to_uppercase())
-            .font(font(size::TINY, Weight::SemiBold))
+            .font(font(size::CAPTION, Weight::SemiBold))
+            .extra_letter_spacing(0.6)
             .color(t.text_faint),
     );
 }
@@ -296,6 +299,40 @@ pub fn display(ui: &mut Ui, t: &Tokens, text: &str) -> Response {
             .color(icons::lerp(t.sec_a, Color32::WHITE, 0.15)),
     )
 }
+
+/// The narrowest width up to `max_w` at which `text` still takes as few lines as at
+/// `max_w`: wrapped text gets even lines instead of a one-word last line.
+pub fn balanced_width(ui: &Ui, text: &str, fid: &FontId, max_w: f32) -> f32 {
+    let lines = |w: f32| {
+        let mut job =
+            egui::text::LayoutJob::simple(text.to_string(), fid.clone(), Color32::WHITE, w);
+        job.wrap.max_width = w;
+        ui.ctx().fonts_mut(|f| f.layout_job(job)).rows.len()
+    };
+    let n = lines(max_w);
+    if n <= 1 {
+        return max_w;
+    }
+    let (mut lo, mut hi) = (max_w * 0.4, max_w);
+    for _ in 0..12 {
+        let mid = (lo + hi) / 2.0;
+        if lines(mid) > n {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    (hi + 2.0).min(max_w)
+}
+
+/// How far below the top of a `big` line a `small` line must start so both share one
+/// baseline (Inter's ascender is 0.969 em).
+pub fn baseline_offset(big: f32, small: f32) -> f32 {
+    ((big - small) * 0.969).round()
+}
+
+/// Height of a line of `size::DISPLAY` text (Inter's line is 1.21 em).
+pub const DISPLAY_ROW_H: f32 = size::DISPLAY * 1.21;
 
 /// `text` shortened in the middle with an ellipsis so it fits `max_w` in `fid`.
 pub fn truncate_middle(ctx: &egui::Context, text: &str, fid: &FontId, max_w: f32) -> String {
@@ -336,9 +373,30 @@ pub fn truncate_middle(ctx: &egui::Context, text: &str, fid: &FontId, max_w: f32
     s
 }
 
+/// `text` cut at the end with an ellipsis so it fits `max_w` in `fid` (sentences: reasons).
+pub fn truncate_end(ctx: &egui::Context, text: &str, fid: &FontId, max_w: f32) -> String {
+    let widths: Vec<f32> = ctx.fonts_mut(|f| text.chars().map(|c| f.glyph_width(fid, c)).collect());
+    if widths.iter().sum::<f32>() <= max_w {
+        return text.to_string();
+    }
+    let ell = ctx.fonts_mut(|f| f.glyph_width(fid, '…'));
+    let mut w = 0.0;
+    let mut out = String::new();
+    for (c, cw) in text.chars().zip(widths) {
+        if w + cw + ell > max_w {
+            break;
+        }
+        w += cw;
+        out.push(c);
+    }
+    let mut out = out.trim_end().to_string();
+    out.push('…');
+    out
+}
+
 /// A label shortened in the middle to the available width.
 pub fn path_label(ui: &mut Ui, t: &Tokens, text: &str) -> Response {
-    let fid = font(size::SMALL, Weight::Regular);
+    let fid = font(size::FOOTNOTE, Weight::Regular);
     let w = ui.available_width().max(40.0);
     let shown = truncate_middle(ui.ctx(), text, &fid, w);
     let r = ui.add(egui::Label::new(RichText::new(shown).font(fid).color(t.text_faint)).truncate());
@@ -347,9 +405,9 @@ pub fn path_label(ui: &mut Ui, t: &Tokens, text: &str) -> Response {
 
 /// A rounded tag (a file's reason, a state).
 pub fn tag(ui: &mut Ui, text: &str, color: Color32) -> Response {
-    let fid = font(size::TINY, Weight::Medium);
+    let fid = font(size::FOOTNOTE, Weight::Medium);
     let galley = ui.painter().layout_no_wrap(text.to_string(), fid, color);
-    let size = galley.size() + vec2(14.0, 6.0);
+    let size = galley.size() + vec2(16.0, 6.0);
     let (r, resp) = ui.allocate_exact_size(size, Sense::hover());
     resp.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, text));
     let p = ui.painter();
@@ -399,8 +457,80 @@ pub fn initial_tile(p: &egui::Painter, r: Rect, name: &str, color: Color32) {
         Align2::CENTER_CENTER,
         letter,
         font(r.height() * 0.48, Weight::Bold),
-        Color32::WHITE,
+        theme::on_color(icons::lerp(color, Color32::BLACK, 0.12)),
     );
+}
+
+/// An app's picture in `r`. Today the coloured initial tile; the real icon from
+/// `images::app_icon` takes this slot once it is loaded (the tile stays as its placeholder).
+pub fn app_icon(ui: &Ui, r: Rect, name: &str, bundle: Option<&std::path::Path>) {
+    let _ = bundle;
+    initial_tile(ui.painter(), r, name, name_color(name));
+}
+
+/// A centred, wrapping row of painted chips (small module tile and name), for "what this
+/// covers" lines on start screens. Painted only: no accessible nodes, so names stay unique.
+pub fn chips(ui: &mut Ui, t: &Tokens, items: &[(Icon, Color32, &str)], max_w: f32) {
+    let fid = font(size::CALLOUT, Weight::Medium);
+    let h = 34.0;
+    let gap = space::S;
+    let tile = 22.0;
+    let widths: Vec<f32> = items
+        .iter()
+        .map(|(_, _, n)| galley(ui, n, fid.clone(), t.text).size().x + tile + 30.0)
+        .collect();
+    let max_w = max_w.min(ui.available_width());
+    // Fewest lines that fit, then the same number of chips on each line (5 chips on two
+    // lines read 3 and 2, never 4 and 1).
+    let fits = |per: usize| {
+        widths
+            .chunks(per.max(1))
+            .all(|c| c.iter().sum::<f32>() + gap * (c.len() as f32 - 1.0) <= max_w)
+    };
+    let n = widths.len().max(1);
+    let mut n_lines = 1;
+    while n_lines < n && !fits(n.div_ceil(n_lines)) {
+        n_lines += 1;
+    }
+    let per = n.div_ceil(n_lines);
+    let lines: Vec<Vec<usize>> = (0..widths.len())
+        .collect::<Vec<_>>()
+        .chunks(per)
+        .map(|c| c.to_vec())
+        .collect();
+    let total_h = lines.len() as f32 * h + (lines.len() as f32 - 1.0) * gap;
+    let (area, _) = ui.allocate_exact_size(vec2(ui.available_width(), total_h), Sense::hover());
+    let p = ui.painter();
+    for (li, line) in lines.iter().enumerate() {
+        let lw: f32 =
+            line.iter().map(|i| widths[*i]).sum::<f32>() + gap * (line.len() as f32 - 1.0);
+        let mut x = area.center().x - lw / 2.0;
+        let y = area.top() + li as f32 * (h + gap);
+        for i in line {
+            let (icon, color, name) = items[*i];
+            let r = Rect::from_min_size(pos2(x, y), vec2(widths[*i], h));
+            p.rect_filled(r, h / 2.0, t.glass);
+            p.rect_stroke(
+                r,
+                h / 2.0,
+                Stroke::new(1.0, t.glass_stroke),
+                egui::StrokeKind::Inside,
+            );
+            let tr = Rect::from_center_size(
+                pos2(r.left() + 6.0 + tile / 2.0, r.center().y),
+                Vec2::splat(tile),
+            );
+            icon_tile(p, tr, icon, color);
+            p.text(
+                pos2(tr.right() + 8.0, r.center().y),
+                Align2::LEFT_CENTER,
+                name,
+                fid.clone(),
+                t.text_dim,
+            );
+            x += widths[*i] + gap;
+        }
+    }
 }
 
 /// A stable colour for a name (app tiles).
@@ -462,30 +592,49 @@ pub fn series_color(t: &Tokens, i: usize) -> Color32 {
 /// The compact header at the top of a page: icon tile, title, one line under it.
 pub fn header(ui: &mut Ui, t: &Tokens, icon: Icon, title_text: &str, sub: &str) {
     ui.horizontal(|ui| {
-        badge(ui, t.sec_a, icon, 40.0);
-        ui.add_space(4.0);
+        badge(ui, t.sec_a, icon, isz::HEADER);
+        ui.add_space(space::XS);
         ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing.y = 2.0;
+            ui.spacing_mut().item_spacing.y = 1.0;
+            if sub.is_empty() {
+                ui.add_space(8.0);
+            }
             title(ui, t, title_text);
             if !sub.is_empty() {
+                // Wraps (never cut): a page's explanation is read in full.
+                ui.set_max_width(ui.available_width().min(space::MEASURE + 160.0));
                 ui.add(
                     egui::Label::new(
                         RichText::new(sub)
-                            .font(font(12.5, Weight::Regular))
+                            .font(font(size::CALLOUT, Weight::Regular))
                             .color(t.text_dim),
                     )
-                    .truncate(),
+                    .wrap(),
                 );
             }
         });
     });
-    ui.add_space(space::M);
+    ui.add_space(space::L);
+}
+
+/// The head of a card: a small module tile in `color` and a title.
+pub fn card_head(ui: &mut Ui, t: &Tokens, icon: Icon, color: Color32, title_text: &str) {
+    ui.horizontal(|ui| {
+        badge(ui, color, icon, 28.0);
+        ui.add_space(space::XXS);
+        ui.label(
+            RichText::new(title_text)
+                .font(font(size::TITLE3, Weight::SemiBold))
+                .color(t.text),
+        );
+    });
 }
 
 /// Center content vertically: remembers the last height of the block under `id`.
 pub fn centered_block<R>(ui: &mut Ui, id: egui::Id, add: impl FnOnce(&mut Ui) -> R) -> R {
     let avail = ui.available_height();
-    let last: f32 = ui.data(|d| d.get_temp(id)).unwrap_or(avail);
+    let known: Option<f32> = ui.data(|d| d.get_temp(id));
+    let last = known.unwrap_or(avail);
     let top = ((avail - last) / 2.0).max(0.0) * 0.85;
     ui.add_space(top);
     let start = ui.cursor().min.y;
@@ -493,7 +642,14 @@ pub fn centered_block<R>(ui: &mut Ui, id: egui::Id, add: impl FnOnce(&mut Ui) ->
     let h = ui.cursor().min.y - start;
     if (h - last).abs() > 0.5 {
         ui.data_mut(|d| d.insert_temp(id, h));
-        ui.ctx().request_repaint();
+        // The first time a block shows, its height is unknown: redo this frame unseen
+        // instead of showing it one frame at the wrong place.
+        if known.is_none() {
+            ui.ctx()
+                .request_discard("centre a block whose height was unknown");
+        } else {
+            ui.ctx().request_repaint();
+        }
     }
     r
 }
@@ -515,7 +671,7 @@ pub fn hero(
     // Height of everything but the picture, from the last frame: the picture takes what is
     // left (between 96 and 200 points), so the action button never needs scrolling.
     let rest: f32 = ui.data(|d| d.get_temp(id.with("rest"))).unwrap_or(320.0);
-    let side = ((avail - rest) / 1.12).clamp(96.0, 200.0).round();
+    let side = ((avail - rest) / 1.12).clamp(110.0, isz::HERO_MAX).round();
     let mut clicked = false;
     egui::ScrollArea::vertical()
         .id_salt(id)
@@ -529,23 +685,22 @@ pub fn hero(
                 ui.add_space(space::S);
                 ui.label(
                     RichText::new(title_text)
-                        .font(font(size::HERO_TITLE, Weight::Bold))
+                        .font(font(size::LARGE_TITLE, Weight::Bold))
                         .color(t.text),
                 );
-                ui.add_space(2.0);
+                ui.add_space(space::XS);
                 ui.scope(|ui| {
-                    ui.set_max_width(540.0);
-                    ui.label(
-                        RichText::new(desc)
-                            .font(font(14.0, Weight::Regular))
-                            .color(t.text_dim),
-                    );
+                    let fid = font(size::BODY_L, Weight::Regular);
+                    let w =
+                        balanced_width(ui, desc, &fid, space::MEASURE.min(ui.available_width()));
+                    ui.set_max_width(w);
+                    ui.label(RichText::new(desc).font(fid).color(t.text_dim));
                 });
                 ui.add_space(space::L);
                 extra(ui);
+                ui.add_space(space::XS);
+                clicked = round_action(ui, t, action, 112.0).clicked();
                 ui.add_space(space::S);
-                clicked = round_action(ui, t, action, 104.0).clicked();
-                ui.add_space(space::M);
                 if !note.is_empty() {
                     dim(ui, t, note);
                 }
@@ -556,8 +711,11 @@ pub fn hero(
                 }
             });
         });
+    // The idle picture drifts slowly: 30 frames a second is plenty and saves energy on
+    // 120 Hz displays.
     if !motion::REDUCE_MOTION {
-        ui.ctx().request_repaint();
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(33));
     }
     clicked
 }
@@ -565,7 +723,7 @@ pub fn hero(
 /// The big action button with a breathing halo: round for a short label, a wide pill for a
 /// long one.
 pub fn round_action(ui: &mut Ui, t: &Tokens, label: &str, d: f32) -> Response {
-    let fid = font(19.0, Weight::Bold);
+    let fid = font(size::TITLE2, Weight::Bold);
     let label_w = galley(ui, label, fid.clone(), Color32::WHITE).size().x;
     let round = label_w < d * 0.78;
     let size = if round {
@@ -645,7 +803,7 @@ pub fn round_action(ui: &mut Ui, t: &Tokens, label: &str, d: f32) -> Response {
         c,
         Align2::CENTER_CENTER,
         label,
-        font(19.0 * scale, Weight::Bold),
+        font(size::TITLE2 * scale, Weight::Bold),
         t.on_section(),
     );
     resp
@@ -672,7 +830,7 @@ pub fn progress(
     let mut stop = false;
     centered_block(ui, id, |ui| {
         let avail = ui.available_height();
-        let d = if avail < 420.0 { 150.0 } else { 196.0 };
+        let d = if avail < 460.0 { 160.0 } else { 210.0 };
         let (r, _) = ui.allocate_exact_size(vec2(d * 1.3, d + 20.0), Sense::hover());
         let time = ui.input(|i| i.time);
         progress_ring(ui.painter(), r.center(), d, t, time);
@@ -684,18 +842,18 @@ pub fn progress(
             c + vec2(0.0, d * 0.16),
             Align2::CENTER_CENTER,
             clock(elapsed),
-            font(15.0, Weight::SemiBold),
+            font(size::TITLE3, Weight::SemiBold),
             t.text_dim,
         );
         ui.add_space(space::M);
         ui.label(
             RichText::new(headline)
-                .font(font(20.0, Weight::SemiBold))
+                .font(font(size::TITLE2, Weight::SemiBold))
                 .color(t.text),
         );
-        ui.add_space(2.0);
-        let fid = font(12.5, Weight::Regular);
-        let w = ui.available_width().min(560.0);
+        ui.add_space(space::XS);
+        let fid = font(size::CALLOUT, Weight::Regular);
+        let w = ui.available_width().min(space::MEASURE);
         let shown = truncate_middle(ui.ctx(), status, &fid, w);
         ui.label(RichText::new(shown).font(fid).color(t.text_faint));
         if can_stop {
@@ -849,6 +1007,21 @@ pub fn gauge(p: &egui::Painter, c: Pos2, r: f32, value: f32, color: Color32) {
 pub fn sparkline(p: &egui::Painter, r: Rect, values: &[f64], slots: usize, color: Color32) {
     p.rect_filled(r, radius::S, Color32::from_black_alpha(50));
     if values.len() < 2 {
+        // Not enough samples for a line yet: a dashed baseline and a word, not an empty box.
+        let y = r.bottom() - 6.0;
+        p.add(Shape::dashed_line(
+            &[pos2(r.left() + 8.0, y), pos2(r.right() - 8.0, y)],
+            Stroke::new(1.0, color.gamma_multiply(0.45)),
+            4.0,
+            4.0,
+        ));
+        p.text(
+            r.center() - vec2(0.0, 3.0),
+            Align2::CENTER_CENTER,
+            "Collecting",
+            font(size::FOOTNOTE, Weight::Medium),
+            Color32::from_rgb(0x93, 0x9D, 0xAA),
+        );
         return;
     }
     let n = slots.max(values.len()) as f32;
@@ -953,14 +1126,14 @@ pub fn modal(id: egui::Id, t: &Tokens) -> egui::Modal {
 /// A dialog's top: icon tile in `color`, headline, one dim line.
 pub fn dialog_head(ui: &mut Ui, t: &Tokens, icon: Icon, color: Color32, headline: &str, sub: &str) {
     ui.horizontal(|ui| {
-        badge(ui, color, icon, 44.0);
-        ui.add_space(6.0);
+        badge(ui, color, icon, isz::DIALOG);
+        ui.add_space(space::S);
         ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing.y = 3.0;
+            ui.spacing_mut().item_spacing.y = space::XS;
             ui.add(
                 egui::Label::new(
                     RichText::new(headline)
-                        .font(font(18.0, Weight::Bold))
+                        .font(font(size::TITLE2, Weight::Bold))
                         .color(t.text),
                 )
                 .wrap(),
@@ -969,7 +1142,7 @@ pub fn dialog_head(ui: &mut Ui, t: &Tokens, icon: Icon, color: Color32, headline
                 ui.add(
                     egui::Label::new(
                         RichText::new(sub)
-                            .font(font(12.5, Weight::Regular))
+                            .font(font(size::CALLOUT, Weight::Regular))
                             .color(t.text_dim),
                     )
                     .wrap(),
@@ -985,16 +1158,17 @@ pub fn strip(ui: &mut Ui, icon: Icon, color: Color32, text: &str) {
         .fill(color.gamma_multiply(0.12))
         .stroke(Stroke::new(1.0, color.gamma_multiply(0.35)))
         .corner_radius(CornerRadius::same(radius::M))
-        .inner_margin(Margin::symmetric(12, 8))
+        .inner_margin(Margin::symmetric(14, 10))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
-                let (r, _) = ui.allocate_exact_size(Vec2::splat(16.0), Sense::hover());
+                let (r, _) = ui.allocate_exact_size(Vec2::splat(isz::INLINE), Sense::hover());
                 icons::paint(ui.painter(), r, icon, color);
+                ui.add_space(space::XS);
                 ui.add(
                     egui::Label::new(
                         RichText::new(text)
-                            .font(font(12.5, Weight::Regular))
+                            .font(font(size::CALLOUT, Weight::Regular))
                             .color(icons::lerp(color, Color32::WHITE, 0.55)),
                     )
                     .wrap(),
@@ -1027,6 +1201,15 @@ pub fn text_at(
     resp
 }
 
+/// A secondary line that shows `shown` and announces `full` (the bottom bar shows "27 items
+/// selected" next to the big size, and VoiceOver still hears the size).
+pub fn quiet_label(ui: &mut Ui, t: &Tokens, shown: &str, full: &str) -> Response {
+    let fid = font(size::CALLOUT, Weight::Medium);
+    let w = galley(ui, shown, fid.clone(), t.text_dim).size().x + 2.0;
+    let (r, _) = ui.allocate_exact_size(vec2(w, 20.0), Sense::hover());
+    text_at(ui, r, shown, full, fid, t.text_dim, egui::Align::Min)
+}
+
 /// One line of a confirmation list: kind icon, path (shortened in the middle), reason, size.
 pub fn confirm_line(
     ui: &mut Ui,
@@ -1037,18 +1220,25 @@ pub fn confirm_line(
     size_text: &str,
 ) {
     let w = ui.available_width();
-    let (r, _) = ui.allocate_exact_size(vec2(w, 26.0), Sense::hover());
-    let ir = Rect::from_center_size(pos2(r.left() + 10.0, r.center().y), Vec2::splat(14.0));
-    icons::paint(ui.painter(), ir, kind_icon(path), t.text_faint);
-    let size_font = font(12.5, Weight::SemiBold);
-    let size_w = galley(ui, size_text, size_font.clone(), t.text).size().x;
+    let (r, _) = ui.allocate_exact_size(vec2(w, hit::CONFIRM_LINE), Sense::hover());
+    let ir = Rect::from_center_size(
+        pos2(r.left() + 10.0, r.center().y),
+        Vec2::splat(isz::INLINE),
+    );
+    icons::paint(ui.painter(), ir, kind_icon(path), t.text_dim);
+    let size_font = font(size::CALLOUT, Weight::SemiBold);
+    // Fixed columns, so reasons start on one line from row to row.
+    let size_w = galley(ui, size_text, size_font.clone(), t.text)
+        .size()
+        .x
+        .max(72.0);
     let avail = r.width() - 28.0 - size_w - 16.0;
-    let path_font = font(12.5, Weight::Regular);
-    let reason_font = font(11.5, Weight::Regular);
+    let path_font = font(size::CALLOUT, Weight::Regular);
+    let reason_font = font(size::FOOTNOTE, Weight::Regular);
     let reason_w = (avail * 0.38).min(260.0);
     let path_w = avail - reason_w - 12.0;
     let path_s = truncate_middle(ui.ctx(), shown, &path_font, path_w);
-    let reason_s = truncate_middle(ui.ctx(), reason, &reason_font, reason_w);
+    let reason_s = truncate_end(ui.ctx(), reason, &reason_font, reason_w);
     let x0 = r.left() + 26.0;
     text_at(
         ui,
@@ -1068,8 +1258,8 @@ pub fn confirm_line(
         &reason_s,
         reason,
         reason_font,
-        t.text_faint,
-        egui::Align::Max,
+        t.text_dim,
+        egui::Align::Min,
     );
     text_at(
         ui,
@@ -1089,7 +1279,7 @@ pub fn confirm_line(
 /// check. Accessible as a checkbox named `name`. Returns the response; `changed()` tells
 /// when the user toggled it (`on` holds the new value).
 pub fn check(ui: &mut Ui, t: &Tokens, on: &mut bool, name: &str) -> Response {
-    let (r, mut resp) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::click());
+    let (r, mut resp) = ui.allocate_exact_size(Vec2::splat(22.0), Sense::click());
     let enabled = ui.is_enabled();
     if resp.clicked() && enabled {
         *on = !*on;
@@ -1115,7 +1305,7 @@ pub fn paint_check(ui: &Ui, t: &Tokens, r: Rect, resp: &Response, on: bool, enab
     if !enabled {
         p.set_opacity(0.35);
     }
-    let b = Rect::from_center_size(r.center(), Vec2::splat(17.0));
+    let b = Rect::from_center_size(r.center(), Vec2::splat(hit::CHECK));
     p.rect_filled(b, 5.0, Color32::from_black_alpha(60));
     p.rect_stroke(
         b,
@@ -1142,7 +1332,7 @@ pub fn paint_check(ui: &Ui, t: &Tokens, r: Rect, resp: &Response, on: bool, enab
 
 /// A checkbox with its text to the right; the text is its accessible name.
 pub fn check_text(ui: &mut Ui, t: &Tokens, on: &mut bool, text: &str) -> Response {
-    check_text_font(ui, t, on, text, font(12.5, Weight::Medium), false)
+    check_text_font(ui, t, on, text, font(size::CALLOUT, Weight::Medium), false)
 }
 
 /// `check_text` with a chosen font; `strong` keeps the text bright.
@@ -1155,7 +1345,7 @@ pub fn check_text_font(
     strong: bool,
 ) -> Response {
     let g = galley(ui, text, fid, t.text_dim);
-    let (r, mut resp) = ui.allocate_exact_size(vec2(26.0 + g.size().x, 24.0), Sense::click());
+    let (r, mut resp) = ui.allocate_exact_size(vec2(28.0 + g.size().x, hit::MIN), Sense::click());
     let enabled = ui.is_enabled();
     if resp.clicked() && enabled {
         *on = !*on;
@@ -1163,7 +1353,7 @@ pub fn check_text_font(
     }
     let state = *on;
     resp.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, enabled, state, text));
-    let br = Rect::from_min_size(r.min + vec2(0.0, 2.0), Vec2::splat(20.0));
+    let br = Rect::from_min_size(pos2(r.min.x, r.center().y - 11.0), Vec2::splat(22.0));
     paint_check(ui, t, br, &resp, state, enabled);
     let color = if resp.hovered() || strong {
         t.text
@@ -1172,7 +1362,7 @@ pub fn check_text_font(
     };
     let color = if enabled { color } else { t.text_faint };
     ui.painter().galley(
-        pos2(r.left() + 26.0, r.center().y - g.size().y / 2.0),
+        pos2(r.left() + 28.0, r.center().y - g.size().y / 2.0),
         g,
         color,
     );
@@ -1182,6 +1372,7 @@ pub fn check_text_font(
 /// The floating action bar pinned to the bottom of the page (stays visible at 680 pt).
 pub fn bottom_bar(ui: &mut Ui, t: &Tokens, id: egui::Id, add: impl FnOnce(&mut Ui)) {
     egui::Panel::bottom(id)
+        .show_separator_line(false)
         .frame(Frame::new().inner_margin(Margin {
             left: 0,
             right: 0,
@@ -1189,19 +1380,179 @@ pub fn bottom_bar(ui: &mut Ui, t: &Tokens, id: egui::Id, add: impl FnOnce(&mut U
             bottom: 0,
         }))
         .show(ui, |ui| {
+            // The bar's shadow falls into the page margin; without this the panel's clip
+            // cuts it into a square slab under the rounded corners.
+            ui.set_clip_rect(ui.ctx().content_rect());
             bar_frame(t).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 let w = ui.available_width();
                 ui.allocate_ui_with_layout(
-                    vec2(w, 40.0),
+                    vec2(w, 44.0),
                     egui::Layout::left_to_right(egui::Align::Center),
                     |ui| {
-                        ui.set_min_height(40.0);
+                        ui.set_min_height(44.0);
                         add(ui);
                     },
                 );
             });
         });
+}
+
+/// CleanCraft's radio button: a ring that fills with the section gradient and an ink dot,
+/// with its text to the right (the accessible name). Returns the response; `clicked()` means
+/// the user picked it.
+pub fn radio(ui: &mut Ui, t: &Tokens, on: bool, text: &str) -> Response {
+    let fid = font(size::CALLOUT, Weight::Medium);
+    let g = galley(ui, text, fid, t.text_dim);
+    let (r, resp) = ui.allocate_exact_size(vec2(28.0 + g.size().x, hit::MIN), Sense::click());
+    let enabled = ui.is_enabled();
+    resp.widget_info(|| WidgetInfo::selected(WidgetType::RadioButton, enabled, on, text));
+    let ctx = ui.ctx();
+    let k = anim(ctx, resp.id.with("on"), on, motion::HOVER);
+    let hov = anim(
+        ctx,
+        resp.id.with("hov"),
+        resp.hovered() && enabled,
+        motion::HOVER,
+    );
+    let mut p = ui.painter().clone();
+    if !enabled {
+        p.set_opacity(0.4);
+    }
+    let c = pos2(r.left() + 11.0, r.center().y);
+    let rad = hit::CHECK / 2.0;
+    p.circle_filled(c, rad, Color32::from_black_alpha(60));
+    // Ring at 3.5:1 against the card (WCAG 1.4.11), section colour on hover.
+    p.circle_stroke(
+        c,
+        rad - 0.75,
+        Stroke::new(
+            1.5,
+            icons::lerp(Color32::from_rgb(0x70, 0x7A, 0x8A), t.sec_a, hov.max(k)),
+        ),
+    );
+    if k > 0.0 {
+        icons::gradient_disc(
+            &p,
+            c,
+            rad * (0.6 + 0.4 * k),
+            t.sec_a.gamma_multiply(k),
+            t.sec_b.gamma_multiply(k),
+        );
+        p.circle_filled(c, 3.2 * k, t.on_section());
+    }
+    let color = if resp.hovered() || on {
+        t.text
+    } else {
+        t.text_dim
+    };
+    p.galley(
+        pos2(r.left() + 28.0, r.center().y - g.size().y / 2.0),
+        g,
+        color,
+    );
+    resp
+}
+
+/// A search field in a toolbar: rounded, a magnifier, `FIELD` tall. The caller names it for
+/// accessibility (`widget_info`) and reacts to `changed()`.
+pub fn search_field(
+    ui: &mut Ui,
+    t: &Tokens,
+    text: &mut String,
+    hint: &str,
+    width: f32,
+) -> Response {
+    let (r, _) = ui.allocate_exact_size(vec2(width, hit::FIELD), Sense::hover());
+    let p = ui.painter();
+    p.rect_filled(r, r.height() / 2.0, Color32::from_black_alpha(70));
+    p.rect_stroke(
+        r,
+        r.height() / 2.0,
+        Stroke::new(1.0, Color32::from_white_alpha(26)),
+        egui::StrokeKind::Inside,
+    );
+    let ir = Rect::from_center_size(pos2(r.left() + 18.0, r.center().y), Vec2::splat(15.0));
+    icons::paint(p, ir, Icon::Search, t.text_faint);
+    let field = Rect::from_min_max(
+        pos2(r.left() + 30.0, r.top()),
+        pos2(r.right() - 10.0, r.bottom()),
+    );
+    let mut out = None;
+    place_with(
+        ui,
+        field,
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            out = Some(
+                ui.add(
+                    egui::TextEdit::singleline(text)
+                        .hint_text(RichText::new(hint).color(t.text_faint))
+                        .font(font(size::CALLOUT, Weight::Regular))
+                        .frame(egui::Frame::NONE)
+                        .background_color(Color32::TRANSPARENT)
+                        .desired_width(field.width())
+                        .margin(Margin::symmetric(2, 0)),
+                ),
+            );
+        },
+    );
+    let resp = out.unwrap_or_else(|| ui.interact(r, ui.id().with(hint), Sense::hover()));
+    if resp.has_focus() {
+        ui.painter().rect_stroke(
+            r,
+            r.height() / 2.0,
+            Stroke::new(1.5, t.sec_a.gamma_multiply(0.8)),
+            egui::StrokeKind::Inside,
+        );
+    }
+    resp
+}
+
+/// A pop-up menu for choosing a sort order (or any small set of values): a pill with the
+/// current choice and up/down chevrons, `FIELD` tall. Accessible name "Sort" plus `id`'s
+/// own salt for egui.
+pub fn sort_menu<T: Copy + PartialEq>(ui: &mut Ui, id: &str, value: &mut T, choices: &[(T, &str)]) {
+    let current = choices
+        .iter()
+        .find(|(v, _)| v == value)
+        .map(|(_, l)| *l)
+        .unwrap_or("");
+    ui.scope(|ui| {
+        let v = &mut ui.style_mut().visuals.widgets;
+        for w in [&mut v.inactive, &mut v.hovered, &mut v.active, &mut v.open] {
+            w.corner_radius = CornerRadius::same((hit::FIELD / 2.0) as u8);
+        }
+        ui.spacing_mut().interact_size.y = hit::FIELD;
+        ui.spacing_mut().button_padding = vec2(14.0, 7.0);
+        egui::ComboBox::from_id_salt(id)
+            .selected_text(RichText::new(current).font(font(size::CALLOUT, Weight::Medium)))
+            .icon(|ui, rect, visuals, _open| {
+                let r = Rect::from_center_size(rect.center(), Vec2::splat(13.0));
+                icons::paint(ui.painter(), r, Icon::UpDown, visuals.fg_stroke.color);
+            })
+            .show_ui(ui, |ui| {
+                for (v, l) in choices {
+                    ui.selectable_value(value, *v, *l);
+                }
+            })
+            .response
+            .widget_info(|| WidgetInfo::labeled(WidgetType::ComboBox, true, "Sort"));
+    });
+}
+
+/// A plain text field in CleanCraft's style (`FIELD` tall, rounded). The caller names it.
+pub fn text_field(ui: &mut Ui, t: &Tokens, text: &mut String, hint: &str, width: f32) -> Response {
+    let resp = ui.add(
+        egui::TextEdit::singleline(text)
+            .hint_text(RichText::new(hint).color(t.text_faint))
+            .font(font(size::CALLOUT, Weight::Regular))
+            .desired_width(width)
+            .min_size(vec2(width, hit::FIELD))
+            .vertical_align(egui::Align::Center)
+            .margin(Margin::symmetric(12, 6)),
+    );
+    resp
 }
 
 /// A secondary pill, returning its response (to rename it for accessibility).

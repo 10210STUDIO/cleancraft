@@ -18,7 +18,7 @@ use crate::app::CleanApp;
 use crate::icons::{self, Icon};
 use crate::jobs::Job;
 use crate::kit;
-use crate::theme::{Weight, font, size, space};
+use crate::theme::{Weight, font, hit, icon as isz, size, space};
 
 #[derive(Default)]
 pub enum Phase {
@@ -312,7 +312,7 @@ fn visible_items(st: &PlanState) -> Vec<usize> {
 }
 
 /// Height of a line in the item list.
-const ROW_H: f32 = 52.0;
+const ROW_H: f32 = hit::ROW;
 
 fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     let t = app.t;
@@ -320,38 +320,42 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         return;
     };
     // Summary: the big total and the sentence under it.
-    ui.horizontal(|ui| {
+    ui.horizontal_top(|ui| {
         kit::display(ui, &t, &human_size(plan.total_size()));
         ui.add_space(4.0);
         ui.vertical(|ui| {
-            ui.add_space(10.0);
+            ui.add_space(kit::baseline_offset(size::DISPLAY, size::TITLE3));
             ui.label(
                 RichText::new(format!(
                     "found in {}",
                     cleancraft_core::fsutil::items(plan.items.len())
                 ))
-                .font(font(15.0, Weight::Medium))
+                .font(font(size::TITLE3, Weight::Medium))
                 .color(t.text_dim),
             );
             for note in &plan.notes {
                 kit::dim(ui, &t, note);
             }
         });
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if kit::secondary(ui, &t, "Scan Again") {
-                app.act();
-                start_scan(app, f);
-            }
-        });
+        ui.allocate_ui_with_layout(
+            vec2(ui.available_width(), kit::DISPLAY_ROW_H),
+            Layout::right_to_left(Align::Center),
+            |ui| {
+                if kit::secondary(ui, &t, "Scan Again") {
+                    app.act();
+                    start_scan(app, f);
+                }
+            },
+        );
     });
     if plan.items.is_empty() {
         ui.add_space(space::XL);
         ui.vertical_centered(|ui| {
-            kit::badge(ui, t.success, Icon::Check, 64.0);
+            kit::badge(ui, t.success, Icon::Check, 72.0);
             ui.add_space(space::M);
             ui.label(
                 RichText::new("Nothing to clean here.")
-                    .font(font(18.0, Weight::SemiBold))
+                    .font(font(size::TITLE2, Weight::SemiBold))
                     .color(t.text),
             );
         });
@@ -365,26 +369,30 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         .map(|p| (p.selected_count(), p.selected_size()))
         .unwrap_or((0, 0));
     egui::Panel::bottom(egui::Id::new(("plan-bottom", f.as_str())))
+        .show_separator_line(false)
         .frame(egui::Frame::new().inner_margin(egui::Margin {
             left: 0,
             right: 0,
-            top: 10,
+            top: 12,
             bottom: 0,
         }))
         .show(ui, |ui| {
+            ui.set_clip_rect(ui.ctx().content_rect());
             kit::bar_frame(&t).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
-                    ui.set_min_height(38.0);
+                    ui.set_min_height(44.0);
                     ui.label(
                         RichText::new(human_size(sel_size))
-                            .font(font(22.0, Weight::Bold))
+                            .font(font(size::NUMBER_S, Weight::Bold))
                             .color(t.text),
                     );
-                    ui.label(
-                        RichText::new(format!("{sel_count} selected, {}", human_size(sel_size)))
-                            .font(font(12.5, Weight::Medium))
-                            .color(t.text_dim),
+                    ui.add_space(space::XS);
+                    kit::quiet_label(
+                        ui,
+                        &t,
+                        &format!("{} selected", cleancraft_core::fsutil::items(sel_count)),
+                        &format!("{sel_count} selected, {}", human_size(sel_size)),
                     );
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if sel_count > 0 && kit::primary(ui, &t, "Review and Clean") {
@@ -397,13 +405,61 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                 });
             });
         });
-    ui.add_space(space::S);
+    ui.add_space(space::M);
+    // One toolbar over both columns: search, sort and selection, in one row at 1060 pt.
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = space::S;
+        let st = app.plan_state(f);
+        let r = kit::search_field(ui, &t, &mut st.search, "Search", 220.0);
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Search"));
+        if r.changed() {
+            app.act();
+        }
+        let st = app.plan_state(f);
+        let mut sort = st.sort;
+        kit::sort_menu(
+            ui,
+            "sort",
+            &mut sort,
+            &[(Sort::Size, "Sort by size"), (Sort::Name, "Sort by name")],
+        );
+        if sort != app.plan_state(f).sort {
+            app.act();
+            app.plan_state(f).sort = sort;
+        }
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if kit::secondary(ui, &t, "Select None") {
+                app.act();
+                let ids = visible_items(app.plan_state(f));
+                if let Some(p) = app.plan_state(f).plan.as_mut() {
+                    for id in ids {
+                        p.set_selected(id, false);
+                    }
+                }
+            }
+            if kit::secondary(ui, &t, "Select All") {
+                app.act();
+                let ids = visible_items(app.plan_state(f));
+                if let Some(p) = app.plan_state(f).plan.as_mut() {
+                    for id in ids {
+                        p.set_selected(id, true);
+                    }
+                }
+                keep_a_copy(app, f);
+            }
+            super::extras::results_toolbar(app, ui, f);
+        });
+    });
+    ui.add_space(space::M);
     let avail_h = ui.available_height() - 4.0;
     let body =
         egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), avail_h));
-    let left_w = if body.width() < 760.0 { 220.0 } else { 252.0 };
+    let left_w = if body.width() < 760.0 { 236.0 } else { 272.0 };
     let left = egui::Rect::from_min_size(body.min, egui::vec2(left_w, avail_h));
-    let right = egui::Rect::from_min_max(egui::pos2(left.right() + space::M, body.top()), body.max);
+    let right = egui::Rect::from_min_max(
+        egui::pos2(left.right() + space::GUTTER, body.top()),
+        body.max,
+    );
     ui.allocate_rect(body, egui::Sense::hover());
     // Categories.
     ui.scope_builder(egui::UiBuilder::new().max_rect(left), |ui| {
@@ -425,60 +481,6 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     // Items.
     ui.scope_builder(egui::UiBuilder::new().max_rect(right), |ui| {
         ui.set_clip_rect(right.expand(24.0).intersect(ui.clip_rect()));
-        // Wraps when a module adds its own buttons, so nothing is pushed out of the window.
-        ui.horizontal_wrapped(|ui| {
-            let st = app.plan_state(f);
-            let r = ui.add(
-                egui::TextEdit::singleline(&mut st.search)
-                    .hint_text("Search")
-                    .desired_width(200.0)
-                    .margin(egui::Margin::symmetric(10, 7)),
-            );
-            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Search"));
-            if r.changed() {
-                app.act();
-            }
-            let st = app.plan_state(f);
-            let mut sort = st.sort;
-            egui::ComboBox::from_id_salt("sort")
-                .selected_text(match sort {
-                    Sort::Size => "Sort by size",
-                    Sort::Name => "Sort by name",
-                })
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut sort, Sort::Size, "Sort by size");
-                    ui.selectable_value(&mut sort, Sort::Name, "Sort by name");
-                })
-                .response
-                .widget_info(|| {
-                    egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, "Sort")
-                });
-            if sort != app.plan_state(f).sort {
-                app.act();
-                app.plan_state(f).sort = sort;
-            }
-            if kit::secondary(ui, &t, "Select All") {
-                app.act();
-                let ids = visible_items(app.plan_state(f));
-                if let Some(p) = app.plan_state(f).plan.as_mut() {
-                    for id in ids {
-                        p.set_selected(id, true);
-                    }
-                }
-                keep_a_copy(app, f);
-            }
-            super::extras::results_toolbar(app, ui, f);
-            if kit::secondary(ui, &t, "Select None") {
-                app.act();
-                let ids = visible_items(app.plan_state(f));
-                if let Some(p) = app.plan_state(f).plan.as_mut() {
-                    for id in ids {
-                        p.set_selected(id, false);
-                    }
-                }
-            }
-        });
-        ui.add_space(4.0);
         let rows = rows(app.plan_state(f));
         let list_h = (ui.available_height() - 18.0).max(60.0);
         kit::card(&t)
@@ -597,7 +599,7 @@ pub fn category_row(
     check: Option<(bool, bool, String)>,
 ) -> CatResp {
     let w = ui.available_width();
-    let (r, resp) = ui.allocate_exact_size(vec2(w, 48.0), Sense::click());
+    let (r, resp) = ui.allocate_exact_size(vec2(w, hit::CATEGORY), Sense::click());
     resp.widget_info(|| {
         egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, current, label)
     });
@@ -622,7 +624,7 @@ pub fn category_row(
     let mut x = r.left() + 10.0;
     let mut check_changed = None;
     if let Some((enabled, on, name)) = check {
-        let cb_rect = Rect::from_center_size(pos2(x + 9.0, r.top() + 16.0), vec2(20.0, 20.0));
+        let cb_rect = Rect::from_center_size(pos2(x + 10.0, r.top() + 19.0), vec2(22.0, 22.0));
         let mut v = on;
         let cb = kit::place(ui, cb_rect, |ui| {
             ui.add_enabled_ui(enabled, |ui| kit::check(ui, t, &mut v, &name))
@@ -631,46 +633,58 @@ pub fn category_row(
         if cb.changed() {
             check_changed = Some(v);
         }
-        x += 26.0;
+        x += 30.0;
     } else {
-        p.circle_filled(pos2(x + 9.0, r.top() + 16.0), 5.0, color);
-        x += 26.0;
+        p.circle_filled(pos2(x + 10.0, r.top() + 19.0), 5.0, color);
+        x += 30.0;
     }
-    let size_g = kit::galley(ui, size_text, font(13.0, Weight::SemiBold), t.text);
+    let size_g = kit::galley(ui, size_text, font(size::BODY, Weight::SemiBold), t.text);
     let size_w = size_g.size().x;
     p.galley(
         pos2(
             r.right() - 10.0 - size_w,
-            r.top() + 16.0 - size_g.size().y / 2.0,
+            r.top() + 19.0 - size_g.size().y / 2.0,
         ),
         size_g,
         t.text,
     );
     let title_w = r.right() - 18.0 - size_w - x;
-    let title_s = kit::truncate_middle(ui.ctx(), title, &font(13.0, Weight::SemiBold), title_w);
+    let title_s = kit::truncate_middle(
+        ui.ctx(),
+        title,
+        &font(size::BODY, Weight::SemiBold),
+        title_w,
+    );
     p.text(
-        pos2(x, r.top() + 16.0),
+        pos2(x, r.top() + 19.0),
         egui::Align2::LEFT_CENTER,
         title_s,
-        font(13.0, Weight::SemiBold),
+        font(size::BODY, Weight::SemiBold),
         if current {
             t.text
         } else {
             icons::lerp(t.text_dim, t.text, 0.5 + 0.5 * hov)
         },
     );
-    p.text(
-        pos2(x, r.top() + 33.0),
-        egui::Align2::LEFT_CENTER,
+    let count_g = kit::galley(
+        ui,
         count_text,
-        font(10.5, Weight::Regular),
+        font(size::FOOTNOTE, Weight::Regular),
+        t.text_faint,
+    );
+    let count_w = count_g.size().x;
+    p.galley(
+        pos2(x, r.top() + 38.0 - count_g.size().y / 2.0),
+        count_g,
         t.text_faint,
     );
     let bar = Rect::from_min_max(
-        pos2(x + 62.0, r.top() + 31.0),
-        pos2(r.right() - 10.0, r.top() + 35.0),
+        pos2(x + count_w.max(56.0) + 10.0, r.top() + 35.5),
+        pos2(r.right() - 10.0, r.top() + 40.5),
     );
-    kit::paint_bar(&p, bar, t, share, color);
+    if share > 0.0 {
+        kit::paint_bar(&p, bar, t, share, color);
+    }
     CatResp {
         row_clicked: resp.clicked(),
         row: resp,
@@ -790,25 +804,25 @@ fn group_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, g: &str) {
     let w = ui.available_width();
     let (r, _) = ui.allocate_exact_size(vec2(w, ROW_H), Sense::hover());
     let line = Rect::from_min_max(
-        pos2(r.left() + 6.0, r.bottom() - 10.0),
-        pos2(r.right() - 6.0, r.bottom() - 9.0),
+        pos2(r.left() + 8.0, r.bottom() - 10.0),
+        pos2(r.right() - 8.0, r.bottom() - 9.0),
     );
     ui.painter()
         .rect_filled(line, 0.0, t.sec_a.gamma_multiply(0.25));
     let ir = Rect::from_center_size(
-        pos2(r.left() + 18.0, r.center().y + 2.0),
-        egui::Vec2::splat(16.0),
+        pos2(r.left() + 20.0, r.center().y + 1.0),
+        egui::Vec2::splat(isz::INLINE),
     );
     icons::paint(ui.painter(), ir, Icon::Duplicates, t.sec_a);
     kit::text_at(
         ui,
         Rect::from_min_max(
-            pos2(r.left() + 34.0, r.top() + 8.0),
+            pos2(r.left() + 38.0, r.top() + 8.0),
             pos2(r.right() - 8.0, r.bottom() - 10.0),
         ),
         &text,
         &text,
-        font(12.5, Weight::SemiBold),
+        font(size::CALLOUT, Weight::SemiBold),
         t.text_dim,
         Align::Min,
     );
@@ -839,13 +853,13 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
     let p = ui.painter().clone();
     let card = r.shrink2(vec2(2.0, 2.0));
     if selected_now {
-        p.rect_filled(card, 10.0, t.sec_a.gamma_multiply(0.07 + 0.04 * hov));
+        p.rect_filled(card, 12.0, t.sec_a.gamma_multiply(0.07 + 0.04 * hov));
     } else if hov > 0.0 {
-        p.rect_filled(card, 10.0, Color32::from_white_alpha((9.0 * hov) as u8));
+        p.rect_filled(card, 12.0, Color32::from_white_alpha((9.0 * hov) as u8));
     }
     let locked = it.locked.is_some();
     // Checkbox, named after the file.
-    let cb_rect = Rect::from_center_size(pos2(r.left() + 16.0, r.center().y), vec2(20.0, 20.0));
+    let cb_rect = Rect::from_center_size(pos2(r.left() + 20.0, r.center().y), vec2(22.0, 22.0));
     let mut on = selected_now;
     let cb = kit::place(ui, cb_rect, |ui| {
         ui.add_enabled_ui(!locked, |ui| kit::check(ui, &t, &mut on, &name))
@@ -869,22 +883,105 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
         }
     }
     // Kind tile.
-    let tile = Rect::from_center_size(pos2(r.left() + 50.0, r.center().y), vec2(32.0, 32.0));
-    p.rect_filled(tile, 9.0, Color32::from_white_alpha(12));
+    let tile = Rect::from_center_size(
+        pos2(r.left() + 60.0, r.center().y),
+        egui::Vec2::splat(isz::ROW_TILE),
+    );
+    p.rect_filled(tile, 10.0, Color32::from_white_alpha(14));
     let kind = kit::kind_icon(&it.path);
     icons::paint(
         &p,
-        tile.shrink(7.0),
+        Rect::from_center_size(tile.center(), egui::Vec2::splat(isz::ROW)),
         kind,
         icons::lerp(t.sec_a, t.text, 0.25),
     );
-    // Actions and size on the right.
-    let right_w = 190.0;
-    let actions = Rect::from_min_max(
-        pos2(r.right() - right_w, r.top()),
-        pos2(r.right() - 6.0, r.bottom()),
+    // Size on the right; Reveal and Ignore show over the end of the text on hover (they
+    // are always there for the keyboard, VoiceOver and tests), so names, reasons and paths
+    // get the width.
+    let size_text = human_size(it.size);
+    let size_font = font(size::BODY, Weight::SemiBold);
+    let size_w = kit::galley(ui, &size_text, size_font.clone(), t.text)
+        .size()
+        .x;
+    let size_r = Rect::from_min_max(
+        pos2(r.right() - 14.0 - size_w.max(64.0), r.top()),
+        pos2(r.right() - 12.0, r.bottom()),
     );
+    kit::text_at(
+        ui,
+        size_r,
+        &size_text,
+        &size_text,
+        size_font,
+        if locked { t.text_faint } else { t.text },
+        Align::Max,
+    );
+    // Name, then the reason as a tag and the dimmed path.
+    let x0 = r.left() + 90.0;
+    let text_w = (size_r.left() - 16.0 - x0).max(60.0);
+    // Line 1: the name, then where it is (dimmed). Line 2: why it is listed.
+    let name_font = font(size::BODY, Weight::SemiBold);
+    let name_s = kit::truncate_middle(ui.ctx(), &name, &name_font, text_w * 0.62);
+    let name_w = kit::galley(ui, &name_s, name_font.clone(), t.text).size().x;
+    // Painted only: the checkbox already carries the name for VoiceOver.
+    p.text(
+        pos2(x0, r.top() + 20.0),
+        egui::Align2::LEFT_CENTER,
+        name_s,
+        name_font,
+        if locked { t.text_dim } else { t.text },
+    );
+    let shown = app.env.display(&it.path);
+    let path_x = x0 + name_w + 12.0;
+    let path_w = (x0 + text_w - path_x).max(24.0);
+    let pf = font(size::FOOTNOTE, Weight::Regular);
+    let path_s = kit::truncate_middle(ui.ctx(), &shown, &pf, path_w);
+    kit::text_at(
+        ui,
+        Rect::from_min_size(pos2(path_x, r.top() + 11.0), vec2(path_w, 19.0)),
+        &path_s,
+        &shown,
+        pf,
+        t.text_faint,
+        Align::Min,
+    )
+    .on_hover_text(&shown);
+    let why = match &it.locked {
+        Some(l) => format!("{} (cannot be selected: {l})", it.reason),
+        None => reason_text(it),
+    };
+    let tag_font = font(size::FOOTNOTE, Weight::Medium);
+    let tag_s = kit::truncate_end(ui.ctx(), &why, &tag_font, text_w - 16.0);
+    let color = if locked {
+        t.text_dim
+    } else {
+        kit::risk_color(&t, it.risk)
+    };
+    let tg = kit::galley(ui, &tag_s, tag_font.clone(), color);
+    let tag_r = Rect::from_min_size(pos2(x0 - 2.0, r.top() + 31.0), tg.size() + vec2(16.0, 5.0));
+    p.rect_filled(tag_r, tag_r.height() / 2.0, color.gamma_multiply(0.16));
+    kit::text_at(ui, tag_r, &tag_s, &why, tag_font, color, Align::Center).on_hover_text(&why);
+    // Row actions, shown on hover.
+    let actions_w = 150.0;
+    let actions = Rect::from_min_max(
+        pos2(size_r.left() - 12.0 - actions_w, r.top()),
+        pos2(size_r.left() - 12.0, r.bottom()),
+    );
+    let show = hov.max(if resp.contains_pointer() { 1.0 } else { 0.0 });
+    if show > 0.0 {
+        // A soft solid under the buttons so the text beneath does not show through.
+        let under = actions
+            .expand2(vec2(0.0, -6.0))
+            .with_min_x(actions.left() - 10.0);
+        let solid = icons::lerp(
+            t.glass_solid(),
+            t.sec_a,
+            if selected_now { 0.10 } else { 0.03 },
+        );
+        p.rect_filled(under, 10.0, solid.gamma_multiply(show));
+    }
     kit::place_with(ui, actions, Layout::right_to_left(Align::Center), |ui| {
+        ui.multiply_opacity(show);
         ui.spacing_mut().item_spacing.x = 4.0;
         let ig = kit::ghost(ui, &t, "Ignore", None)
             .on_hover_text("Never propose this again (Settings > Ignore list)");
@@ -900,7 +997,7 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
         // Only files and folders on disk can be shown in Finder (Wi-Fi networks and
         // permissions are listed under a label, not a file).
         if std::fs::symlink_metadata(&it.path).is_ok()
-            && kit::ghost(ui, &t, "Reveal", None)
+            && kit::ghost(ui, &t, "Reveal", Some(Icon::Reveal))
                 .on_hover_text("Show in Finder")
                 .clicked()
         {
@@ -912,55 +1009,7 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
                 Err(e) => app.warn(format!("Could not open Finder: {e}")),
             }
         }
-        ui.add_space(6.0);
-        ui.label(
-            RichText::new(human_size(it.size))
-                .font(font(13.5, Weight::SemiBold))
-                .color(if locked { t.text_faint } else { t.text }),
-        );
     });
-    // Name, then the reason as a tag and the dimmed path.
-    let x0 = r.left() + 76.0;
-    let text_w = (r.right() - right_w - 8.0 - x0).max(60.0);
-    let name_font = font(13.5, Weight::SemiBold);
-    let name_s = kit::truncate_middle(ui.ctx(), &name, &name_font, text_w);
-    // Painted only: the checkbox already carries the name for VoiceOver.
-    p.text(
-        pos2(x0, r.top() + 16.0),
-        egui::Align2::LEFT_CENTER,
-        name_s,
-        name_font,
-        if locked { t.text_dim } else { t.text },
-    );
-    let why = match &it.locked {
-        Some(l) => format!("{} (cannot be selected: {l})", it.reason),
-        None => reason_text(it),
-    };
-    let tag_font = font(10.5, Weight::Medium);
-    let tag_max = (text_w * 0.5).max(60.0);
-    let tag_s = kit::truncate_middle(ui.ctx(), &why, &tag_font, tag_max - 14.0);
-    let color = kit::risk_color(&t, it.risk);
-    let tg = kit::galley(ui, &tag_s, tag_font.clone(), color);
-    let tag_r = Rect::from_min_size(pos2(x0, r.top() + 29.0), tg.size() + vec2(14.0, 5.0));
-    p.rect_filled(tag_r, tag_r.height() / 2.0, color.gamma_multiply(0.15));
-    kit::text_at(ui, tag_r, &tag_s, &why, tag_font, color, Align::Center);
-    let shown = app.env.display(&it.path);
-    let path_x = tag_r.right() + 8.0;
-    let path_w = (x0 + text_w - path_x).max(24.0);
-    let pf = font(11.0, Weight::Regular);
-    let path_s = kit::truncate_middle(ui.ctx(), &shown, &pf, path_w);
-    kit::text_at(
-        ui,
-        Rect::from_min_size(
-            pos2(path_x, r.top() + 28.0),
-            vec2(path_w, tag_r.height() + 2.0),
-        ),
-        &path_s,
-        &shown,
-        pf,
-        t.text_faint,
-        Align::Min,
-    );
 }
 
 /// The confirmation line for items that need the administrator password, when there are any.
@@ -1031,7 +1080,7 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             egui::ScrollArea::vertical()
                 .id_salt("confirm-list")
                 .max_height(max_list)
-                .show_rows(ui, 26.0, rows.len(), |ui, range| {
+                .show_rows(ui, hit::CONFIRM_LINE, rows.len(), |ui, range| {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     for it in &rows[range] {
                         kit::confirm_line(
@@ -1060,6 +1109,10 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                 close = true;
             }
         });
+        // Esc cancels, Return is left alone (the action moves files: it takes a click).
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            close = true;
+        }
     });
     if go {
         app.act();
@@ -1084,7 +1137,7 @@ pub fn skipped_card(
     kit::card(t).show(ui, |ui| {
         ui.set_width(ui.available_width().min(720.0));
         ui.horizontal(|ui| {
-            let (r, _) = ui.allocate_exact_size(egui::Vec2::splat(16.0), Sense::hover());
+            let (r, _) = ui.allocate_exact_size(egui::Vec2::splat(isz::INLINE), Sense::hover());
             icons::paint(ui.painter(), r, Icon::Warning, t.warning);
             ui.label(
                 RichText::new("Not moved")
@@ -1119,23 +1172,28 @@ pub fn done_view(
     let started = kit::first_seen(ui, ("done", &rep.plan_id));
     let id = egui::Id::new(("done-block", &rep.plan_id));
     kit::centered_block(ui, id, |ui| {
-        let d = if ui.available_height() < 420.0 {
-            84.0
+        let d = if ui.available_height() < 460.0 {
+            96.0
         } else {
-            116.0
+            132.0
         };
         kit::done_check(ui, &t, d, started);
-        ui.add_space(space::M);
+        ui.add_space(space::L);
         ui.label(
             RichText::new(features::moved_text([rep]))
-                .font(font(30.0, Weight::Bold))
+                .font(font(size::LARGE_TITLE, Weight::Bold))
                 .color(t.text),
+        );
+        ui.add_space(space::XS);
+        ui.label(
+            RichText::new(summary)
+                .font(font(size::BODY_L, Weight::Regular))
+                .color(t.text_dim),
         );
         if !rep.moved.is_empty() {
             kit::dim(ui, &t, cleancraft_core::features::SPACE_NOTE);
         }
-        ui.label(RichText::new(summary).color(t.text_dim));
-        ui.add_space(space::L);
+        ui.add_space(space::XL);
         kit::centered_row(ui, id.with("buttons"), |ui| buttons(app, ui));
         ui.add_space(space::L);
         let h = ui.available_height() - 80.0;

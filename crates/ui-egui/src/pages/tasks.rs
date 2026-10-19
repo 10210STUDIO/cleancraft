@@ -13,7 +13,7 @@ use egui::{RichText, Ui};
 use crate::app::CleanApp;
 use crate::jobs::Job;
 use crate::kit;
-use crate::theme::{Weight, font};
+use crate::theme::{Weight, font, size};
 
 /// What the availability check found for one task.
 pub type Ready = Result<Prepared, String>;
@@ -144,7 +144,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             }
             ui.label(
                 RichText::new(format!("{n} selected"))
-                    .font(font(13.5, Weight::Medium))
+                    .font(font(size::BODY, Weight::Medium))
                     .color(t.text_dim),
             );
         } else {
@@ -187,7 +187,7 @@ fn task_card(app: &mut CleanApp, ui: &mut Ui, info: &tasks::TaskInfo) {
                         &t,
                         &mut on,
                         info.title,
-                        font(14.5, Weight::SemiBold),
+                        font(size::TITLE3, Weight::SemiBold),
                         true,
                     )
                 })
@@ -210,22 +210,31 @@ fn task_card(app: &mut CleanApp, ui: &mut Ui, info: &tasks::TaskInfo) {
             );
         });
         ui.horizontal(|ui| {
-            ui.add_space(26.0);
+            ui.add_space(28.0);
             ui.vertical(|ui| {
-                ui.spacing_mut().item_spacing.y = 4.0;
-                ui.label(RichText::new(info.description).color(t.text_dim));
+                // Readable line length: about 80 characters.
+                ui.set_max_width(
+                    ui.available_width()
+                        .min(crate::theme::space::MEASURE + 80.0),
+                );
+                ui.spacing_mut().item_spacing.y = 6.0;
+                ui.label(
+                    RichText::new(info.description)
+                        .font(font(size::BODY, Weight::Regular))
+                        .color(t.text_dim),
+                );
                 let command = match &ready {
                     Some(Ok(p)) => p.commands().join("\n"),
                     _ => info.command.to_string(),
                 };
                 kit::well(&t)
-                    .inner_margin(egui::Margin::symmetric(10, 6))
+                    .inner_margin(egui::Margin::symmetric(12, 8))
                     .show(ui, |ui| {
                         ui.label(
                             RichText::new(format!("Command: {command}"))
                                 .monospace()
-                                .size(11.5)
-                                .color(t.text_faint),
+                                .size(size::FOOTNOTE)
+                                .color(t.text_dim),
                         );
                     });
                 if let Some(Err(why)) = &ready {
@@ -252,7 +261,7 @@ fn task_card(app: &mut CleanApp, ui: &mut Ui, info: &tasks::TaskInfo) {
                 ) {
                     ui.label(
                         RichText::new(why)
-                            .font(font(11.5, Weight::Medium))
+                            .font(font(size::FOOTNOTE, Weight::Medium))
                             .color(t.sec_a),
                     );
                 }
@@ -264,7 +273,7 @@ fn task_card(app: &mut CleanApp, ui: &mut Ui, info: &tasks::TaskInfo) {
                     };
                     ui.label(
                         RichText::new(&r.message)
-                            .font(font(13.0, Weight::SemiBold))
+                            .font(font(size::BODY, Weight::SemiBold))
                             .color(color),
                     );
                     if let (Some(b), Some(a)) = (r.free_before, r.free_after) {
@@ -351,7 +360,7 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
                         continue;
                     };
                     ui.add_space(4.0);
-                    ui.label(RichText::new(info.title).font(font(14.0, Weight::SemiBold)));
+                    ui.label(RichText::new(info.title).font(font(size::BODY, Weight::SemiBold)));
                     ui.label(RichText::new(info.description).color(t.text_dim));
                     for c in p.commands() {
                         ui.label(RichText::new(c).monospace().size(11.5));

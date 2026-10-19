@@ -9,7 +9,7 @@ use egui::{Color32, CornerRadius, RichText, Sense, Stroke, Ui, vec2};
 use crate::icons::{self, Icon};
 use crate::kit;
 use crate::pages::{self, plan_page::PlanState};
-use crate::theme::{self, Section, Tokens, Weight, font, motion, space};
+use crate::theme::{self, Section, Tokens, Weight, font, hit, icon as isz, motion, size, space};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Page {
@@ -198,12 +198,13 @@ impl CleanApp {
         content.min.x += space::SIDEBAR;
         kit::backdrop(ui.painter(), content, &t);
         egui::Panel::left("sidebar")
+            .show_separator_line(false)
             .resizable(false)
             .exact_size(space::SIDEBAR)
             .frame(
                 egui::Frame::new()
                     .fill(t.sidebar)
-                    .inner_margin(egui::Margin::symmetric(12, 14)),
+                    .inner_margin(egui::Margin::symmetric(space::SIDEBAR_X, space::SIDEBAR_Y)),
             )
             .show(ui, |ui| self.sidebar(ui));
         // Page change: fade in with a short slide up.
@@ -238,7 +239,9 @@ impl CleanApp {
 
     fn sidebar(&mut self, ui: &mut Ui) {
         let t = self.t;
-        let side = ui.max_rect().expand2(vec2(12.0, 14.0));
+        let side = ui
+            .max_rect()
+            .expand2(vec2(space::SIDEBAR_X as f32, space::SIDEBAR_Y as f32));
         icons::vertical_gradient(
             ui.painter(),
             side,
@@ -251,39 +254,57 @@ impl CleanApp {
             Stroke::new(1.0, Color32::from_white_alpha(10)),
         );
         ui.horizontal(|ui| {
-            ui.add_space(2.0);
-            let (r, _) = ui.allocate_exact_size(egui::Vec2::splat(30.0), Sense::hover());
+            ui.add_space(4.0);
+            let (r, _) = ui.allocate_exact_size(egui::Vec2::splat(32.0), Sense::hover());
             let (a, b) = Section::Overview.colors();
             icons::gradient_tile(ui.painter(), r, 9.0, a, b);
-            icons::paint(ui.painter(), r.shrink(5.0), Icon::Logo, theme::on_color(a));
-            ui.add_space(2.0);
+            icons::paint(ui.painter(), r.shrink(5.5), Icon::Logo, theme::on_color(a));
+            ui.add_space(4.0);
             ui.label(
                 RichText::new("CleanCraft")
-                    .font(font(17.0, Weight::Bold))
+                    .font(font(size::TITLE2, Weight::Bold))
                     .color(t.text),
             );
         });
-        ui.add_space(8.0);
+        ui.add_space(space::S);
         // Rows breathe in tall windows and tighten in short ones, so every entry fits a
-        // 680 pt tall window without scrolling.
+        // 680 pt tall window without scrolling, and never gets under the 28 pt hit target.
         let headers = GROUPS.iter().filter(|g| !g.0.is_empty()).count() as f32;
         let rows = GROUPS.iter().map(|g| g.1.len()).sum::<usize>() as f32 + 2.0;
-        let fixed = headers * 22.0 + 16.0;
-        let row_h = ((ui.available_height() - fixed) / rows - 1.0).clamp(24.0, 30.0);
+        let avail = ui.available_height();
+        let sep = 13.0;
+        // Spare height goes to rows up to 32, then to the group labels up to 28 (air above
+        // each label), then to rows up to 36.
+        let extra = (avail - headers * 18.0 - rows * hit::MIN - sep).max(0.0);
+        let to_rows = extra.min(rows * 4.0);
+        let to_heads = (extra - to_rows).min(headers * 10.0);
+        let to_rows2 = (extra - to_rows - to_heads).min(rows * (hit::NAV_MAX - 32.0));
+        let row_h = (hit::MIN + (to_rows + to_rows2) / rows).floor();
+        let head_h = (18.0 + to_heads / headers).floor();
         self.row_h = row_h;
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                ui.spacing_mut().item_spacing.y = 1.0;
+                ui.spacing_mut().item_spacing.y = 0.0;
                 for (group, feats) in GROUPS {
                     if !group.is_empty() {
                         let w = ui.available_width();
-                        let (r, _) = ui.allocate_exact_size(vec2(w, 21.0), Sense::hover());
-                        ui.painter().text(
-                            egui::pos2(r.left() + 8.0, r.bottom() - 4.0),
-                            egui::Align2::LEFT_BOTTOM,
-                            group.to_uppercase(),
-                            font(9.5, Weight::SemiBold),
+                        let (r, _) = ui.allocate_exact_size(vec2(w, head_h), Sense::hover());
+                        let g = ui
+                            .painter()
+                            .layout_job(egui::text::LayoutJob::single_section(
+                                group.to_uppercase(),
+                                egui::TextFormat {
+                                    font_id: font(size::CAPTION, Weight::SemiBold),
+                                    color: t.text_faint,
+                                    extra_letter_spacing: 0.8,
+                                    ..Default::default()
+                                },
+                            ));
+                        let gh = g.size().y;
+                        ui.painter().galley(
+                            egui::pos2(r.left() + 10.0, r.bottom() - 4.0 - gh),
+                            g,
                             t.text_faint,
                         );
                     }
@@ -296,14 +317,14 @@ impl CleanApp {
                         }
                     }
                 }
-                ui.add_space(7.0);
+                ui.add_space(6.0);
                 let y = ui.cursor().min.y;
                 ui.painter().hline(
                     ui.max_rect().x_range(),
                     y,
                     Stroke::new(1.0, Color32::from_white_alpha(14)),
                 );
-                ui.add_space(7.0);
+                ui.add_space(6.0);
                 let neutral = Section::Neutral.colors().0;
                 if self.nav_row(
                     ui,
@@ -341,44 +362,44 @@ impl CleanApp {
         if on > 0.0 {
             p.rect_filled(
                 r,
-                CornerRadius::same(9),
-                icons::lerp(Color32::TRANSPARENT, color.gamma_multiply(0.16), on),
+                CornerRadius::same(theme::radius::S),
+                icons::lerp(Color32::TRANSPARENT, color.gamma_multiply(0.18), on),
+            );
+            p.rect_stroke(
+                r,
+                CornerRadius::same(theme::radius::S),
+                Stroke::new(1.0, color.gamma_multiply(0.22 * on)),
+                egui::StrokeKind::Inside,
             );
             let bar = egui::Rect::from_center_size(
                 r.left_center() + vec2(1.5, 0.0),
-                vec2(3.0, 14.0 * on),
+                vec2(3.0, (r.height() * 0.5) * on),
             );
             p.rect_filled(bar, CornerRadius::same(2), color);
         }
         if hov > 0.0 && !active {
             p.rect_filled(
                 r,
-                CornerRadius::same(9),
+                CornerRadius::same(theme::radius::S),
                 Color32::from_white_alpha((10.0 * hov) as u8),
             );
         }
         let ir = egui::Rect::from_center_size(
-            r.left_center() + vec2(18.0, 0.0),
-            egui::Vec2::splat(16.0),
+            r.left_center() + vec2(20.0, 0.0),
+            egui::Vec2::splat(isz::SIDEBAR),
         );
         let icon_color = if active {
             icons::lerp(color, Color32::WHITE, 0.2)
         } else {
             icons::lerp(color.gamma_multiply(0.85), color, hov)
         };
-        icons::paint_with(p, ir, icon, icon_color, 1.45);
+        icons::paint_with(p, ir, icon, icon_color, 1.6);
         p.text(
-            r.left_center() + vec2(36.0, 0.0),
+            r.left_center() + vec2(40.0, 0.0),
             egui::Align2::LEFT_CENTER,
             label,
-            font(
-                13.0,
-                if active {
-                    Weight::SemiBold
-                } else {
-                    Weight::Medium
-                },
-            ),
+            // One weight in both states, so the label does not jump when selected.
+            font(size::BODY, Weight::Medium),
             if active {
                 t.text
             } else {
@@ -395,17 +416,17 @@ impl CleanApp {
                 .fill(Color32::from_rgba_unmultiplied(0x3A, 0x2C, 0x12, 200))
                 .stroke(Stroke::new(1.0, t.warning.gamma_multiply(0.45)))
                 .corner_radius(CornerRadius::same(theme::radius::M))
-                .inner_margin(egui::Margin::symmetric(12, 8))
+                .inner_margin(egui::Margin::symmetric(14, 10))
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     ui.horizontal_wrapped(|ui| {
-                        let (r, _) = ui.allocate_exact_size(egui::Vec2::splat(18.0), Sense::hover());
+                        let (r, _) = ui.allocate_exact_size(egui::Vec2::splat(isz::SIDEBAR), Sense::hover());
                         icons::paint(ui.painter(), r, Icon::Warning, t.warning);
                         ui.label(
                             RichText::new(
                                 "CleanCraft cannot see Mail, Safari and Trash data. Turn on Full Disk Access for CleanCraft to include them.",
                             )
-                            .font(font(12.5, Weight::Regular))
+                            .font(font(size::CALLOUT, Weight::Regular))
                             .color(t.text),
                         );
                         if kit::secondary(ui, &t, "Open Privacy Settings") {
@@ -437,11 +458,11 @@ impl CleanApp {
                 ))
                 .stroke(Stroke::new(1.0, color.gamma_multiply(0.4)))
                 .corner_radius(CornerRadius::same(theme::radius::M))
-                .inner_margin(egui::Margin::symmetric(12, 8))
+                .inner_margin(egui::Margin::symmetric(14, 8))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         let (r, _) =
-                            ui.allocate_exact_size(egui::Vec2::splat(18.0), Sense::hover());
+                            ui.allocate_exact_size(egui::Vec2::splat(isz::SIDEBAR), Sense::hover());
                         icons::paint(
                             ui.painter(),
                             r,
@@ -459,7 +480,7 @@ impl CleanApp {
                                     ui.add(
                                         egui::Label::new(
                                             RichText::new(&msg)
-                                                .font(font(12.5, Weight::Regular))
+                                                .font(font(size::CALLOUT, Weight::Regular))
                                                 .color(t.text),
                                         )
                                         .wrap(),

@@ -24,7 +24,7 @@ use crate::app::CleanApp;
 use crate::icons::{self, Icon};
 use crate::jobs::Job;
 use crate::kit;
-use crate::theme::{self, Weight, font, motion};
+use crate::theme::{self, Weight, font, motion, size};
 
 /// Blocks drawn at most; the rest are one "Other items" block.
 pub const MAX_BLOCKS: usize = 40;
@@ -368,13 +368,13 @@ fn storage_bar(app: &mut CleanApp, ui: &mut Ui) {
             ui.horizontal(|ui| {
                 ui.label(
                     RichText::new(text)
-                        .font(font(13.0, Weight::SemiBold))
+                        .font(font(size::BODY, Weight::SemiBold))
                         .color(t.text),
                 );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.label(
                         RichText::new(format!("Selected: {}", human_size(sel)))
-                            .font(font(12.5, Weight::Medium))
+                            .font(font(size::CALLOUT, Weight::Medium))
                             .color(t.warning),
                     );
                 });
@@ -505,7 +505,7 @@ fn map(app: &mut CleanApp, ui: &mut Ui) {
         let can_back = node.path != root;
         if ui
             .add_enabled_ui(can_back, |ui| {
-                kit::pill(ui, &t, "Back", kit::Kind::Secondary, Some(Icon::Undo))
+                kit::pill(ui, &t, "Back", kit::Kind::Secondary, Some(Icon::Back))
             })
             .inner
             .clicked()
@@ -560,7 +560,7 @@ fn map(app: &mut CleanApp, ui: &mut Ui) {
     ui.horizontal(|ui| {
         ui.label(
             RichText::new(human_size(node.size))
-                .font(font(30.0, Weight::Bold))
+                .font(font(size::LARGE_TITLE, Weight::Bold))
                 .color(icons::lerp(t.sec_a, Color32::WHITE, 0.15)),
         );
         ui.label(
@@ -603,7 +603,7 @@ fn map(app: &mut CleanApp, ui: &mut Ui) {
     kit::bottom_bar(ui, &t, egui::Id::new("disk-map-bottom"), |ui| {
         ui.label(
             RichText::new(format!("{n} selected, {}", human_size(size)))
-                .font(font(14.0, Weight::SemiBold))
+                .font(font(size::BODY, Weight::SemiBold))
                 .color(t.text),
         );
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -746,20 +746,31 @@ fn treemap(app: &mut CleanApp, ui: &mut Ui, node: &Node, area: egui::Rect) {
             } else {
                 rest
             };
-            let galley = p.layout(
-                format!("{label}\n{}", human_size(size)),
-                font(12.0, Weight::SemiBold),
-                Color32::WHITE,
-                rect.width() - 14.0,
-            );
+            // Ink or white, whichever reads better on the block (WCAG), one line for the
+            // name cut at its end (never broken mid-word) and one for the size.
+            let ink = theme::on_color(icons::lerp(top, bottom, 0.35));
+            let nf = font(size::FOOTNOTE, Weight::SemiBold);
+            let sf = font(size::FOOTNOTE, Weight::Regular);
+            let name_s = kit::truncate_end(ui.ctx(), &label, &nf, rect.width() - 16.0);
             let pos = rect.left_top() + vec2(8.0, 7.0);
             let clip = p.with_clip_rect(rect.shrink(2.0));
-            clip.galley(
-                pos + vec2(0.0, 1.0),
-                galley.clone(),
-                Color32::from_black_alpha(90),
+            if ink == Color32::WHITE {
+                clip.text(
+                    pos + vec2(0.0, 1.0),
+                    egui::Align2::LEFT_TOP,
+                    &name_s,
+                    nf.clone(),
+                    Color32::from_black_alpha(90),
+                );
+            }
+            clip.text(pos, egui::Align2::LEFT_TOP, &name_s, nf, ink);
+            clip.text(
+                pos + vec2(0.0, 16.0),
+                egui::Align2::LEFT_TOP,
+                human_size(size),
+                sf,
+                ink.gamma_multiply(0.8),
             );
-            clip.galley(pos, galley, Color32::WHITE);
         }
         let resp = match &target {
             Some((path, true)) => resp.on_hover_text(format!("Open {}", app.env.display(path))),
@@ -854,7 +865,7 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                             color,
                         );
                         let size_text = human_size(c.size);
-                        let sf = font(13.0, Weight::SemiBold);
+                        let sf = font(size::BODY, Weight::SemiBold);
                         let size_w = kit::galley(ui, &size_text, sf.clone(), t.text).size().x;
                         kit::text_at(
                             ui,
@@ -870,7 +881,7 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                         );
                         let x0 = r.left() + 56.0;
                         let name_w = (r.right() - size_w - 20.0 - x0).max(40.0);
-                        let nf = font(13.0, Weight::Medium);
+                        let nf = font(size::BODY, Weight::Medium);
                         let name_s = kit::truncate_middle(ui.ctx(), &c.name, &nf, name_w);
                         let name_rect = egui::Rect::from_min_size(
                             egui::pos2(x0, r.top() + 4.0),
@@ -908,7 +919,7 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                         );
                         if let Some(why) = &locked {
                             let text = format!("locked: {why}");
-                            let lf = font(10.5, Weight::Regular);
+                            let lf = font(size::FOOTNOTE, Weight::Regular);
                             let s = kit::truncate_middle(ui.ctx(), &text, &lf, line.width());
                             kit::text_at(ui, line, &s, &text, lf, t.text_faint, Align::Min);
                         } else {

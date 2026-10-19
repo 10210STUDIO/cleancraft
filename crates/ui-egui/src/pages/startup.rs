@@ -15,7 +15,7 @@ use egui::{RichText, Ui};
 use crate::app::CleanApp;
 use crate::jobs::Job;
 use crate::kit;
-use crate::theme::{Weight, font};
+use crate::theme::{Weight, font, size};
 
 /// Everything the page shows, read in one go.
 #[derive(Clone, Debug)]
@@ -239,7 +239,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             + data.login.as_ref().map(|l| l.len()).unwrap_or(0);
         ui.label(
             RichText::new(format!("{n_on} items start automatically"))
-                .font(font(20.0, Weight::Bold))
+                .font(font(size::TITLE2, Weight::Bold))
                 .color(t.text),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -274,7 +274,7 @@ fn section(ui: &mut Ui, t: &crate::theme::Tokens, title: &str, desc: &str) {
     ui.add_space(14.0);
     ui.label(
         RichText::new(title)
-            .font(font(15.0, Weight::Bold))
+            .font(font(size::TITLE3, Weight::Bold))
             .color(t.text),
     );
     kit::dim(ui, t, desc);
@@ -301,12 +301,12 @@ fn login_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot) {
             Ok(list) => {
                 for it in list {
                     ui.horizontal(|ui| {
-                        ui.set_height(34.0);
+                        ui.set_height(44.0);
                         split_row(
                             ui,
                             |ui| {
                                 let (r, _) = ui.allocate_exact_size(
-                                    egui::vec2(28.0, 28.0),
+                                    egui::Vec2::splat(crate::theme::icon::APP_ROW),
                                     egui::Sense::hover(),
                                 );
                                 kit::initial_tile(
@@ -315,11 +315,11 @@ fn login_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot) {
                                     &it.name,
                                     kit::name_color(&it.name),
                                 );
-                                short(ui, &it.name, 13.5, Weight::SemiBold, t.text);
+                                short(ui, &it.name, size::BODY, Weight::SemiBold, t.text);
                                 short(
                                     ui,
                                     it.path.as_deref().unwrap_or("location unknown"),
-                                    11.5,
+                                    size::FOOTNOTE,
                                     Weight::Regular,
                                     t.text_faint,
                                 );
@@ -336,12 +336,12 @@ fn login_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot) {
                 }
                 for (id, it) in &data.removed_login {
                     ui.horizontal(|ui| {
-                        ui.set_height(34.0);
+                        ui.set_height(44.0);
                         split_row(
                             ui,
                             |ui| {
                                 let (r, _) = ui.allocate_exact_size(
-                                    egui::vec2(28.0, 28.0),
+                                    egui::Vec2::splat(crate::theme::icon::APP_ROW),
                                     egui::Sense::hover(),
                                 );
                                 kit::initial_tile(
@@ -350,11 +350,11 @@ fn login_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot) {
                                     &it.name,
                                     egui::Color32::from_gray(90),
                                 );
-                                short(ui, &it.name, 13.5, Weight::SemiBold, t.text_dim);
+                                short(ui, &it.name, size::BODY, Weight::SemiBold, t.text_dim);
                                 short(
                                     ui,
                                     it.path.as_deref().unwrap_or(""),
-                                    11.5,
+                                    size::FOOTNOTE,
                                     Weight::Regular,
                                     t.text_faint,
                                 );
@@ -392,12 +392,12 @@ fn launch_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot, d: Domain) {
                     |ui| {
                         ui.vertical(|ui| {
                             ui.spacing_mut().item_spacing.y = 2.0;
-                            short(ui, &it.label, 13.5, Weight::SemiBold, t.text);
+                            short(ui, &it.label, size::BODY, Weight::SemiBold, t.text);
                             let prog = it.program.as_deref().unwrap_or("no program named");
                             short(
                                 ui,
                                 &format!("Runs {prog}"),
-                                11.5,
+                                size::FOOTNOTE,
                                 Weight::Regular,
                                 t.text_faint,
                             );
@@ -411,9 +411,9 @@ fn launch_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot, d: Domain) {
                             } else {
                                 (it.signer.label(), t.text_dim)
                             };
-                            short(ui, &sig, 11.5, Weight::Medium, col);
+                            short(ui, &sig, size::FOOTNOTE, Weight::Medium, col);
                             if let Some(p) = &it.problem {
-                                short(ui, p, 11.5, Weight::Medium, t.warning);
+                                short(ui, p, size::FOOTNOTE, Weight::Medium, t.warning);
                             }
                         });
                     },
@@ -501,12 +501,12 @@ fn heavy_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot) {
             Ok(v) => {
                 for p in v {
                     ui.horizontal(|ui| {
-                        ui.set_height(32.0);
+                        ui.set_height(44.0);
                         split_row(
                             ui,
                             |ui| {
                                 let (r, _) = ui.allocate_exact_size(
-                                    egui::vec2(26.0, 26.0),
+                                    egui::Vec2::splat(crate::theme::icon::APP_ROW),
                                     egui::Sense::hover(),
                                 );
                                 kit::initial_tile(
@@ -515,13 +515,13 @@ fn heavy_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot) {
                                     &p.name,
                                     kit::name_color(&p.name),
                                 );
-                                short(ui, &p.name, 13.5, Weight::SemiBold, t.text);
+                                short(ui, &p.name, size::BODY, Weight::SemiBold, t.text);
                                 ui.label(
                                     RichText::new(format!(
                                         "CPU {:.1}%  Memory {:.1}%",
                                         p.cpu, p.mem
                                     ))
-                                    .font(font(12.0, Weight::Medium))
+                                    .font(font(size::FOOTNOTE, Weight::Medium))
                                     .color(t.warning),
                                 );
                                 kit::dim(ui, &t, &format!("pid {}", p.pid));
