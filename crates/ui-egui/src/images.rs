@@ -1,8 +1,8 @@
 //! Real app icons and file previews on screen.
 //!
 //! Pages call [`app_icon`] / [`paint_app_icon`] for apps and [`file_icon`] /
-//! [`paint_file_icon`] for item rows. The first call for a path shows the placeholder (the
-//! coloured initial tile for apps, the drawn kind icon for files) and queues the work; a
+//! [`paint_file_icon`] for item rows. The first call for a path shows the placeholder (a
+//! neutral rounded tile for apps, the drawn kind icon for files) and queues the work; a
 //! bounded pool of background workers ([`WORKERS`]) runs `sips` / `qlmanage` through
 //! `cleancraft_core::app_icons`, which caches PNGs in `~/Library/Caches/CleanCraft/icons`.
 //! When a PNG is decoded it becomes an egui texture and fades in. The frame never waits for a
@@ -10,7 +10,8 @@
 //! ([`QUEUE_MAX`]).
 //!
 //! The loader lives in the egui context ([`install`] / [`ensure`]); with none installed
-//! (UI tests that do not ask for it) every call paints the placeholder.
+//! (UI tests that do not ask for it) every call paints the fallback: the coloured initial
+//! tile for apps, which also stays when no tool could make an icon.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -310,11 +311,26 @@ fn ease(x: f64) -> f32 {
     (1.0 - (1.0 - x).powi(3)) as f32
 }
 
+/// What a placeholder stands for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Wait {
+    /// The image is on its way.
+    Loading,
+    /// No image will come (no loader, or every tool failed).
+    Never,
+}
+
 /// Paint `k` in `rect`, or the placeholder. Returns what was shown.
-fn paint(ui: &Ui, rect: Rect, k: Key, corner: f32, placeholder: &dyn Fn(&Painter, Rect)) -> Shown {
+fn paint(
+    ui: &Ui,
+    rect: Rect,
+    k: Key,
+    corner: f32,
+    placeholder: &dyn Fn(&Painter, Rect, Wait),
+) -> Shown {
     let ctx = ui.ctx();
     let Some(s) = shared(ctx) else {
-        placeholder(ui.painter(), rect);
+        placeholder(ui.painter(), rect, Wait::Never);
         return Shown::Placeholder;
     };
     let now = ctx.input(|i| i.time);
@@ -332,7 +348,7 @@ fn paint(ui: &Ui, rect: Rect, k: Key, corner: f32, placeholder: &dyn Fn(&Painter
             if a < 1.0 {
                 let mut p = ui.painter().clone();
                 p.multiply_opacity(1.0 - a);
-                placeholder(&p, rect);
+                placeholder(&p, rect, Wait::Loading);
                 ctx.request_repaint();
             }
             let size = tex.size_vec2();
@@ -345,8 +361,12 @@ fn paint(ui: &Ui, rect: Rect, k: Key, corner: f32, placeholder: &dyn Fn(&Painter
                 .paint_at(ui, r);
             Shown::Image
         }
-        _ => {
-            placeholder(ui.painter(), rect);
+        Some(Entry::Failed) => {
+            placeholder(ui.painter(), rect, Wait::Never);
+            Shown::Placeholder
+        }
+        Some(Entry::Pending) | None => {
+            placeholder(ui.painter(), rect, Wait::Loading);
             Shown::Placeholder
         }
     };
@@ -366,8 +386,28 @@ fn app_name(app_path: &Path) -> String {
         .unwrap_or_default()
 }
 
-/// Paint an app's real icon in `rect` (the coloured initial tile until it is ready).
-/// `app_path` is the bundle path in the env (as `AppInfo::path`).
+/// The tile shown while an app icon loads: a quiet rounded square in the shape of a macOS
+/// icon, no letter and no colour, so a list of loading rows reads as calm (REVIEW-A 44).
+pub fn loading_tile(p: &Painter, r: Rect) {
+    // macOS app icons: a rounded square inset ~10% with corners ~22.5% of its side.
+    let tile = r.shrink(r.width() * 0.08);
+    let round = tile.width() * 0.225;
+    p.rect(
+        tile,
+        round,
+        LOADING_FILL,
+        egui::Stroke::new(1.0, LOADING_EDGE),
+        egui::StrokeKind::Inside,
+    );
+}
+
+/// Fill and edge of [`loading_tile`]: grey, so no app looks like another while it loads.
+pub const LOADING_FILL: Color32 = Color32::from_rgba_premultiplied(16, 16, 16, 16);
+pub const LOADING_EDGE: Color32 = Color32::from_rgba_premultiplied(24, 24, 24, 24);
+
+/// Paint an app's real icon in `rect`: the neutral [`loading_tile`] while it loads, the coloured
+/// initial tile when no icon can be made (or no loader runs). `app_path` is the bundle path
+/// in the env (as `AppInfo::path`).
 pub fn paint_app_icon(ui: &Ui, rect: Rect, app_path: &Path) -> Shown {
     let name = app_name(app_path);
     let k = Key {
@@ -375,8 +415,9 @@ pub fn paint_app_icon(ui: &Ui, rect: Rect, app_path: &Path) -> Shown {
         px: px(ui, rect.width().max(rect.height())),
         preview: false,
     };
-    paint(ui, rect, k, 0.0, &|p, r| {
-        kit::initial_tile(p, r, &name, kit::name_color(&name))
+    paint(ui, rect, k, 0.0, &|p, r, wait| match wait {
+        Wait::Loading => loading_tile(p, r),
+        Wait::Never => kit::initial_tile(p, r, &name, kit::name_color(&name)),
     })
 }
 
@@ -395,9 +436,9 @@ pub fn paint_file_icon(ui: &Ui, rect: Rect, path: &Path, kind: FileKind) -> Show
     if kind == FileKind::App {
         return paint_app_icon(ui, rect, path);
     }
-    let drawn = |p: &Painter, r: Rect| file_icons::paint(p, r, kind);
+    let drawn = |p: &Painter, r: Rect, _: Wait| file_icons::paint(p, r, kind);
     if app_icons::preview_method(path).is_none() || shared(ui.ctx()).is_none() {
-        drawn(ui.painter(), rect);
+        drawn(ui.painter(), rect, Wait::Never);
         return Shown::Placeholder;
     }
     let k = Key {

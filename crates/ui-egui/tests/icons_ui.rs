@@ -467,3 +467,203 @@ fn icons_render() {
         }
     }
 }
+
+/// A pixel inside the row's icon tile, off the centre (clear of an initial's letter), and the
+/// row's own background just right of the tile.
+fn tile_and_row_pixels(h: &mut H, name: &str) -> ([u8; 3], [u8; 3]) {
+    let r = h.get_by_label(name).rect();
+    let (cx, cy) = (r.left() + 30.0, r.center().y);
+    let img = h.render().expect("render");
+    let ppp = h.ctx.pixels_per_point();
+    let at = |x: f32, y: f32| {
+        let p = img.get_pixel((x * ppp) as u32, (y * ppp) as u32).0;
+        [p[0], p[1], p[2]]
+    };
+    (at(cx - 9.0, cy + 9.0), at(cx + 26.0, cy + 9.0))
+}
+
+/// How far a pixel is from grey.
+fn spread(p: [u8; 3]) -> u8 {
+    p.iter().max().unwrap() - p.iter().min().unwrap()
+}
+
+#[test]
+fn the_loading_placeholder_is_a_neutral_tile_not_a_coloured_letter() {
+    // REVIEW-A 44: while the icon loads, a quiet grey tile; no colour, no letter.
+    let m = icon_mac();
+    let mut h = harness(&m.mac);
+    let ctx = h.ctx.clone();
+    images::install(&ctx, &m.mac.env, Mode::Manual);
+    click(&mut h, "App Remover");
+    assert_eq!(images::shown(&ctx, &m.editor), Some(Shown::Placeholder));
+    for name in ["Editor", "Notes Pro"] {
+        let (tile, row) = tile_and_row_pixels(&mut h, name);
+        assert!(
+            spread(tile) <= spread(row) + 3,
+            "{name}: loading tile {tile:?} is coloured (row {row:?})"
+        );
+        assert!(
+            tile.iter().zip(row).all(|(t, r)| *t > r),
+            "{name}: loading tile {tile:?} is not visible on the row {row:?}"
+        );
+    }
+}
+
+#[test]
+fn an_app_without_an_icon_keeps_its_initial_tile() {
+    // When no tool can make an icon, the coloured initial tile tells apps apart.
+    let mac = FakeMac::new();
+    let app = mac.icon_app("Broken", "com.example.Broken", IconKind::AssetCatalog);
+    mac.quicklook_silent(&app, 64);
+    mac.env
+        .fake_sys()
+        .unwrap()
+        .answer("/usr/bin/osascript", "failed\n");
+    mac.spotlight_finds_nothing();
+    let mut h = harness(&mac);
+    images::install(&h.ctx.clone(), &mac.env, Mode::Sync);
+    click(&mut h, "App Remover");
+    let (tile, row) = tile_and_row_pixels(&mut h, "Broken");
+    assert!(
+        spread(tile) > spread(row) + 20,
+        "failed icon shows no initial tile: {tile:?} (row {row:?})"
+    );
+}
+
+/// `codesign -dv --verbose=2 <app>` names `authority` (stderr, as codesign writes it).
+fn signed(mac: &FakeMac, app: &Path, authority: &str) {
+    mac.env.fake_sys().unwrap().answer_full(
+        &format!("/usr/bin/codesign -dv --verbose=2 {}", mac.env.display(app)),
+        cleancraft_core::sys::CmdOut {
+            status: 0,
+            stdout: String::new(),
+            stderr: format!("Executable=x\n{authority}\nTeamIdentifier=ABCDE12345\n"),
+        },
+    );
+}
+
+fn add_copyright(app: &Path, text: &str) {
+    cleancraft_core::testkit_icons::set_plist_strings(app, &[("NSHumanReadableCopyright", text)]);
+}
+
+/// REVIEW-A 45 on the App Remover list: the real developer names and "Part of macOS" only on
+/// Safari and Calculator, never on Apple's App Store apps.
+fn metadata_mac() -> FakeMac {
+    let mac = FakeMac::new();
+    let goland = mac.app("GoLand", "com.jetbrains.goland", "2024.2");
+    signed(
+        &mac,
+        &goland,
+        "Authority=Developer ID Application: JetBrains s.r.o. (2ZEFAR8TH3)",
+    );
+    let frog = mac.app(
+        "Screaming Frog SEO Spider",
+        "co.uk.screamingfrog.seo.spider",
+        "20.0",
+    );
+    signed(
+        &mac,
+        &frog,
+        "Authority=Developer ID Application: Screaming Frog Ltd (ABCDE12345)",
+    );
+    for (name, id) in [
+        ("iMovie", "com.apple.iMovieApp"),
+        ("GarageBand", "com.apple.garageband10"),
+    ] {
+        let p = mac.app_spec(&AppSpec {
+            mas: true,
+            ..AppSpec::new(name, id, "10.4")
+        });
+        signed(&mac, &p, "Authority=Apple Mac OS Application Signing");
+        add_copyright(&p, "Copyright © 2001–2024 Apple Inc. All rights reserved.");
+    }
+    mac.app("Safari", "com.apple.Safari", "18.0");
+    mac.app_spec(&AppSpec {
+        dir: "/System/Applications",
+        ..AppSpec::new("Calculator", "com.apple.calculator", "11.0")
+    });
+    mac.spotlight_finds_nothing();
+    mac
+}
+
+#[test]
+fn app_remover_shows_real_developers_and_part_of_macos_only_for_system_apps() {
+    let mac = metadata_mac();
+    let mut h = harness(&mac);
+    click(&mut h, "App Remover");
+    let row = |name: &str| h.get_by_label(name).rect();
+    let info_in_row = |name: &str, dev: &str| {
+        let r = row(name);
+        h.query_all_by_label_contains(&format!("  ·  {dev}  ·  "))
+            .any(|n| r.contains(n.rect().center()))
+    };
+    for (name, dev) in [
+        ("GoLand", "JetBrains s.r.o."),
+        ("Screaming Frog SEO Spider", "Screaming Frog Ltd"),
+        ("iMovie", "Apple Inc."),
+        ("GarageBand", "Apple Inc."),
+        ("Safari", "Apple"),
+        ("Calculator", "Apple"),
+    ] {
+        assert!(info_in_row(name, dev), "{name} should show {dev}");
+    }
+    for bad in ["Jetbrains", "Co", "Apple  ·  App Store"] {
+        assert!(!has_text(&h, &format!("  ·  {bad}  ·  ")), "{bad} shown");
+    }
+    let tags: Vec<egui::Rect> = h
+        .query_all_by_label("Part of macOS")
+        .map(|n| n.rect())
+        .collect();
+    let rows_with_tag: Vec<&str> = [
+        "GoLand",
+        "Screaming Frog SEO Spider",
+        "iMovie",
+        "GarageBand",
+        "Safari",
+        "Calculator",
+    ]
+    .into_iter()
+    .filter(|n| {
+        let r = row(n);
+        tags.iter().any(|t| r.contains(t.center()))
+    })
+    .collect();
+    assert_eq!(rows_with_tag, ["Safari", "Calculator"]);
+}
+
+#[test]
+fn metadata_render() {
+    let save = std::env::var("CLEANCRAFT_SNAPSHOTS").is_ok_and(|v| v == "1");
+    let out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/screens/v2");
+    for (w, hgt) in [(1060.0, 680.0), (1280.0, 820.0)] {
+        for ppp in [1.0f32, 2.0] {
+            // Icons on the way (Manual loader, never pumped): the neutral loading tiles.
+            let mac = metadata_mac();
+            let app = cleancraft_ui_egui::CleanApp::new(mac.env.clone()).with_sync();
+            let mut h = egui_kittest::Harness::builder()
+                .with_size(egui::vec2(w, hgt))
+                .with_pixels_per_point(ppp)
+                .build_ui_state(
+                    |ui, app: &mut cleancraft_ui_egui::CleanApp| {
+                        app.logic(&ui.ctx().clone());
+                        app.ui(ui);
+                    },
+                    app,
+                );
+            for _ in 0..4 {
+                h.step();
+            }
+            images::install(&h.ctx.clone(), &mac.env, Mode::Manual);
+            h.get_by_label("App Remover").click();
+            for _ in 0..6 {
+                h.step();
+            }
+            let img = h.render().expect("render");
+            if save {
+                std::fs::create_dir_all(&out_dir).unwrap();
+                img.save(out_dir.join(format!("icons3-app-remover-meta-{}@{ppp}x.png", w as u32)))
+                    .unwrap();
+            }
+        }
+    }
+}
