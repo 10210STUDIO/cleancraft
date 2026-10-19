@@ -609,8 +609,10 @@ mod tests {
         assert_eq!(tr::HOVER.duration, 0.12);
         assert_eq!(tr::PRESS.duration, 0.08);
         assert_eq!(tr::CHECK.duration, 0.6);
-        assert!(tr::HERO_BURST.duration > 0.8 && tr::HERO_BURST.duration < 1.5);
-        assert!(lp::HERO_IDLE_TURN.period > lp::HERO_SCAN_TURN.period);
+        const {
+            assert!(tr::HERO_BURST.duration > 0.8 && tr::HERO_BURST.duration < 1.5);
+            assert!(lp::HERO_IDLE_TURN.period > lp::HERO_SCAN_TURN.period);
+        }
         assert_eq!(Motion::spring(tr::HERO_SETTLE).progress(10.0), 1.0);
         let staggered = tr::APPEAR.delayed(3.0 * tr::STAGGER);
         assert_eq!(staggered.progress(0.1), 0.0);
