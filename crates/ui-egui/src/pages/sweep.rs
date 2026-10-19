@@ -63,6 +63,7 @@ fn start_scan(app: &mut CleanApp) {
         sweep::scan(&env, &settings, &src, &cancel, status)
     });
     app.sweep.phase = Phase::Scanning(job);
+    crate::sound::play(&app.env, crate::sound::Cue::ScanStart);
 }
 
 fn start_run(app: &mut CleanApp) {
@@ -93,6 +94,7 @@ pub fn poll(app: &mut CleanApp) -> bool {
             if let Some(r) = job.poll() {
                 st.result = Some(r);
                 st.phase = Phase::Results;
+                crate::sound::play(&app.env, crate::sound::Cue::ScanDone);
                 false
             } else if job.is_dead() {
                 st.phase = Phase::Idle;
@@ -112,7 +114,16 @@ pub fn poll(app: &mut CleanApp) -> bool {
                         ps.plan = None;
                     }
                 }
+                let ok = runs.iter().any(|r| r.result.is_ok());
                 app.sweep.phase = Phase::Done(runs);
+                crate::sound::play(
+                    &app.env,
+                    if ok {
+                        crate::sound::Cue::CleanDone
+                    } else {
+                        crate::sound::Cue::Error
+                    },
+                );
                 false
             } else if job.is_dead() {
                 st.phase = Phase::Results;

@@ -1,8 +1,7 @@
 //! Interface sounds in the real flow: a scan plays "scan start" then "scan done" once each, a
 //! cleanup plays "clean done" once, and with sounds off in Settings nothing plays.
 //!
-//! Ignored until design3 adds the `sound::play` calls (BOARD, sound3 -> design3); remove the
-//! `#[ignore]`s then.
+//! The calls are in plan_page (scan start, scan done, clean done), sweep and `CleanApp::warn`.
 
 mod common;
 
@@ -22,10 +21,11 @@ fn played(mac: &FakeMac) -> Vec<String> {
 }
 
 #[test]
-#[ignore = "call sites land with design3 (BOARD)"]
 fn a_scan_and_a_cleanup_play_their_cues_once() {
     let mac = FakeMac::sample();
     let mut h = harness(&mac);
+    // The tool sits in the "Clean" section of the sidebar.
+    click(&mut h, "Clean");
     click(&mut h, "System Junk");
     click(&mut h, "Scan");
     steps(&mut h);
@@ -40,7 +40,6 @@ fn a_scan_and_a_cleanup_play_their_cues_once() {
 }
 
 #[test]
-#[ignore = "call sites land with design3 (BOARD)"]
 fn sounds_off_play_nothing_in_the_flow() {
     let mac = FakeMac::sample();
     Settings {
@@ -50,6 +49,8 @@ fn sounds_off_play_nothing_in_the_flow() {
     .save(&mac.env)
     .expect("save");
     let mut h = harness(&mac);
+    // The tool sits in the "Clean" section of the sidebar.
+    click(&mut h, "Clean");
     click(&mut h, "System Junk");
     click(&mut h, "Scan");
     click(&mut h, "Review and Clean");

@@ -116,6 +116,7 @@ pub fn start_scan(app: &mut CleanApp, f: FeatureId) {
     let st = app.plan_state(f);
     st.phase = Phase::Scanning(job);
     st.error = None;
+    crate::sound::play(&app.env, crate::sound::Cue::ScanStart);
 }
 
 fn start_clean(app: &mut CleanApp, f: FeatureId) {
@@ -136,17 +137,20 @@ fn start_clean(app: &mut CleanApp, f: FeatureId) {
 
 /// Finish jobs. Returns true while something is running.
 pub fn poll(app: &mut CleanApp, f: FeatureId) -> bool {
+    let mut cue = None;
     let st = app.plan_state(f);
-    match &mut st.phase {
+    let busy = match &mut st.phase {
         Phase::Scanning(job) => {
             if let Some(r) = job.poll() {
                 match r {
                     Ok(plan) => {
+                        cue = Some(crate::sound::Cue::ScanDone);
                         st.plan = Some(plan);
                         st.category = None;
                         st.phase = Phase::Results;
                     }
                     Err(e) => {
+                        cue = Some(crate::sound::Cue::Error);
                         st.error = Some(e);
                         st.phase = Phase::Idle;
                     }
@@ -163,8 +167,18 @@ pub fn poll(app: &mut CleanApp, f: FeatureId) -> bool {
         Phase::Cleaning(job) => {
             if let Some(r) = job.poll() {
                 match r {
-                    Ok(rep) => st.phase = Phase::Done(rep),
+                    Ok(rep) => {
+                        // A cleanup that moved nothing because every item failed is an
+                        // error to the ear; anything moved is a finished cleanup.
+                        cue = Some(if rep.moved.is_empty() && !rep.skipped.is_empty() {
+                            crate::sound::Cue::Error
+                        } else {
+                            crate::sound::Cue::CleanDone
+                        });
+                        st.phase = Phase::Done(rep);
+                    }
                     Err(e) => {
+                        cue = Some(crate::sound::Cue::Error);
                         st.error = Some(e);
                         st.phase = Phase::Results;
                     }
@@ -182,7 +196,11 @@ pub fn poll(app: &mut CleanApp, f: FeatureId) -> bool {
             }
         }
         _ => false,
+    };
+    if let Some(c) = cue {
+        crate::sound::play(&app.env, c);
     }
+    busy
 }
 
 /// Stop the running scan: the scan is told to stop and its result is dropped.

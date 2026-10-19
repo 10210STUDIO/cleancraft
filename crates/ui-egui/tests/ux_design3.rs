@@ -415,3 +415,25 @@ fn sparkline_spans_the_box_from_two_readings() {
     let max = xs.iter().cloned().fold(f32::MIN, f32::max);
     assert!(min <= 11.0 && max >= 209.0, "line spans {min}..{max}");
 }
+
+/// sound3's Settings group: "Play sounds" is a switch that is saved, the volume is saved and
+/// "Preview sound" plays a sound through afplay (FakeSys records it).
+#[test]
+fn settings_sounds_group_saves_and_previews() {
+    let m = FakeMac::new();
+    base(&m);
+    let mut h = harness(&m, 1280.0, 820.0);
+    click(&mut h, "Settings");
+    h.get_by_label("Preview sound").scroll_to_me();
+    settle(&mut h);
+    click(&mut h, "Preview sound");
+    let spawned = m.env.fake_sys().unwrap().spawned();
+    assert!(
+        spawned.iter().any(|l| l.starts_with("/usr/bin/afplay ")),
+        "{spawned:?}"
+    );
+    click(&mut h, "Play sounds");
+    assert!(!cleancraft_core::Settings::load(&m.env).sounds);
+    click(&mut h, "Play sounds");
+    assert!(cleancraft_core::Settings::load(&m.env).sounds);
+}

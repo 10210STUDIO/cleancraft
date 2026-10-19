@@ -154,6 +154,7 @@ impl CleanApp {
 
     pub fn warn(&mut self, msg: impl Into<String>) {
         self.notice = Some((msg.into(), true));
+        crate::sound::play(&self.env, crate::sound::Cue::Error);
     }
 
     /// Go to a page by name: a feature id ("system_junk"), "history" or "settings".
@@ -178,6 +179,8 @@ impl CleanApp {
     pub fn save_settings(&mut self) {
         if let Err(e) = self.settings.save(&self.env) {
             self.warn(format!("Settings could not be saved: {e}"));
+        } else {
+            crate::sound::apply(&self.env, &self.settings);
         }
     }
 
