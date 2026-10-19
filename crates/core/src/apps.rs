@@ -51,8 +51,13 @@ pub struct AppInfo {
     pub build: String,
     /// Bytes on disk; 0 in a quick listing.
     pub size: u64,
-    /// Last opened, seconds since the epoch, when Spotlight knows.
+    /// Last opened, seconds since the epoch, when Spotlight knows (`kMDItemLastUsedDate`, else
+    /// its day-precision copy `kMDItemLastUsedDate_Ranking`).
     pub last_used: Option<i64>,
+    /// When Spotlight has no date: the newest change to the app's own settings or saved
+    /// windows ([`app_data_paths`]). A hint that the app ran, never used for "Unused".
+    #[serde(default)]
+    pub last_active: Option<i64>,
     pub store: Store,
     /// The maker, from the bundle id: "com.google.Chrome" gives "Google".
     pub vendor: String,
@@ -242,6 +247,8 @@ pub fn app_paths(env: &Env) -> Vec<(PathBuf, bool)> {
 pub fn inventory(env: &Env, deep: bool, progress: &dyn Fn(&str)) -> Vec<AppInfo> {
     let setapp = env.sys_path("/Applications/Setapp");
     let mut out = Vec::new();
+    // Asked once, only when an app needs the app-data fallback.
+    let mut full_disk: Option<bool> = None;
     for (path, system) in app_paths(env) {
         let Some(b) = read_bundle(&path) else {
             continue;
@@ -260,18 +267,17 @@ pub fn inventory(env: &Env, deep: bool, progress: &dyn Fn(&str)) -> Vec<AppInfo>
         };
         let mut apple = system || b.bundle_id.starts_with("com.apple.");
         let shown = env.display(&path);
-        let (mut size, mut last_used) = (0, None);
+        let (mut size, mut last_used, mut last_active) = (0, None, None);
         if deep {
             size = tree_size(&path).0;
-            last_used = env
-                .sys
-                .run(
-                    "/usr/bin/mdls",
-                    &["-name", "kMDItemLastUsedDate", "-raw", &shown],
-                )
-                .ok()
-                .filter(|o| o.ok())
-                .and_then(|o| parse_mdls_date(&o.stdout));
+            last_used = spotlight_date(env, "kMDItemLastUsedDate", &shown)
+                .or_else(|| spotlight_date(env, "kMDItemLastUsedDate_Ranking", &shown));
+            if last_used.is_none() {
+                let containers = *full_disk.get_or_insert_with(|| {
+                    crate::permissions::full_disk_access(env) == crate::permissions::Access::Granted
+                });
+                last_active = last_active_from_data(env, &b.bundle_id, containers);
+            }
             if !apple
                 && let Ok(o) = env
                     .sys
@@ -295,6 +301,7 @@ pub fn inventory(env: &Env, deep: bool, progress: &dyn Fn(&str)) -> Vec<AppInfo>
             build: b.version,
             size,
             last_used,
+            last_active,
             store,
             apple,
             feed_url: b.feed_url,
@@ -302,6 +309,60 @@ pub fn inventory(env: &Env, deep: bool, progress: &dyn Fn(&str)) -> Vec<AppInfo>
     }
     out.sort_by_key(|a| a.name.to_lowercase());
     out
+}
+
+/// `mdls -name <attr> -raw <app>`: a Spotlight date, `None` for "(null)" or an error.
+fn spotlight_date(env: &Env, attr: &str, shown: &str) -> Option<i64> {
+    env.sys
+        .run("/usr/bin/mdls", &["-name", attr, "-raw", shown])
+        .ok()
+        .filter(|o| o.ok())
+        .and_then(|o| parse_mdls_date(&o.stdout))
+}
+
+/// Files an app writes when it runs: its preferences and its saved windows, in the home
+/// folder and (when `containers`) in its sandbox container. Reading inside another app's
+/// container needs Full Disk Access on recent macOS (else macOS asks the user), so the
+/// container paths are only listed with it.
+pub fn app_data_paths(env: &Env, bundle_id: &str, containers: bool) -> Vec<PathBuf> {
+    if bundle_id.is_empty() || bundle_id.contains('/') || bundle_id.contains("..") {
+        return Vec::new();
+    }
+    let mut v = vec![
+        env.home_path(&format!("Library/Preferences/{bundle_id}.plist")),
+        env.home_path(&format!(
+            "Library/Saved Application State/{bundle_id}.savedState"
+        )),
+    ];
+    if containers {
+        let data = format!("Library/Containers/{bundle_id}/Data/Library");
+        v.push(env.home_path(&format!("{data}/Preferences/{bundle_id}.plist")));
+        v.push(env.home_path(&format!(
+            "{data}/Saved Application State/{bundle_id}.savedState"
+        )));
+    }
+    v
+}
+
+/// The newest modification time among [`app_data_paths`], seconds since the epoch.
+pub fn last_active_from_data(env: &Env, bundle_id: &str, containers: bool) -> Option<i64> {
+    app_data_paths(env, bundle_id, containers)
+        .iter()
+        .filter_map(|p| std::fs::symlink_metadata(p).ok()?.modified().ok())
+        .filter_map(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs() as i64)
+        .max()
+}
+
+/// The last-opened line for an app: "Opened: 3 days ago" from Spotlight; when Spotlight has
+/// no date, "Last active: 3 days ago (app data)" from the app's own files; else
+/// "Opened: No record" (Spotlight never saw it open: often an app that was never launched).
+pub fn opened_text(a: &AppInfo, now: i64) -> String {
+    match (a.last_used, a.last_active) {
+        (Some(t), _) => format!("Opened: {}", last_used_text(Some(t), now)),
+        (None, Some(t)) => format!("Last active: {} (app data)", last_used_text(Some(t), now)),
+        (None, None) => "Opened: No record".into(),
+    }
 }
 
 /// Find an app by path (shown or real), file name, name or bundle id, ignoring case.

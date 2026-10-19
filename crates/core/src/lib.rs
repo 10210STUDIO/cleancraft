@@ -5,6 +5,7 @@
 //! confirms, [`executor`] moves confirmed items to the Trash or quarantine and logs each move
 //! with an undo.
 
+pub mod app_icons;
 pub mod apps;
 pub mod env;
 pub mod executor;
@@ -27,6 +28,7 @@ pub mod testkit;
 pub mod testkit_apps;
 pub mod testkit_cleanup;
 pub mod testkit_files;
+pub mod testkit_icons;
 pub mod testkit_monitor;
 pub mod testkit_perf;
 pub mod updater;
