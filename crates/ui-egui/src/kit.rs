@@ -1614,6 +1614,30 @@ pub fn sort_menu<T: Copy + PartialEq>(ui: &mut Ui, id: &str, value: &mut T, choi
     });
 }
 
+/// A pop-up menu behind a secondary pill (`FIELD` tall, glass, rounded ends).
+pub fn menu_pill<R>(
+    ui: &mut Ui,
+    t: &Tokens,
+    label: &str,
+    add: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<Option<R>> {
+    ui.scope(|ui| {
+        let v = &mut ui.style_mut().visuals.widgets;
+        for w in [&mut v.inactive, &mut v.hovered, &mut v.active, &mut v.open] {
+            w.corner_radius = CornerRadius::same((hit::FIELD / 2.0) as u8);
+        }
+        v.inactive.weak_bg_fill = t.glass;
+        v.inactive.bg_stroke = Stroke::new(1.0, t.glass_edge);
+        ui.spacing_mut().interact_size.y = hit::FIELD;
+        ui.spacing_mut().button_padding = vec2(16.0, 7.0);
+        ui.menu_button(
+            RichText::new(label).font(font(size::CALLOUT, Weight::Medium)),
+            add,
+        )
+    })
+    .inner
+}
+
 /// A plain text field in CleanCraft's style (`FIELD` tall, rounded). The caller names it.
 pub fn text_field(ui: &mut Ui, t: &Tokens, text: &mut String, hint: &str, width: f32) -> Response {
     ui.add(

@@ -842,7 +842,7 @@ fn file_row(app: &CleanApp, ui: &mut Ui, it: &cleancraft_core::Item) -> Option<b
         t.text,
     );
     let wf = font(size::FOOTNOTE, Weight::Regular);
-    let why_s = kit::truncate_middle(ui.ctx(), &why, &wf, why_w);
+    let why_s = kit::truncate_end(ui.ctx(), &why, &wf, why_w);
     kit::text_at(
         ui,
         Rect::from_min_size(pos2(x0 + path_w + 10.0, r.top()), vec2(why_w, r.height())),

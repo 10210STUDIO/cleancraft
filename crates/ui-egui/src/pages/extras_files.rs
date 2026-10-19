@@ -191,7 +191,8 @@ pub fn results_toolbar(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         rules.push(("Keep Largest File", KeepRule::Largest));
     }
     let mut chosen = None;
-    let r = ui.menu_button("Select Copies", |ui| {
+    // A pill like the buttons beside it (egui's menu button, restyled).
+    let r = kit::menu_pill(ui, &app.t, "Select Copies", |ui| {
         for (label, rule) in &rules {
             if ui.button(*label).clicked() {
                 chosen = Some(*rule);

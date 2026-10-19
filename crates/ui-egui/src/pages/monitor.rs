@@ -171,7 +171,7 @@ fn big(app: &CleanApp, ui: &mut Ui, text: &str) {
     ui.add(
         egui::Label::new(
             RichText::new(text)
-                .font(font(size::NUMBER, Weight::Bold))
+                .font(font(size::TITLE, Weight::Bold))
                 .color(app.t.text),
         )
         .truncate(),
@@ -183,9 +183,16 @@ fn gauge_big(app: &CleanApp, ui: &mut Ui, frac: f32, color: Color32, text: &str)
     let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 78.0), Sense::hover());
     let c = egui::pos2(r.left() + 56.0, r.bottom() - 8.0);
     kit::gauge(ui.painter(), c, 48.0, frac, color);
-    let fid = font(size::TITLE, Weight::Bold);
-    let tr = egui::Rect::from_center_size(c - vec2(0.0, 16.0), vec2(88.0, 30.0));
-    kit::text_at(ui, tr, text, text, fid, app.t.text, egui::Align::Center);
+    let tr = egui::Rect::from_center_size(c - vec2(0.0, 15.0), vec2(80.0, 30.0));
+    ui.put(
+        tr,
+        egui::Label::new(
+            RichText::new(text)
+                .font(font(size::TITLE, Weight::Bold))
+                .color(app.t.text),
+        )
+        .selectable(false),
+    );
 }
 
 /// A label pair on one line: name on the left, value on the right.
