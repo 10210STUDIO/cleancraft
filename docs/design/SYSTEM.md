@@ -35,15 +35,18 @@ material is file names and paths.
 | `DISPLAY` | 52 | Bold | 1.1 | (none) | the total found on a results page |
 | `NUMBER` | 30 | Bold | 1.15 | (none) | values in Quick Sweep tiles and Live Monitor cards, App Remover detail total |
 | `LARGE_TITLE` | 30 | Bold | 1.2 | Large Title (26) | start-screen title, Done headline |
-| `NUMBER_S` | 22 | Bold | 1.2 | (none) | selected size in the bottom bar |
+| `NUMBER_S` | 24 | Bold | 1.2 | (none) | selected size in the bottom bar (same size as `TITLE`) |
 | `TITLE` | 24 | Bold | 1.2 | Title 1 (22) | page title in the header, app name in App Remover detail |
 | `TITLE2` | 19 | SemiBold / Bold | 1.25 | Title 2 (17) | dialog headline, progress headline, app name in the sidebar logo, empty states |
 | `TITLE3` | 16 | SemiBold | 1.3 | Title 3 (15) | card titles, "found in" and "ready to clean" next to the total |
-| `BODY_L` | 15 | Regular | 1.4 | (none) | lead text under a start-screen title, Done summary |
+| `BODY_L` | 16 | Regular | 1.4 | (none) | lead text under a start-screen title, Done summary (same size as `TITLE3`) |
 | `BODY` | 14 | Regular / Medium / SemiBold | 1.35 | Body (13) | row names (SemiBold), sidebar entries (Medium, SemiBold when active), sizes in rows, primary buttons |
 | `CALLOUT` | 13 | Regular / Medium | 1.35 | Callout (12) | page subtitles, secondary lines, secondary buttons, banners, strips, confirmation lines |
 | `FOOTNOTE` | 12 | Regular / Medium | 1.3 | Footnote (10) | paths, tags, counts, app meta lines, row actions (Reveal, Ignore) |
 | `CAPTION` | 11.5 | SemiBold, upper case, +0.6 to 0.8 letter spacing | 1.2 | Caption (10) | sidebar group labels and eyebrows only |
+
+Nine sizes in all (`theme::SCALE`: 52, 30, 24, 19, 16, 14, 13, 12, 11.5); `theme::snap`
+puts text sized from a shape (the initial in an app tile) on the nearest one.
 
 Rules:
 - Nothing a person must read is under 12 pt. 11.5 pt exists only as spaced upper case.
@@ -64,8 +67,9 @@ Rules:
 | Module tile in a card head | `CARD` | 36 (28 in Live Monitor card heads) |
 | Module tile in the page header | `HEADER` | 48 |
 | Dialog head tile | `DIALOG` | 48 |
-| Hero picture (start, scanning) | `HERO_MIN` to `HERO_MAX` | 110 to 240, by window height; progress ring 160 or 210 |
-| Done check | | 96 or 132 (Quick Sweep 80 or 108, it has cards under it) |
+| Hero object, start screen (`heroes::show`, Idle) | `HERO_MIN` to `HERO_MAX` | 96 to 240 by window height (square of side x 1.12) |
+| Hero object, scanning (Scanning) | | 170 or 220 by window height; elapsed time under the status line |
+| Hero object, Done (Done, with a check badge at 30% of its size on its lower right) | | 150 or 200 (Quick Sweep 120 or 160, it has cards under it) |
 
 App icons go through `kit::app_icon(ui, rect, name, bundle_path)`: the real icon from the
 icons agent's `images::app_icon` when loaded, the coloured initial tile as placeholder.
@@ -126,6 +130,9 @@ background by under 1 point of contrast, so tag text stays above 5:1.
 Text on gradient fills (primary buttons, the round action, checkbox ticks) uses
 `theme::on_color`: dark ink #08161C on light section colours, white on deep ones.
 
+Each section gradient is chosen so its label colour reaches 4.5:1 at both ends (Overview
+end #2690B4: ink 5.0; Neutral end #7A8AA6: ink 5.3; the others 5.5 to 11).
+
 Section colour pairs (start, end) give each sidebar section its own field: Overview mint,
 Clean glacier blue, Protect coral, Speed lime, Apps periwinkle, Files amber, System sky,
 Neutral slate (History and Settings).
@@ -133,7 +140,9 @@ Neutral slate (History and Settings).
 ## Hit targets and control heights (`theme::hit`)
 
 - Minimum hit target 28 pt (HIG). Ghost row actions (Reveal, Ignore) are 28 tall.
-- Secondary buttons 32, primary and danger buttons 40, text fields 32.
+- One control height per row: primary, secondary and danger buttons, text fields, search
+  fields and pop-up menus are all 32 (`hit::PRIMARY`, `SECONDARY`, `FIELD`); the primary
+  stands out by its fill. Only the start screen's round action (112) is bigger.
 - Checkbox: 18 pt box in a 22 pt hit area inside a 28 pt line.
 - Sidebar row 28 to 36 (adapts to the window height so all 17 entries fit at 680 pt, never
   under 28).
@@ -141,9 +150,11 @@ Neutral slate (History and Settings).
 
 ## Components (kit.rs)
 
-`pill` (Primary, Secondary, Danger, Ghost), `check`, `check_text`, `card`, `well`,
+`pill` (Primary, Secondary, Danger, Ghost), `check`, `check_mixed`, `check_text`, `radio`,
+`search_field`, `text_field`, `sort_menu`, `quiet_label`, `card`, `well`,
 `bar_frame`, `bottom_bar`, `dialog_frame`, `modal`, `dialog_head`, `strip`, `header`,
-`card_head`, `hero`, `round_action`, `chips`, `progress`, `progress_ring`, `done_check`, `tag`,
+`card_head`, `hero`, `round_action`, `chips`, `progress`, `progress_ring`, `done_check`,
+`done_hero`, `tag`,
 `bar`, `gauge`, `sparkline`, `badge`, `icon_tile`, `app_icon`, `initial_tile`, `confirm_line`,
 `text_at`, `place`.
 

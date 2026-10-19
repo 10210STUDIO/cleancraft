@@ -154,6 +154,11 @@ impl CleanApp {
     /// Per-frame work that does not draw: finished jobs.
     pub fn logic(&mut self, ctx: &egui::Context) {
         if !self.fonts_installed {
+            // macOS "Reduce motion" (Accessibility > Display), read once through env.sys.
+            // Tests run with `sync` and keep motion on without asking.
+            if !self.sync {
+                crate::motion::detect_reduce_motion(self.env.sys.as_ref());
+            }
             theme::install_fonts(ctx);
             theme::apply(ctx, &self.t);
             self.fonts_installed = true;

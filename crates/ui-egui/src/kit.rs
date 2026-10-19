@@ -166,8 +166,12 @@ fn top_sheen(p: &egui::Painter, r: Rect, round: f32) {
 
 /// Animated 0..=1 toward `on`, honouring reduced motion.
 pub fn anim(ctx: &egui::Context, id: egui::Id, on: bool, secs: f32) -> f32 {
-    let secs = if motion::REDUCE_MOTION { 0.0 } else { secs };
-    ctx.animate_bool_with_time(id, on, secs)
+    crate::motion::animate_bool(
+        ctx,
+        id,
+        on,
+        crate::motion::Motion::new(secs, crate::motion::GLIDE),
+    )
 }
 
 /// The main action. Returns true when clicked.
@@ -460,7 +464,7 @@ pub fn initial_tile(p: &egui::Painter, r: Rect, name: &str, color: Color32) {
         r.center(),
         Align2::CENTER_CENTER,
         letter,
-        font(r.height() * 0.48, Weight::Bold),
+        font(theme::snap(r.height() * 0.48), Weight::Bold),
         theme::on_color(icons::lerp(color, Color32::BLACK, 0.12)),
     );
 }
@@ -663,7 +667,7 @@ pub fn centered_block<R>(ui: &mut Ui, id: egui::Id, add: impl FnOnce(&mut Ui) ->
 pub fn hero(
     ui: &mut Ui,
     t: &Tokens,
-    icon: Icon,
+    feature: cleancraft_core::FeatureId,
     title_text: &str,
     desc: &str,
     action: &str,
@@ -682,9 +686,14 @@ pub fn hero(
         .auto_shrink([false, false])
         .show(ui, |ui| {
             centered_block(ui, id, |ui| {
-                let time = ui.input(|i| i.time);
-                let (r, _) = ui.allocate_exact_size(vec2(side * 1.3, side * 1.12), Sense::hover());
-                icons::illustration(ui.painter(), r.center(), side, icon, t.sec_a, t.sec_b, time);
+                // The module's own 3D object (heroes.rs), idle.
+                crate::heroes::show(
+                    ui,
+                    feature,
+                    crate::heroes::HeroPhase::Idle,
+                    0.0,
+                    Vec2::splat(side * 1.12),
+                );
                 let start = ui.cursor().min.y;
                 ui.add_space(space::S);
                 ui.label(
@@ -716,11 +725,8 @@ pub fn hero(
             });
         });
     // The idle picture drifts slowly: 30 frames a second is plenty and saves energy on
-    // 120 Hz displays.
-    if !motion::REDUCE_MOTION {
-        ui.ctx()
-            .request_repaint_after(std::time::Duration::from_millis(33));
-    }
+    // 120 Hz displays (heroes::show asks for its own frames; this covers the halo).
+    crate::motion::ambient_repaint(ui.ctx());
     clicked
 }
 
@@ -756,7 +762,7 @@ pub fn round_action(ui: &mut Ui, t: &Tokens, label: &str, d: f32) -> Response {
     let r = Rect::from_center_size(c, size * scale);
     let corner = r.height() / 2.0;
     // Halo: two outlines that grow and fade, half a period apart.
-    if !motion::REDUCE_MOTION {
+    if !motion::reduced() {
         for k in 0..2 {
             let ph = (motion::looped(time, motion::PULSE) + k as f32 * 0.5).fract();
             let e = motion::ease_out(ph);
@@ -807,7 +813,7 @@ pub fn round_action(ui: &mut Ui, t: &Tokens, label: &str, d: f32) -> Response {
         c,
         Align2::CENTER_CENTER,
         label,
-        font(size::TITLE2 * scale, Weight::Bold),
+        font(size::TITLE2, Weight::Bold),
         t.on_section(),
     );
     resp
@@ -824,7 +830,7 @@ pub fn clock(secs: u64) -> String {
 pub fn progress(
     ui: &mut Ui,
     t: &Tokens,
-    icon: Icon,
+    feature: cleancraft_core::FeatureId,
     headline: &str,
     status: &str,
     elapsed: u64,
@@ -834,22 +840,16 @@ pub fn progress(
     let mut stop = false;
     centered_block(ui, id, |ui| {
         let avail = ui.available_height();
-        let d = if avail < 460.0 { 160.0 } else { 210.0 };
-        let (r, _) = ui.allocate_exact_size(vec2(d * 1.3, d + 20.0), Sense::hover());
-        let time = ui.input(|i| i.time);
-        progress_ring(ui.painter(), r.center(), d, t, time);
-        // Inside: icon and time.
-        let c = r.center();
-        let ir = Rect::from_center_size(c - vec2(0.0, d * 0.08), Vec2::splat(d * 0.26));
-        icons::paint(ui.painter(), ir, icon, Color32::WHITE);
-        ui.painter().text(
-            c + vec2(0.0, d * 0.16),
-            Align2::CENTER_CENTER,
-            clock(elapsed),
-            font(size::TITLE3, Weight::SemiBold),
-            t.text_dim,
+        let d = if avail < 460.0 { 170.0 } else { 220.0 };
+        // The module's 3D object at work (heroes.rs, scanning).
+        crate::heroes::show(
+            ui,
+            feature,
+            crate::heroes::HeroPhase::Scanning,
+            0.0,
+            Vec2::splat(d),
         );
-        ui.add_space(space::M);
+        ui.add_space(space::S);
         ui.label(
             RichText::new(headline)
                 .font(font(size::TITLE2, Weight::SemiBold))
@@ -860,14 +860,17 @@ pub fn progress(
         let w = ui.available_width().min(space::MEASURE);
         let shown = truncate_middle(ui.ctx(), status, &fid, w);
         ui.label(RichText::new(shown).font(fid).color(t.text_faint));
+        ui.add_space(space::XS);
+        ui.label(
+            RichText::new(clock(elapsed))
+                .font(font(size::TITLE3, Weight::SemiBold))
+                .color(t.text_dim),
+        );
         if can_stop {
-            ui.add_space(space::L);
+            ui.add_space(space::M);
             stop = pill(ui, t, "Stop", Kind::Secondary, Some(Icon::Stop)).clicked();
         }
     });
-    if !motion::REDUCE_MOTION {
-        ui.ctx().request_repaint();
-    }
     stop
 }
 
@@ -906,6 +909,17 @@ pub fn progress_ring(p: &egui::Painter, c: Pos2, d: f32, t: &Tokens, time: f64) 
 /// time the screen first showed.
 pub fn done_check(ui: &mut Ui, t: &Tokens, d: f32, started: f64) {
     let (r, _) = ui.allocate_exact_size(vec2(d * 1.4, d), Sense::hover());
+    done_check_in(
+        ui,
+        t,
+        Rect::from_center_size(r.center(), Vec2::splat(d)),
+        started,
+    );
+}
+
+/// The growing disc and self-drawing check, painted in `r` (a square).
+fn done_check_in(ui: &mut Ui, t: &Tokens, r: Rect, started: f64) {
+    let d = r.width();
     let now = ui.input(|i| i.time);
     let k = motion::progress(now, started, motion::CHECK);
     if k < 1.0 {
@@ -946,6 +960,29 @@ pub fn done_check(ui: &mut Ui, t: &Tokens, d: f32, started: f64) {
         }
         p.add(Shape::line(line, Stroke::new(w, Color32::WHITE)));
     }
+}
+
+/// The Done picture: the module's object in its finished state with a small check that
+/// grows in and draws itself on its lower right. `started` is when the screen first showed.
+pub fn done_hero(
+    ui: &mut Ui,
+    t: &Tokens,
+    feature: cleancraft_core::FeatureId,
+    d: f32,
+    started: f64,
+) {
+    let r = crate::heroes::show(
+        ui,
+        feature,
+        crate::heroes::HeroPhase::Done,
+        1.0,
+        Vec2::splat(d),
+    )
+    .rect;
+    let c = d * 0.3;
+    let badge = Rect::from_center_size(r.center() + vec2(d * 0.27, d * 0.27), Vec2::splat(c));
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(badge));
+    done_check_in(&mut child, t, badge, started);
 }
 
 /// When a screen identified by `key` first showed (for one-time animations).
@@ -1295,10 +1332,29 @@ pub fn check(ui: &mut Ui, t: &Tokens, on: &mut bool, name: &str) -> Response {
     resp
 }
 
+/// A checkbox that can also show a mixed state (a dash): a group where only some members are
+/// on. Clicking a mixed box turns it on. Accessible as a checkbox named `name`.
+pub fn check_mixed(ui: &mut Ui, t: &Tokens, on: &mut bool, mixed: bool, name: &str) -> Response {
+    let (r, mut resp) = ui.allocate_exact_size(Vec2::splat(22.0), Sense::click());
+    let enabled = ui.is_enabled();
+    if resp.clicked() && enabled {
+        *on = !*on;
+        resp.mark_changed();
+    }
+    let state = *on;
+    resp.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, enabled, state, name));
+    paint_box(ui, t, r, &resp, state, mixed && !state, enabled);
+    resp
+}
+
 /// Paint a checkbox box in `r` for `resp`.
 pub fn paint_check(ui: &Ui, t: &Tokens, r: Rect, resp: &Response, on: bool, enabled: bool) {
+    paint_box(ui, t, r, resp, on, false, enabled);
+}
+
+fn paint_box(ui: &Ui, t: &Tokens, r: Rect, resp: &Response, on: bool, mixed: bool, enabled: bool) {
     let ctx = ui.ctx();
-    let k = anim(ctx, resp.id.with("on"), on, motion::HOVER);
+    let k = anim(ctx, resp.id.with("on"), on || mixed, motion::HOVER);
     let hov = anim(
         ctx,
         resp.id.with("hov"),
@@ -1329,8 +1385,16 @@ pub fn paint_check(ui: &Ui, t: &Tokens, r: Rect, resp: &Response, on: bool, enab
             t.sec_a.gamma_multiply(k),
             t.sec_b.gamma_multiply(k),
         );
-        let ir = b.shrink(2.5);
-        icons::paint_with(&p, ir, Icon::Check, t.on_section().gamma_multiply(k), 2.0);
+        if mixed {
+            let y = b.center().y;
+            p.line_segment(
+                [pos2(b.left() + 4.5, y), pos2(b.right() - 4.5, y)],
+                Stroke::new(2.0, t.on_section().gamma_multiply(k)),
+            );
+        } else {
+            let ir = b.shrink(2.5);
+            icons::paint_with(&p, ir, Icon::Check, t.on_section().gamma_multiply(k), 2.0);
+        }
     }
 }
 

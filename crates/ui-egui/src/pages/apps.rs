@@ -355,7 +355,7 @@ fn remover_page(app: &mut CleanApp, ui: &mut Ui) {
             kit::progress(
                 ui,
                 &t,
-                Icon::Trash,
+                FeatureId::Uninstaller,
                 "Moving to the Trash...",
                 &s,
                 secs,
@@ -376,7 +376,7 @@ fn remover_page(app: &mut CleanApp, ui: &mut Ui) {
             kit::progress(
                 ui,
                 &t,
-                Icon::Remover,
+                FeatureId::Uninstaller,
                 "Looking at your apps",
                 &s,
                 secs,
@@ -1216,48 +1216,55 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
         cleancraft_core::fsutil::items(rep.moved.len()),
         rep.skipped.len()
     );
-    super::plan_page::done_view(app, ui, &rep, &summary, |app, ui| {
-        let t = app.t;
-        if !rep.moved.is_empty()
-            && kit::pill(ui, &t, "Undo", kit::Kind::Secondary, Some(Icon::Undo)).clicked()
-        {
-            app.act();
-            let (n, errs) = executor::undo_plan(&app.env, &rep.plan_id);
-            if errs.is_empty() {
-                app.tell(format!("{} put back.", cleancraft_core::fsutil::items(n)));
-            } else {
-                app.warn(format!(
-                    "{} put back, {} could not be: {}",
-                    cleancraft_core::fsutil::items(n),
-                    errs.len(),
-                    errs[0].1
-                ));
+    super::plan_page::done_view(
+        app,
+        ui,
+        FeatureId::Uninstaller,
+        &rep,
+        &summary,
+        |app, ui| {
+            let t = app.t;
+            if !rep.moved.is_empty()
+                && kit::pill(ui, &t, "Undo", kit::Kind::Secondary, Some(Icon::Undo)).clicked()
+            {
+                app.act();
+                let (n, errs) = executor::undo_plan(&app.env, &rep.plan_id);
+                if errs.is_empty() {
+                    app.tell(format!("{} put back.", cleancraft_core::fsutil::items(n)));
+                } else {
+                    app.warn(format!(
+                        "{} put back, {} could not be: {}",
+                        cleancraft_core::fsutil::items(n),
+                        errs.len(),
+                        errs[0].1
+                    ));
+                }
+                app.apps.phase = Phase::Browse;
+                let old = app.apps.detail.clone();
+                rebuild_detail(app, old.as_ref());
+                start_load(app);
             }
-            app.apps.phase = Phase::Browse;
-            let old = app.apps.detail.clone();
-            rebuild_detail(app, old.as_ref());
-            start_load(app);
-        }
-        if kit::pill(
-            ui,
-            &t,
-            "Show History",
-            kit::Kind::Secondary,
-            Some(Icon::History),
-        )
-        .clicked()
-        {
-            app.act();
-            app.apps.phase = Phase::Browse;
-            app.navigate("history");
-        }
-        if kit::primary(ui, &t, "Done") {
-            app.act();
-            app.apps.phase = Phase::Browse;
-            let old = app.apps.detail.clone();
-            rebuild_detail(app, old.as_ref());
-        }
-    });
+            if kit::pill(
+                ui,
+                &t,
+                "Show History",
+                kit::Kind::Secondary,
+                Some(Icon::History),
+            )
+            .clicked()
+            {
+                app.act();
+                app.apps.phase = Phase::Browse;
+                app.navigate("history");
+            }
+            if kit::primary(ui, &t, "Done") {
+                app.act();
+                app.apps.phase = Phase::Browse;
+                let old = app.apps.detail.clone();
+                rebuild_detail(app, old.as_ref());
+            }
+        },
+    );
 }
 
 // ---------- updates ----------
@@ -1270,7 +1277,7 @@ fn updates_page(app: &mut CleanApp, ui: &mut Ui) {
         kit::progress(
             ui,
             &t,
-            Icon::Updates,
+            FeatureId::Updater,
             "Checking for updates",
             &format!("Checking {s}..."),
             secs,
@@ -1282,7 +1289,7 @@ fn updates_page(app: &mut CleanApp, ui: &mut Ui) {
         if kit::hero(
             ui,
             &t,
-            Icon::Updates,
+            FeatureId::Updater,
             FeatureId::Updater.title(),
             "Newer versions of your apps and of macOS. CleanCraft opens the right place to install them.",
             "Check for Updates",

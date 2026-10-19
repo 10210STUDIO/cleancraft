@@ -44,6 +44,28 @@ pub mod radius {
     pub const PILL: u8 = 255;
 }
 
+/// The nine sizes of the type scale, largest first (tests check pages use only these).
+pub const SCALE: [f32; 9] = [
+    size::DISPLAY,
+    size::LARGE_TITLE,
+    size::TITLE,
+    size::TITLE2,
+    size::TITLE3,
+    size::BODY,
+    size::CALLOUT,
+    size::FOOTNOTE,
+    size::CAPTION,
+];
+
+/// The scale size nearest to `x` (for text sized from a shape, like an initial in a tile).
+pub fn snap(x: f32) -> f32 {
+    SCALE
+        .iter()
+        .copied()
+        .min_by(|a, b| (a - x).abs().total_cmp(&(b - x).abs()))
+        .unwrap_or(size::BODY)
+}
+
 /// Type scale (points), Inter. Tuned for a Mac utility on Retina: nothing a person must read
 /// is below `FOOTNOTE` (12), and `CAPTION` (11.5) is only used for upper-case labels.
 /// Weights and line heights per role are in docs/design/SYSTEM.md.
@@ -52,8 +74,9 @@ pub mod size {
     pub const DISPLAY: f32 = 52.0;
     /// Numbers inside cards and tiles. Bold.
     pub const NUMBER: f32 = 30.0;
-    /// Numbers in the bottom bar and small stats. Bold.
-    pub const NUMBER_S: f32 = 22.0;
+    /// Numbers in the bottom bar and small stats. Bold. (Same size as `TITLE`: the scale
+    /// keeps to nine sizes.)
+    pub const NUMBER_S: f32 = 24.0;
     /// Start-screen title, Done headline. Bold.
     pub const LARGE_TITLE: f32 = 30.0;
     /// Page title in the header. Bold.
@@ -62,8 +85,8 @@ pub mod size {
     pub const TITLE2: f32 = 19.0;
     /// Card and section titles. SemiBold.
     pub const TITLE3: f32 = 16.0;
-    /// Lead text under a hero title. Regular.
-    pub const BODY_L: f32 = 15.0;
+    /// Lead text under a hero title. Regular. (Same size as `TITLE3`.)
+    pub const BODY_L: f32 = 16.0;
     /// Body text, row names (SemiBold), sidebar entries (Medium).
     pub const BODY: f32 = 14.0;
     /// Secondary lines: subtitles, meta, buttons. Regular or Medium.
@@ -130,55 +153,10 @@ pub mod hit {
     pub const CHECK: f32 = 18.0;
 }
 
-/// Motion: every animation's duration and easing. `REDUCE_MOTION` turns movement off
-/// (fades become instant, loops stand still).
+/// Motion lives in `crate::motion` (easing, springs, durations, Reduce motion); this path
+/// stays for the pages that name `theme::motion`.
 pub mod motion {
-    pub const REDUCE_MOTION: bool = false;
-    /// Page change: fade and short slide.
-    pub const PAGE: f32 = 0.18;
-    /// Distance of the page slide (points).
-    pub const PAGE_SLIDE: f32 = 10.0;
-    /// Hover highlight in and out.
-    pub const HOVER: f32 = 0.12;
-    /// Button press scale.
-    pub const PRESS: f32 = 0.08;
-    pub const PRESS_SCALE: f32 = 0.965;
-    /// One breath of the primary action's halo.
-    pub const PULSE: f32 = 2.6;
-    /// One turn of the progress ring's sweep.
-    pub const SPIN: f32 = 1.4;
-    /// The check mark drawn on the Done screen.
-    pub const CHECK: f32 = 0.6;
-    /// Slow drift of the illustration sparkles.
-    pub const DRIFT: f32 = 9.0;
-
-    /// Ease-out cubic: fast start, gentle landing.
-    pub fn ease_out(x: f32) -> f32 {
-        let x = x.clamp(0.0, 1.0);
-        1.0 - (1.0 - x).powi(3)
-    }
-
-    /// Ease-in-out sine, for loops.
-    pub fn ease_in_out(x: f32) -> f32 {
-        let x = x.clamp(0.0, 1.0);
-        0.5 - 0.5 * (std::f32::consts::PI * x).cos()
-    }
-
-    /// Progress (0..=1) of an animation of `duration` that started at `start` (seconds).
-    pub fn progress(now: f64, start: f64, duration: f32) -> f32 {
-        if REDUCE_MOTION || duration <= 0.0 {
-            return 1.0;
-        }
-        (((now - start) as f32) / duration).clamp(0.0, 1.0)
-    }
-
-    /// Phase (0..1) of a loop of `period` seconds; constant with reduced motion.
-    pub fn looped(now: f64, period: f32) -> f32 {
-        if REDUCE_MOTION {
-            return 0.0;
-        }
-        ((now / period as f64).fract()) as f32
-    }
+    pub use crate::motion::*;
 }
 
 /// The sidebar sections. Each one has its own colour field behind the content.
@@ -213,7 +191,8 @@ impl Section {
     pub fn colors(self) -> (Color32, Color32) {
         match self {
             // Mint into deep sea green.
-            Section::Overview => (rgb(0x34, 0xD8, 0xB4), rgb(0x1E, 0x7F, 0xA8)),
+            // Ends chosen so the dark ink label reads at 4.5:1 or more on both (WCAG).
+            Section::Overview => (rgb(0x34, 0xD8, 0xB4), rgb(0x26, 0x90, 0xB4)),
             // Glacier blue into cyan.
             Section::Clean => (rgb(0x4E, 0xA8, 0xFF), rgb(0x2B, 0xC8, 0xD8)),
             // Coral into ember.
@@ -226,7 +205,7 @@ impl Section {
             Section::Files => (rgb(0xFF, 0xB8, 0x3E), rgb(0xF2, 0x77, 0x4A)),
             // Sky into spring green.
             Section::System => (rgb(0x52, 0xD6, 0xF0), rgb(0x6C, 0xE0, 0x8C)),
-            Section::Neutral => (rgb(0x8E, 0x9B, 0xB0), rgb(0x5B, 0x6B, 0x84)),
+            Section::Neutral => (rgb(0x8E, 0x9B, 0xB0), rgb(0x7A, 0x8A, 0xA6)),
         }
     }
 }

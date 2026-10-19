@@ -120,14 +120,14 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     if let Some(job) = &app.tasks.running {
         let status = job.status();
         let secs = job.elapsed_secs();
-        kit::progress(ui, &t, icon, &format!("Running {status}"), "", secs, false);
+        kit::progress(ui, &t, f, &format!("Running {status}"), "", secs, false);
         return;
     }
     if !app.tasks.loaded {
         kit::progress(
             ui,
             &t,
-            icon,
+            f,
             "Checking which tasks can run on this Mac...",
             "",
             0,
@@ -307,7 +307,11 @@ fn task_card(app: &mut CleanApp, ui: &mut Ui, info: &tasks::TaskInfo) {
                         }
                         if open {
                             kit::well(&t).show(ui, |ui| {
-                                ui.label(RichText::new(&r.output).monospace().size(11.5));
+                                ui.label(
+                                    RichText::new(&r.output)
+                                        .monospace()
+                                        .size(crate::theme::size::FOOTNOTE),
+                                );
                             });
                         }
                     }
@@ -363,7 +367,11 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
                     ui.label(RichText::new(info.title).font(font(size::BODY, Weight::SemiBold)));
                     ui.label(RichText::new(info.description).color(t.text_dim));
                     for c in p.commands() {
-                        ui.label(RichText::new(c).monospace().size(11.5));
+                        ui.label(
+                            RichText::new(c)
+                                .monospace()
+                                .size(crate::theme::size::FOOTNOTE),
+                        );
                     }
                     if p.needs_admin() {
                         ui.label(

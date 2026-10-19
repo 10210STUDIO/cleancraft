@@ -140,7 +140,15 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             } else {
                 format!("Looking at {s}")
             };
-            if kit::progress(ui, &t, icon, "Sweeping your Mac", &place, secs, true) {
+            if kit::progress(
+                ui,
+                &t,
+                FeatureId::SmartCare,
+                "Sweeping your Mac",
+                &place,
+                secs,
+                true,
+            ) {
                 app.act();
                 app.sweep.cancel.store(true, Ordering::Relaxed);
                 app.sweep.phase = Phase::Idle;
@@ -158,7 +166,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             kit::progress(
                 ui,
                 &t,
-                Icon::Trash,
+                FeatureId::SmartCare,
                 "Cleaning",
                 &format!("Cleaning {s}"),
                 secs,
@@ -182,7 +190,7 @@ fn idle(app: &mut CleanApp, ui: &mut Ui) {
     if kit::hero(
         ui,
         &t,
-        Icon::Sweep,
+        FeatureId::SmartCare,
         FeatureId::SmartCare.title(),
         SUBTITLE,
         "Scan",
@@ -552,11 +560,11 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
     let mut undo: Option<(FeatureId, String)> = None;
     ui.vertical_centered(|ui| {
         let d = if ui.available_height() < 480.0 {
-            80.0
+            120.0
         } else {
-            108.0
+            160.0
         };
-        kit::done_check(ui, &t, d, started);
+        kit::done_hero(ui, &t, FeatureId::SmartCare, d, started);
         ui.add_space(space::M);
         ui.label(
             RichText::new(headline)

@@ -310,7 +310,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: cleancraft_core::FeatureId) {
             if kit::progress(
                 ui,
                 &t,
-                icon,
+                f,
                 &format!("Measuring {what}..."),
                 &status,
                 secs,
@@ -333,7 +333,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: cleancraft_core::FeatureId) {
             kit::progress(
                 ui,
                 &t,
-                icon,
+                f,
                 "Working on the selected items...",
                 &status,
                 secs,
@@ -404,7 +404,7 @@ fn idle(app: &mut CleanApp, ui: &mut Ui) {
     let go = kit::hero(
         ui,
         &t,
-        Icon::DiskMap,
+        cleancraft_core::FeatureId::SpaceLens,
         cleancraft_core::FeatureId::SpaceLens.title(),
         SUBTITLE,
         "Map Home Folder",
@@ -1010,29 +1010,36 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
         cleancraft_core::fsutil::items(rep.moved.len()),
         rep.skipped.len()
     );
-    super::plan_page::done_view(app, ui, &rep, &summary, |app, ui| {
-        let t = app.t;
-        if !rep.moved.is_empty()
-            && kit::pill(ui, &t, "Undo", kit::Kind::Secondary, Some(Icon::Undo)).clicked()
-        {
-            app.act();
-            start_undo(app, rep.clone());
-        }
-        if kit::pill(
-            ui,
-            &t,
-            "Show History",
-            kit::Kind::Secondary,
-            Some(Icon::History),
-        )
-        .clicked()
-        {
-            app.act();
-            app.navigate("history");
-        }
-        if kit::primary(ui, &t, "Done") {
-            app.act();
-            app.disk_map.phase = Phase::Map;
-        }
-    });
+    super::plan_page::done_view(
+        app,
+        ui,
+        cleancraft_core::FeatureId::SpaceLens,
+        &rep,
+        &summary,
+        |app, ui| {
+            let t = app.t;
+            if !rep.moved.is_empty()
+                && kit::pill(ui, &t, "Undo", kit::Kind::Secondary, Some(Icon::Undo)).clicked()
+            {
+                app.act();
+                start_undo(app, rep.clone());
+            }
+            if kit::pill(
+                ui,
+                &t,
+                "Show History",
+                kit::Kind::Secondary,
+                Some(Icon::History),
+            )
+            .clicked()
+            {
+                app.act();
+                app.navigate("history");
+            }
+            if kit::primary(ui, &t, "Done") {
+                app.act();
+                app.disk_map.phase = Phase::Map;
+            }
+        },
+    );
 }

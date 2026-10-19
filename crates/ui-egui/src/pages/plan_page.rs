@@ -226,7 +226,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             if kit::progress(
                 ui,
                 &t,
-                icon,
+                f,
                 &format!("Scanning {}", f.title()),
                 &place,
                 secs,
@@ -249,7 +249,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             kit::progress(
                 ui,
                 &t,
-                Icon::Trash,
+                f,
                 "Moving the selected items...",
                 &status,
                 secs,
@@ -262,11 +262,11 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
 
 fn idle(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     let t = app.t;
-    let (icon, _) = kit::feature_look(&t, f);
+
     let go = kit::hero(
         ui,
         &t,
-        icon,
+        f,
         f.title(),
         blurb(f),
         "Scan",
@@ -548,6 +548,7 @@ fn categories(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan) {
             .filter(|i| i.category == c.id && i.locked.is_none())
             .collect::<Vec<_>>();
         let all_on = !sel_items.is_empty() && sel_items.iter().all(|i| i.selected);
+        let some_on = sel_items.iter().any(|i| i.selected);
         let size = plan.category_size(&c.id);
         let current = app.plan_state(f).category.as_deref() == Some(c.id.as_str());
         let label = format!("{}  {}", c.title, human_size(size));
@@ -561,7 +562,12 @@ fn categories(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan) {
             size as f32 / total as f32,
             color,
             current,
-            Some((!sel_items.is_empty(), all_on, format!("Select {}", c.title))),
+            Some((
+                !sel_items.is_empty(),
+                all_on,
+                some_on && !all_on,
+                format!("Select {}", c.title),
+            )),
         );
         r.row.on_hover_text(&c.description);
         if let Some(on) = r.check_changed {
@@ -596,7 +602,7 @@ pub fn category_row(
     share: f32,
     color: Color32,
     current: bool,
-    check: Option<(bool, bool, String)>,
+    check: Option<(bool, bool, bool, String)>,
 ) -> CatResp {
     let w = ui.available_width();
     let (r, resp) = ui.allocate_exact_size(vec2(w, hit::CATEGORY), Sense::click());
@@ -623,11 +629,11 @@ pub fn category_row(
     }
     let mut x = r.left() + 10.0;
     let mut check_changed = None;
-    if let Some((enabled, on, name)) = check {
+    if let Some((enabled, on, mixed, name)) = check {
         let cb_rect = Rect::from_center_size(pos2(x + 10.0, r.top() + 17.0), vec2(22.0, 22.0));
         let mut v = on;
         let cb = kit::place(ui, cb_rect, |ui| {
-            ui.add_enabled_ui(enabled, |ui| kit::check(ui, t, &mut v, &name))
+            ui.add_enabled_ui(enabled, |ui| kit::check_mixed(ui, t, &mut v, mixed, &name))
                 .inner
         });
         if cb.changed() {
@@ -1169,6 +1175,7 @@ pub fn skipped_card(
 pub fn done_view(
     app: &mut CleanApp,
     ui: &mut Ui,
+    feature: FeatureId,
     rep: &Report,
     summary: &str,
     buttons: impl FnOnce(&mut CleanApp, &mut Ui),
@@ -1178,11 +1185,11 @@ pub fn done_view(
     let id = egui::Id::new(("done-block", &rep.plan_id));
     kit::centered_block(ui, id, |ui| {
         let d = if ui.available_height() < 460.0 {
-            96.0
+            150.0
         } else {
-            132.0
+            200.0
         };
-        kit::done_check(ui, &t, d, started);
+        kit::done_hero(ui, &t, feature, d, started);
         ui.add_space(space::L);
         ui.label(
             RichText::new(features::moved_text([rep]))
@@ -1216,7 +1223,7 @@ fn done(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         cleancraft_core::fsutil::items(rep.moved.len()),
         rep.skipped.len()
     );
-    done_view(app, ui, &rep, &summary, |app, ui| {
+    done_view(app, ui, f, &rep, &summary, |app, ui| {
         let t = app.t;
         if !rep.moved.is_empty()
             && kit::pill(ui, &t, "Undo", kit::Kind::Secondary, Some(Icon::Undo)).clicked()

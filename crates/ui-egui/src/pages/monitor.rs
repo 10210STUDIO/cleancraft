@@ -120,7 +120,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     );
     ui.ctx().request_repaint_after(app.monitor.interval);
     let Some(snap) = app.monitor.last.clone() else {
-        kit::progress(ui, &t, icon, "Reading...", "", 0, false);
+        kit::progress(ui, &t, f, "Reading...", "", 0, false);
         return;
     };
     egui::ScrollArea::vertical()

@@ -222,7 +222,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         kit::progress(
             ui,
             &t,
-            icon,
+            f,
             "Working... macOS may ask for your password.",
             "",
             0,
@@ -231,7 +231,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         return;
     }
     let Some(data) = app.startup.data.clone() else {
-        kit::progress(ui, &t, icon, "Reading startup items...", "", 0, false);
+        kit::progress(ui, &t, f, "Reading startup items...", "", 0, false);
         return;
     };
     ui.horizontal(|ui| {
@@ -569,7 +569,7 @@ fn confirm_quit(app: &mut CleanApp, ui: &mut Ui) {
         ui.add_space(10.0);
         kit::well(&t).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(RichText::new(cmd).monospace().size(11.5).color(t.text_dim));
+            ui.label(RichText::new(cmd).monospace().size(crate::theme::size::FOOTNOTE).color(t.text_dim));
         });
         ui.add_space(14.0);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -618,7 +618,7 @@ fn confirm_remove(app: &mut CleanApp, ui: &mut Ui) {
         kit::well(&t).show(ui, |ui| {
             ui.set_width(ui.available_width());
             for it in plan.selected() {
-                ui.label(RichText::new(app.env.display(&it.path)).monospace().size(11.5));
+                ui.label(RichText::new(app.env.display(&it.path)).monospace().size(crate::theme::size::FOOTNOTE));
                 ui.label(
                     RichText::new(format!("{}  {}", human_size(it.size), it.reason))
                         .color(t.text_dim),
