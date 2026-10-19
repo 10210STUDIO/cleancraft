@@ -9,7 +9,7 @@ use egui::{Color32, CornerRadius, RichText, Sense, Stroke, Ui, vec2};
 use crate::icons::{self, Icon};
 use crate::kit;
 use crate::pages::{self, plan_page::PlanState};
-use crate::theme::{self, Section, Tokens, Weight, font, hit, icon as isz, motion, size, space};
+use crate::theme::{self, Section, Tokens, Weight, font, icon as isz, motion, size, space};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Page {
@@ -18,9 +18,11 @@ pub enum Page {
     Settings,
 }
 
-/// Sidebar groups, in order. Names are CleanCraft's own.
+/// The sidebar's entries, in order: one per section, each opening one or more tools. Names
+/// are CleanCraft's own. A section with several tools shows them as a switcher at the top of
+/// its page.
 pub const GROUPS: &[(&str, &[FeatureId])] = &[
-    ("", &[FeatureId::SmartCare]),
+    ("Quick Sweep", &[FeatureId::SmartCare]),
     (
         "Clean",
         &[
@@ -41,8 +43,29 @@ pub const GROUPS: &[(&str, &[FeatureId])] = &[
             FeatureId::SpaceLens,
         ],
     ),
-    ("System", &[FeatureId::Monitor]),
+    ("Live Monitor", &[FeatureId::Monitor]),
 ];
+
+/// The sidebar entry (index in [`GROUPS`]) a tool belongs to.
+pub fn group_of(f: FeatureId) -> usize {
+    GROUPS
+        .iter()
+        .position(|(_, fs)| fs.contains(&f))
+        .unwrap_or(0)
+}
+
+/// The icon of a sidebar entry.
+pub fn group_icon(i: usize) -> Icon {
+    match i {
+        0 => Icon::Sweep,
+        1 => Icon::Junk,
+        2 => Icon::Shield,
+        3 => Icon::Tasks,
+        4 => Icon::Remover,
+        5 => Icon::Folder,
+        _ => Icon::Monitor,
+    }
+}
 
 pub struct CleanApp {
     pub env: Env,
@@ -69,16 +92,16 @@ pub struct CleanApp {
     /// The page the transition animation is running for, and when it started.
     shown_page: Page,
     page_since: f64,
-    /// Height of a sidebar row this frame.
-    row_h: f32,
+    /// The tool each sidebar section showed last (by index in [`GROUPS`]), so a section
+    /// opens where the person left it.
+    pub section_tool: BTreeMap<usize, FeatureId>,
 }
 
-/// The window's top band where macOS draws the traffic lights (transparent title bar).
+/// The window's top band where macOS draws the traffic lights (transparent title bar):
+/// nothing clickable in the sidebar goes there.
 const TITLE_BAND: f32 = 28.0;
-/// Width the traffic lights take from the window's left edge.
-const LIGHTS_WIDTH: f32 = 76.0;
-/// The traffic lights are drawn over the sidebar (macOS with the transparent title bar).
-const TRAFFIC_LIGHTS: bool = cfg!(target_os = "macos");
+/// Sidebar entry height.
+const NAV_ROW: f32 = 44.0;
 
 impl CleanApp {
     pub fn new(env: Env) -> CleanApp {
@@ -106,7 +129,7 @@ impl CleanApp {
             fonts_pass: 0,
             shown_page: Page::Feature(FeatureId::SmartCare),
             page_since: f64::NEG_INFINITY,
-            row_h: 28.0,
+            section_tool: BTreeMap::new(),
         }
     }
 
@@ -207,6 +230,9 @@ impl CleanApp {
             ui.ctx().request_repaint();
             return;
         }
+        if let Page::Feature(f) = self.page {
+            self.section_tool.insert(group_of(f), f);
+        }
         let mut content = full;
         content.min.x += space::SIDEBAR;
         kit::backdrop(ui.painter(), content, &t);
@@ -243,6 +269,28 @@ impl CleanApp {
                     .inner_margin(egui::Margin::symmetric(space::PAGE_X, space::PAGE_Y)),
             )
             .show(ui, |ui| {
+                // A section with several tools: its switcher, the same in every phase (it
+                // stands in for the compact page header).
+                let multi =
+                    matches!(self.page, Page::Feature(f) if GROUPS[group_of(f)].1.len() > 1);
+                kit::set_switcher_shown(ui.ctx(), multi);
+                if let Page::Feature(f) = self.page {
+                    let feats = GROUPS[group_of(f)].1;
+                    if feats.len() > 1 {
+                        let items: Vec<(Icon, &str)> = feats
+                            .iter()
+                            .map(|x| (kit::feature_look(&t, *x).0, x.title()))
+                            .collect();
+                        let sel = feats.iter().position(|x| *x == f).unwrap_or(0);
+                        if let Some(i) = kit::segmented(ui, &t, &items, sel) {
+                            self.act();
+                            if feats[i] != f {
+                                self.page = Page::Feature(feats[i]);
+                            }
+                        }
+                        ui.add_space(space::L);
+                    }
+                }
                 self.banners(ui);
                 ui.multiply_opacity(0.25 + 0.75 * k);
                 let shift = egui::emath::TSTransform::from_translation(vec2(
@@ -273,100 +321,46 @@ impl CleanApp {
             side.y_range(),
             Stroke::new(1.0, Color32::from_white_alpha(10)),
         );
-        // The title band: the window's top 28 pt, where macOS draws the traffic lights over
-        // the sidebar (transparent title bar). The logo and the name sit in it, right of the
-        // lights, so the whole height below is the list (17 rows and 6 group labels fit a
-        // 680 pt window with air above each label).
-        let band_w = ui.available_width();
-        let (band, _) = ui.allocate_exact_size(vec2(band_w, TITLE_BAND), Sense::hover());
-        let lights = if TRAFFIC_LIGHTS { LIGHTS_WIDTH } else { 0.0 };
-        let logo = egui::Rect::from_center_size(
-            egui::pos2(
-                band.left() + 4.0 + (lights - space::SIDEBAR_X as f32).max(0.0) + 11.0,
-                band.center().y,
-            ),
-            egui::Vec2::splat(22.0),
-        );
-        let (a, b) = Section::Overview.colors();
-        icons::gradient_tile(ui.painter(), logo, 6.5, a, b);
-        icons::paint(
-            ui.painter(),
-            logo.shrink(4.0),
-            Icon::Logo,
-            theme::on_color(a),
-        );
-        ui.painter().text(
-            egui::pos2(logo.right() + 8.0, band.center().y),
-            egui::Align2::LEFT_CENTER,
-            "CleanCraft",
-            font(size::TITLE3, Weight::Bold),
-            t.text,
-        );
-        ui.add_space(space::S);
-        // Rows breathe in tall windows and tighten in short ones, so every entry fits a
-        // 680 pt tall window without scrolling, and never gets under the 28 pt hit target.
-        let headers = GROUPS.iter().filter(|g| !g.0.is_empty()).count() as f32;
-        let rows = GROUPS.iter().map(|g| g.1.len()).sum::<usize>() as f32 + 2.0;
-        let avail = ui.available_height();
-        let sep = 9.0;
-        // A group label needs 26 pt: 8 above (so it reads with the group below it, not the
-        // row above), the 14 pt line, 4 under. Rows keep the 28 pt hit target; what is left
-        // in a 680 pt window comes off the labels' air first, then spare height goes to rows
-        // up to 32, then to the labels up to 30, then to rows up to 36.
-        let head_min = 22.0;
-        let head_want = 26.0;
-        let base = avail - rows * hit::MIN - sep;
-        let head_fit = (base / headers).clamp(head_min, head_want);
-        let extra = (base - headers * head_fit).max(0.0);
-        let to_rows = extra.min(rows * 4.0);
-        let to_heads = (extra - to_rows).min(headers * 4.0);
-        let to_rows2 = (extra - to_rows - to_heads).min(rows * (hit::NAV_MAX - 32.0));
-        let row_h = (hit::MIN + (to_rows + to_rows2) / rows).floor();
-        let head_h = (head_fit + to_heads / headers).floor();
-        self.row_h = row_h;
+        // The traffic lights' band, then the logo under it.
+        ui.add_space(TITLE_BAND + space::XS);
+        ui.horizontal(|ui| {
+            ui.add_space(6.0);
+            let (r, _) = ui.allocate_exact_size(egui::Vec2::splat(30.0), Sense::hover());
+            let (a, b) = Section::Overview.colors();
+            icons::gradient_tile(ui.painter(), r, 8.5, a, b);
+            icons::paint(ui.painter(), r.shrink(5.0), Icon::Logo, theme::on_color(a));
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new("CleanCraft")
+                    .font(font(size::TITLE2, Weight::Bold))
+                    .color(t.text),
+            );
+        });
+        ui.add_space(space::L);
+        let current = match self.page {
+            Page::Feature(f) => Some(group_of(f)),
+            _ => None,
+        };
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                ui.spacing_mut().item_spacing.y = 0.0;
-                for (group, feats) in GROUPS {
-                    if !group.is_empty() {
-                        let w = ui.available_width();
-                        let (r, _) = ui.allocate_exact_size(vec2(w, head_h), Sense::hover());
-                        let g = ui
-                            .painter()
-                            .layout_job(egui::text::LayoutJob::single_section(
-                                group.to_uppercase(),
-                                egui::TextFormat {
-                                    font_id: font(size::CAPTION, Weight::SemiBold),
-                                    color: t.text_faint,
-                                    extra_letter_spacing: 0.8,
-                                    ..Default::default()
-                                },
-                            ));
-                        let gh = g.size().y;
-                        // 4 pt under the label, the rest above: it reads with the group
-                        // below it.
-                        let y = r.bottom() - 4.0 - gh;
-                        ui.painter()
-                            .galley(egui::pos2(r.left() + 10.0, y), g, t.text_faint);
-                    }
-                    for f in *feats {
-                        let (icon, color) = kit::feature_look(&t, *f);
-                        if self.nav_row(ui, icon, color, f.title(), self.page == Page::Feature(*f))
-                        {
-                            self.act();
-                            self.page = Page::Feature(*f);
-                        }
+                ui.spacing_mut().item_spacing.y = space::XS;
+                for (i, (name, feats)) in GROUPS.iter().enumerate() {
+                    let color = Section::of(feats[0]).colors().0;
+                    if self.nav_row(ui, group_icon(i), color, name, current == Some(i)) {
+                        self.act();
+                        let f = self.section_tool.get(&i).copied().unwrap_or(feats[0]);
+                        self.page = Page::Feature(f);
                     }
                 }
-                ui.add_space(4.0);
+                ui.add_space(space::S);
                 let y = ui.cursor().min.y;
                 ui.painter().hline(
-                    ui.max_rect().x_range(),
+                    ui.max_rect().x_range().shrink(6.0),
                     y,
                     Stroke::new(1.0, Color32::from_white_alpha(14)),
                 );
-                ui.add_space(4.0);
+                ui.add_space(space::S);
                 let neutral = Section::Neutral.colors().0;
                 if self.nav_row(
                     ui,
@@ -391,53 +385,49 @@ impl CleanApp {
             });
     }
 
+    /// One sidebar entry: a 28 pt icon tile in the section's colour and a 15 pt label in a
+    /// 44 pt row; the selected entry sits on a soft pill.
     fn nav_row(&self, ui: &mut Ui, icon: Icon, color: Color32, label: &str, active: bool) -> bool {
         let t = self.t;
-        let (r, resp) =
-            ui.allocate_exact_size(vec2(ui.available_width(), self.row_h), Sense::click());
+        let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), NAV_ROW), Sense::click());
         resp.widget_info(|| {
             egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, label)
         });
         let hov = kit::anim(ui.ctx(), resp.id.with("hov"), resp.hovered(), motion::HOVER);
         let on = kit::anim(ui.ctx(), resp.id.with("on"), active, motion::PAGE);
         let p = ui.painter();
+        let round = CornerRadius::same(theme::radius::M);
         if on > 0.0 {
             p.rect_filled(
                 r,
-                CornerRadius::same(theme::radius::S),
-                icons::lerp(Color32::TRANSPARENT, color.gamma_multiply(0.18), on),
+                round,
+                icons::lerp(
+                    Color32::from_white_alpha(0),
+                    icons::lerp(Color32::from_white_alpha(14), color, 0.14),
+                    on,
+                ),
             );
             p.rect_stroke(
                 r,
-                CornerRadius::same(theme::radius::S),
-                Stroke::new(1.0, color.gamma_multiply(0.22 * on)),
+                round,
+                Stroke::new(1.0, Color32::from_white_alpha((16.0 * on) as u8)),
                 egui::StrokeKind::Inside,
             );
-            let bar = egui::Rect::from_center_size(
-                r.left_center() + vec2(1.5, 0.0),
-                vec2(3.0, (r.height() * 0.5) * on),
-            );
-            p.rect_filled(bar, CornerRadius::same(2), color);
         }
         if hov > 0.0 && !active {
-            p.rect_filled(
-                r,
-                CornerRadius::same(theme::radius::S),
-                Color32::from_white_alpha((10.0 * hov) as u8),
-            );
+            p.rect_filled(r, round, Color32::from_white_alpha((9.0 * hov) as u8));
         }
-        let ir = egui::Rect::from_center_size(
-            r.left_center() + vec2(20.0, 0.0),
-            egui::Vec2::splat(isz::SIDEBAR),
+        let tile = egui::Rect::from_center_size(
+            r.left_center() + vec2(8.0 + 14.0, 0.0),
+            egui::Vec2::splat(28.0),
         );
-        let icon_color = if active {
-            icons::lerp(color, Color32::WHITE, 0.2)
-        } else {
-            icons::lerp(color.gamma_multiply(0.85), color, hov)
-        };
-        icons::paint_with(p, ir, icon, icon_color, 1.6);
+        let mut q = p.clone();
+        if !active {
+            q.set_opacity(0.88 + 0.12 * hov);
+        }
+        kit::icon_tile(&q, tile, icon, color);
         p.text(
-            r.left_center() + vec2(40.0, 0.0),
+            egui::pos2(tile.right() + 12.0, r.center().y),
             egui::Align2::LEFT_CENTER,
             label,
             // One weight in both states, so the label does not jump when selected.

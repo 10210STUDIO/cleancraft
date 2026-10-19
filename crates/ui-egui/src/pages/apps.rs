@@ -318,7 +318,11 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     } else {
         "Remove apps with the files they leave behind, or reset an app to a fresh start."
     };
-    kit::header(ui, &t, icon, f.title(), sub);
+    // The updates start screen has its own large title.
+    let hero = f == FeatureId::Updater && app.apps.updates.is_none() && app.apps.upd_job.is_none();
+    if !hero {
+        kit::header(ui, &t, icon, f.title(), sub);
+    }
     if let Some(e) = app.apps.error.clone() {
         ui.horizontal(|ui| {
             let (r, _) = ui.allocate_exact_size(egui::Vec2::splat(16.0), Sense::hover());
@@ -1291,8 +1295,13 @@ fn updates_page(app: &mut CleanApp, ui: &mut Ui) {
             ui,
             &t,
             FeatureId::Updater,
-            "Check for Updates",
-            "CleanCraft asks each app's update feed and the App Store, then hands the update to the app or the App Store.",
+            kit::HeroText {
+                title: FeatureId::Updater.title(),
+                desc: "Newer versions of your apps and of macOS. CleanCraft opens the right place to install them.",
+                covers: super::covers(FeatureId::Updater),
+                action: "Check for Updates",
+                note: "CleanCraft asks each app's update feed and the App Store, then hands the update to the app or the App Store.",
+            },
             |_| {},
         ) {
             app.act();

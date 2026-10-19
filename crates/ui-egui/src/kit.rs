@@ -283,11 +283,104 @@ pub fn dither(p: &egui::Painter, r: Rect) {
 // ---------------------------------------------------------------------------------------
 
 pub fn title(ui: &mut Ui, t: &Tokens, text: &str) {
-    ui.label(
-        RichText::new(text)
-            .font(font(size::TITLE, Weight::Bold))
-            .color(t.text),
+    heading(ui, text, font(size::TITLE, Weight::Bold), t.text);
+}
+
+/// A page heading, painted: the sidebar entry or the selected tool in the section switcher
+/// already names the page for VoiceOver, so the heading adds no second node with the same
+/// name (which would make "System Junk" ambiguous to assistive tools and tests).
+pub fn heading(ui: &mut Ui, text: &str, fid: FontId, color: Color32) -> Rect {
+    let g = galley(ui, text, fid, color);
+    let (r, _) = ui.allocate_exact_size(g.size(), Sense::hover());
+    ui.painter().galley(r.min, g, color);
+    r
+}
+
+/// Whether the section switcher is on the page this frame (set by the shell).
+pub fn switcher_shown(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<bool>(egui::Id::new("cleancraft-switcher")))
+        .unwrap_or(false)
+}
+
+pub fn set_switcher_shown(ctx: &egui::Context, on: bool) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("cleancraft-switcher"), on));
+}
+
+/// The section switcher: one segment per tool (icon and name) in a glass track; the
+/// selected one sits on a soft pill in the section colour. Each segment is announced with its
+/// tool's name and selected state. Returns the index clicked.
+pub fn segmented(
+    ui: &mut Ui,
+    t: &Tokens,
+    items: &[(Icon, &str)],
+    selected: usize,
+) -> Option<usize> {
+    let fid = font(size::CALLOUT, Weight::SemiBold);
+    let h = 40.0;
+    let pad = 14.0;
+    let icon = 16.0;
+    let widths: Vec<f32> = items
+        .iter()
+        .map(|(_, n)| galley(ui, n, fid.clone(), t.text).size().x + icon + 8.0 + pad * 2.0)
+        .collect();
+    let total: f32 = widths.iter().sum::<f32>() + 8.0;
+    let (track, _) = ui.allocate_exact_size(vec2(total, h), Sense::hover());
+    let p = ui.painter().clone();
+    p.rect_filled(track, h / 2.0, Color32::from_black_alpha(70));
+    p.rect_stroke(
+        track,
+        h / 2.0,
+        Stroke::new(1.0, t.glass_stroke),
+        egui::StrokeKind::Inside,
     );
+    let mut x = track.left() + 4.0;
+    let mut clicked = None;
+    for (i, (ic, name)) in items.iter().enumerate() {
+        let r = Rect::from_min_size(pos2(x, track.top() + 4.0), vec2(widths[i], h - 8.0));
+        x += widths[i];
+        let id = ui.id().with(("segment", *name));
+        let resp = ui.interact(r, id, Sense::click());
+        let on = i == selected;
+        resp.widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, true, on, *name));
+        let hov = anim(ui.ctx(), id.with("hov"), resp.hovered(), motion::HOVER);
+        let k = anim(ui.ctx(), id.with("on"), on, motion::HOVER * 1.5);
+        if k > 0.0 {
+            p.rect_filled(
+                r,
+                r.height() / 2.0,
+                icons::lerp(t.glass_solid(), t.sec_a, 0.22).gamma_multiply(k),
+            );
+            p.rect_stroke(
+                r,
+                r.height() / 2.0,
+                Stroke::new(1.0, t.sec_a.gamma_multiply(0.45 * k)),
+                egui::StrokeKind::Inside,
+            );
+        } else if hov > 0.0 {
+            p.rect_filled(
+                r,
+                r.height() / 2.0,
+                Color32::from_white_alpha((10.0 * hov) as u8),
+            );
+        }
+        let color = icons::lerp(icons::lerp(t.text_dim, t.text, hov), t.text, k);
+        let ir = Rect::from_center_size(
+            pos2(r.left() + pad + icon / 2.0, r.center().y),
+            Vec2::splat(icon),
+        );
+        icons::paint(&p, ir, *ic, icons::lerp(color, t.sec_a, k * 0.6));
+        p.text(
+            pos2(ir.right() + 8.0, r.center().y),
+            Align2::LEFT_CENTER,
+            *name,
+            fid.clone(),
+            color,
+        );
+        if resp.clicked() {
+            clicked = Some(i);
+        }
+    }
+    clicked
 }
 
 pub fn subtitle(ui: &mut Ui, t: &Tokens, text: &str) {
@@ -659,12 +752,19 @@ pub fn chips_with_state(
         .map(|c| c.to_vec())
         .collect();
     let total_h = lines.len() as f32 * h + (lines.len() as f32 - 1.0) * gap;
+    let left_aligned = ui.layout().horizontal_align() == egui::Align::Min;
     let (area, _) = ui.allocate_exact_size(vec2(ui.available_width(), total_h), Sense::hover());
     let time = ui.input(|i| i.time);
     for (li, line) in lines.iter().enumerate() {
         let lw: f32 =
             line.iter().map(|i| widths[*i]).sum::<f32>() + gap * (line.len() as f32 - 1.0);
-        let mut x = area.center().x - lw / 2.0;
+        // Lines follow the layout: centred in a centred column, from the left edge in a
+        // left-aligned one (the wide start screen).
+        let mut x = if left_aligned {
+            area.left()
+        } else {
+            area.center().x - lw / 2.0
+        };
         let y = area.top() + li as f32 * (h + gap);
         for i in line {
             let (icon, color, name) = items[*i];
@@ -803,6 +903,10 @@ pub fn series_color(t: &Tokens, i: usize) -> Color32 {
 
 /// The compact header at the top of a page: icon tile, title, one line under it.
 pub fn header(ui: &mut Ui, t: &Tokens, icon: Icon, title_text: &str, sub: &str) {
+    // In a section with several tools the switcher above names the page: no second header.
+    if switcher_shown(ui.ctx()) {
+        return;
+    }
     ui.horizontal(|ui| {
         badge(ui, t.sec_a, icon, isz::HEADER);
         ui.add_space(space::XS);
@@ -885,53 +989,168 @@ pub fn centered_block<R>(ui: &mut Ui, id: egui::Id, add: impl FnOnce(&mut Ui) ->
     r
 }
 
-/// A module's start screen under the page header: the module's object, optional controls,
-/// the big round action button and a short note. The title and the explanation live in the
-/// page header, which stays in place from start screen to scanning, results and Done (no
-/// jump when Scan is clicked). Returns true when the action is clicked.
+/// What a module's start screen shows besides its object.
+pub struct HeroText<'a> {
+    pub title: &'a str,
+    pub desc: &'a str,
+    /// What the scan looks at, one short line each.
+    pub covers: &'a [&'a str],
+    pub action: &'a str,
+    pub note: &'a str,
+}
+
+/// Content width from which a start screen uses two columns (object left, words right).
+pub const HERO_TWO_COLUMNS: f32 = 900.0;
+
+/// A module's start screen. From [`HERO_TWO_COLUMNS`] wide: the module's 3D object on the
+/// left, scaled with the window, and on the right the title (34 pt), the explanation, what the
+/// scan covers, optional controls, the action and a short note. Narrower (a 1060 pt window):
+/// one centred column without the coverage list.
+/// Returns true when the action is clicked.
 pub fn hero(
     ui: &mut Ui,
     t: &Tokens,
     feature: cleancraft_core::FeatureId,
-    action: &str,
-    note: &str,
+    text: HeroText<'_>,
     extra: impl FnOnce(&mut Ui),
 ) -> bool {
     let id = ui.id().with(("hero", feature.as_str()));
     let avail = ui.available_height();
-    // Height of everything but the picture, from the last frame: the picture takes what is
-    // left (between 96 and HERO_MAX points), so the action button never needs scrolling.
-    let rest: f32 = ui.data(|d| d.get_temp(id.with("rest"))).unwrap_or(320.0);
-    let side = ((avail - rest) / 1.12).clamp(96.0, isz::HERO_MAX).round();
+    let width = ui.available_width();
+    let wide = width >= HERO_TWO_COLUMNS;
+    // Height of everything but the picture, from the last frame.
+    let rest: f32 = ui
+        .data(|d| d.get_temp(id.with(("rest", wide))))
+        .unwrap_or(if wide { 360.0 } else { 420.0 });
     let mut clicked = false;
+    let words = |ui: &mut Ui, align_left: bool, covers: bool, clicked: &mut bool| {
+        let start = ui.cursor().min.y;
+        let w = ui.available_width().min(space::MEASURE);
+        heading(
+            ui,
+            text.title,
+            font(size::LARGE_TITLE, Weight::Bold),
+            t.text,
+        );
+        ui.add_space(space::S);
+        ui.scope(|ui| {
+            let fid = font(size::BODY_L, Weight::Regular);
+            let bw = if align_left {
+                w
+            } else {
+                balanced_width(ui, text.desc, &fid, w)
+            };
+            ui.set_max_width(bw);
+            ui.label(RichText::new(text.desc).font(fid).color(t.text_dim));
+        });
+        if covers && !text.covers.is_empty() {
+            ui.add_space(space::L);
+            for c in text.covers {
+                ui.horizontal(|ui| {
+                    let (r, _) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::hover());
+                    ui.painter()
+                        .circle_filled(r.center(), 9.0, t.sec_a.gamma_multiply(0.16));
+                    icons::paint(
+                        ui.painter(),
+                        Rect::from_center_size(r.center(), Vec2::splat(12.0)),
+                        Icon::Check,
+                        t.sec_a,
+                    );
+                    ui.add_space(space::XS);
+                    ui.label(
+                        RichText::new(*c)
+                            .font(font(size::BODY, Weight::Regular))
+                            .color(t.text),
+                    );
+                });
+                ui.add_space(2.0);
+            }
+        }
+        ui.add_space(space::L);
+        extra(ui);
+        ui.add_space(space::XS);
+        // A short window gets a smaller round button (it is 156 pt tall with its halo).
+        let d = if avail < 620.0 { 88.0 } else { 112.0 };
+        *clicked = round_action(ui, t, text.action, d).clicked();
+        ui.add_space(space::S);
+        if !text.note.is_empty() {
+            ui.scope(|ui| {
+                ui.set_max_width(w);
+                dim(ui, t, text.note);
+            });
+        }
+        ui.cursor().min.y - start
+    };
     egui::ScrollArea::vertical()
         .id_salt(id)
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            centered_block(ui, id, |ui| {
-                // The module's own 3D object (heroes.rs), idle.
-                show_hero(
-                    ui,
-                    feature,
-                    crate::heroes::HeroPhase::Idle,
-                    0.0,
-                    Vec2::splat(side * 1.12),
-                );
-                let start = ui.cursor().min.y;
-                ui.add_space(space::S);
-                extra(ui);
-                ui.add_space(space::XS);
-                clicked = round_action(ui, t, action, 112.0).clicked();
-                ui.add_space(space::S);
-                if !note.is_empty() {
-                    dim(ui, t, note);
-                }
-                let h = ui.cursor().min.y - start;
-                if (h - rest).abs() > 1.0 {
-                    ui.data_mut(|d| d.insert_temp(id.with("rest"), h));
-                    ui.ctx().request_repaint();
-                }
-            });
+            if wide {
+                // Two columns, centred as a pair in the page.
+                let block_h = rest.max(240.0);
+                let top = ((avail - block_h) / 2.0).max(0.0) * 0.85;
+                ui.add_space(top);
+                let side = (width * 0.42)
+                    .min(avail * 0.82)
+                    .clamp(isz::HERO_MIN * 1.6, isz::HERO_MAX * 2.0)
+                    .round();
+                let right_w = (width - side - space::XXL).min(space::MEASURE + 40.0);
+                let left_pad = ((width - side - space::XXL - right_w) / 2.0).max(0.0);
+                ui.horizontal_top(|ui| {
+                    ui.add_space(left_pad);
+                    ui.vertical(|ui| {
+                        ui.add_space(((block_h - side) / 2.0).max(0.0));
+                        show_hero(
+                            ui,
+                            feature,
+                            crate::heroes::HeroPhase::Idle,
+                            0.0,
+                            Vec2::splat(side),
+                        );
+                    });
+                    ui.add_space(space::XXL);
+                    ui.vertical(|ui| {
+                        ui.set_width(right_w);
+                        ui.add_space(((block_h - rest) / 2.0).max(0.0));
+                        let h = words(ui, true, true, &mut clicked);
+                        if (h - rest).abs() > 1.0 {
+                            ui.data_mut(|d| d.insert_temp(id.with(("rest", true)), h));
+                            ui.ctx().request_repaint();
+                        }
+                    });
+                });
+            } else {
+                // One column (a 1060 pt window): the coverage list waits for a wider window,
+                // the object keeps its room.
+                let covers = false;
+                // What the words leave, minus a margin; a short window gets a smaller
+                // object, and none at all rather than a scrolling start screen.
+                let side = ((avail - rest - 16.0) / 1.12).min(isz::HERO_MAX).round();
+                centered_block(ui, id, |ui| {
+                    if side >= 64.0 {
+                        show_hero(
+                            ui,
+                            feature,
+                            crate::heroes::HeroPhase::Idle,
+                            0.0,
+                            Vec2::splat(side * 1.12),
+                        );
+                        ui.add_space(space::S);
+                    }
+                    let h = ui
+                        .scope(|ui| {
+                            ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                                words(ui, false, covers, &mut clicked)
+                            })
+                            .inner
+                        })
+                        .inner;
+                    if (h - rest).abs() > 1.0 {
+                        ui.data_mut(|d| d.insert_temp(id.with(("rest", false)), h));
+                        ui.ctx().request_repaint();
+                    }
+                });
+            }
         });
     // The idle picture drifts slowly: 30 frames a second is plenty and saves energy on
     // 120 Hz displays (heroes::show asks for its own frames; this covers the halo).

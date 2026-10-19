@@ -204,7 +204,10 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         Phase::Cleaning(_) => 4,
         Phase::Done(_) => 5,
     };
-    kit::header(ui, &t, icon, f.title(), blurb(f));
+    // The start screen has its own large title; every other phase has the compact header.
+    if phase != 0 {
+        kit::header(ui, &t, icon, f.title(), blurb(f));
+    }
     if let Some(e) = app.plan_state(f).error.clone() {
         let (text, needs_access) = friendly_error(&e);
         ui.horizontal(|ui| {
@@ -278,8 +281,13 @@ fn idle(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         ui,
         &t,
         f,
-        "Scan",
-        "Scanning only looks. Nothing is removed until you review and confirm the list.",
+        kit::HeroText {
+            title: f.title(),
+            desc: blurb(f),
+            covers: super::covers(f),
+            action: "Scan",
+            note: "Scanning only looks. Nothing is removed until you review and confirm the list.",
+        },
         |ui| super::extras::before_scan(app, ui, f),
     );
     if go {

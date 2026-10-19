@@ -283,7 +283,9 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: cleancraft_core::FeatureId) {
         Phase::Working(_) => 4,
         Phase::Done(_) => 5,
     };
-    kit::header(ui, &t, icon, f.title(), SUBTITLE);
+    if phase != 0 {
+        kit::header(ui, &t, icon, f.title(), SUBTITLE);
+    }
     if phase != 0 && phase != 5 {
         storage_bar(app, ui);
         ui.add_space(theme::space::S);
@@ -403,8 +405,13 @@ fn idle(app: &mut CleanApp, ui: &mut Ui) {
         ui,
         &t,
         cleancraft_core::FeatureId::SpaceLens,
-        "Map Home Folder",
-        "Measuring only looks. Nothing moves until you review the list and confirm.",
+        kit::HeroText {
+            title: cleancraft_core::FeatureId::SpaceLens.title(),
+            desc: SUBTITLE,
+            covers: &[],
+            action: "Map Home Folder",
+            note: "Measuring only looks. Nothing moves until you review the list and confirm.",
+        },
         |ui| {
             ui.scope(|ui| {
                 ui.set_max_width(520.0);

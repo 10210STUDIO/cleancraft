@@ -26,7 +26,7 @@ use egui_kittest::kittest::Queryable;
 
 type H = egui_kittest::Harness<'static, CleanApp>;
 
-const SIZES: [(f32, f32); 2] = [(1280.0, 820.0), (1060.0, 680.0)];
+const SIZES: [(f32, f32); 3] = [(1280.0, 820.0), (1060.0, 680.0), (1600.0, 1000.0)];
 
 fn base(m: &FakeMac) {
     let f = m.env.fake_sys().expect("fake sys");

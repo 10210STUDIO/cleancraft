@@ -131,7 +131,9 @@ const SUBTITLE: &str = "One scan across junk, mail downloads, the Trash, threats
 pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     let t = app.t;
     let (icon, _) = kit::feature_look(&t, f);
-    kit::header(ui, &t, icon, f.title(), SUBTITLE);
+    if !matches!(app.sweep.phase, Phase::Idle) {
+        kit::header(ui, &t, icon, f.title(), SUBTITLE);
+    }
     match &app.sweep.phase {
         Phase::Idle => idle(app, ui),
         Phase::Scanning(j) => {
@@ -222,8 +224,13 @@ fn idle(app: &mut CleanApp, ui: &mut Ui) {
         ui,
         &t,
         FeatureId::SmartCare,
-        "Scan",
-        "Scanning only looks. You see every file before anything moves.",
+        kit::HeroText {
+            title: FeatureId::SmartCare.title(),
+            desc: SUBTITLE,
+            covers: &[],
+            action: "Scan",
+            note: "Scanning only looks. You see every file before anything moves.",
+        },
         |ui| {
             kit::chips(ui, &t, &looks, 760.0);
             ui.add_space(space::S);
