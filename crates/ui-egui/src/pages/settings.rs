@@ -50,8 +50,17 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
             let list = app.settings.ignore.clone();
             for (i, p) in list.iter().enumerate() {
                 ui.horizontal(|ui| {
-                    ui.label(app.env.display(p));
-                    if ui.small_button(format!("Remove {}", i + 1)).clicked() {
+                    let shown = app.env.display(p);
+                    ui.label(&shown);
+                    let r = ui.small_button("Remove");
+                    r.widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::WidgetType::Button,
+                            true,
+                            format!("Remove {shown}"),
+                        )
+                    });
+                    if r.clicked() {
                         app.settings.ignore.remove(i);
                         changed = true;
                     }

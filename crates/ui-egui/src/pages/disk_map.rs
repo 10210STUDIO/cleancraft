@@ -749,11 +749,15 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                             toggle(app, &c.path, on);
                         }
                         if c.is_dir {
-                            if ui
+                            let link = ui
                                 .link(RichText::new(&c.name).font(font(13.0, Weight::Medium)))
-                                .on_hover_text("Open this folder")
-                                .clicked()
-                            {
+                                .on_hover_text("Open this folder");
+                            // egui reports a visible link's text as a plain label (text
+                            // selection); say again that it is a link, for VoiceOver and tests.
+                            link.widget_info(|| {
+                                egui::WidgetInfo::labeled(egui::WidgetType::Link, true, &c.name)
+                            });
+                            if link.clicked() {
                                 open_folder(app, c.path.clone());
                             }
                         } else {

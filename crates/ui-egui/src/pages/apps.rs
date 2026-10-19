@@ -494,7 +494,9 @@ fn browse(app: &mut CleanApp, ui: &mut Ui) {
                 for s in [SortBy::Size, SortBy::Name, SortBy::LastOpened] {
                     ui.selectable_value(&mut sort, s, s.label());
                 }
-            });
+            })
+            .response
+            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, "Sort"));
         if sort != app.apps.sort {
             app.act();
             app.apps.sort = sort;
