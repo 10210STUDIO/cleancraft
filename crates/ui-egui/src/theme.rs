@@ -114,7 +114,7 @@ pub mod hit {
     /// Item row in a results list.
     pub const ROW: f32 = 60.0;
     /// Category row in the left column of a results page.
-    pub const CATEGORY: f32 = 56.0;
+    pub const CATEGORY: f32 = 50.0;
     /// Line in a confirmation list.
     pub const CONFIRM_LINE: f32 = 30.0;
     /// Button heights. Primary, secondary and danger share one height so a row of buttons

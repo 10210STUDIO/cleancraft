@@ -119,25 +119,40 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                                             RichText::new(name)
                                                 .font(font(size::BODY, Weight::SemiBold)),
                                         );
-                                        ui.label(
-                                            RichText::new(format!(
-                                                "{when}  ·  {feat}  ·  {}",
-                                                human_size(r.size)
-                                            ))
-                                            .font(font(size::FOOTNOTE, Weight::Medium))
-                                            .color(t.text_dim),
+                                        // Shows when, module and size; announces where it
+                                        // is now too (VoiceOver, tests).
+                                        let shown =
+                                            format!("{when}  ·  {feat}  ·  {}", human_size(r.size));
+                                        let full = format!(
+                                            "{when} · {feat} · {} · now in {}",
+                                            human_size(r.size),
+                                            app.env.display(stored)
+                                        );
+                                        let fid = font(size::FOOTNOTE, Weight::Medium);
+                                        let w = kit::galley(ui, &shown, fid.clone(), t.text_dim)
+                                            .size()
+                                            .x
+                                            + 2.0;
+                                        let (rr, _) = ui.allocate_exact_size(
+                                            egui::vec2(w, 17.0),
+                                            Sense::hover(),
+                                        );
+                                        kit::text_at(
+                                            ui,
+                                            rr,
+                                            &shown,
+                                            &full,
+                                            fid,
+                                            t.text_dim,
+                                            egui::Align::Min,
                                         );
                                         ui.scope(|ui| {
                                             ui.set_max_width(ui.available_width() - 120.0);
-                                            kit::path_label(
-                                                ui,
-                                                &t,
-                                                &format!(
-                                                    "{}  ->  {}",
-                                                    app.env.display(original),
+                                            kit::path_label(ui, &t, &app.env.display(original))
+                                                .on_hover_text(format!(
+                                                    "Now in {}",
                                                     app.env.display(stored)
-                                                ),
-                                            );
+                                                ));
                                         });
                                     }
                                     ActionKind::Command {

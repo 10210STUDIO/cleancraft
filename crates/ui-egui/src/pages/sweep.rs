@@ -347,14 +347,7 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile, w: f32, tile_h: 
                 "Open the page to act on them.".to_string(),
                 t.text,
             ),
-            TileData::Failed(e) => {
-                let mut c = e.chars();
-                let e = c
-                    .next()
-                    .map(|f| f.to_uppercase().collect::<String>() + c.as_str())
-                    .unwrap_or_default();
-                ("Could not scan".to_string(), e, t.warning)
-            }
+            TileData::Failed(e) => ("Could not scan".to_string(), e.clone(), t.warning),
         };
         let failed = matches!(tile.data, TileData::Failed(_));
         ui.horizontal(|ui| {
@@ -473,8 +466,16 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
         }
         kit::well(&t).show(ui, |ui| {
             ui.set_width(ui.available_width());
+            // Height known from the first frame, so the dialog opens in its final place.
+            let est: f32 = plans
+                .iter()
+                .map(|p| 32.0 + p.selected_count() as f32 * crate::theme::hit::CONFIRM_LINE)
+                .sum();
+            let list_h = est.min(max_list);
             egui::ScrollArea::vertical()
-                .max_height(max_list)
+                .min_scrolled_height(list_h)
+                .max_height(list_h)
+                .auto_shrink([false, false])
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     for p in &plans {

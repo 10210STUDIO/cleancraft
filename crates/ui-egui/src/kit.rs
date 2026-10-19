@@ -140,9 +140,11 @@ pub fn pill(ui: &mut Ui, t: &Tokens, label: &str, kind: Kind, icon: Option<Icon>
         icons::paint(&p, ir, ic, text_color);
         x += icon_w;
     }
-    let galley =
-        ui.painter()
-            .layout_no_wrap(label.to_string(), font(fs * scale, weight), text_color);
+    // The label keeps its size while pressed (only the fill shrinks): re-laying text at a
+    // scaled size makes the glyphs shimmer.
+    let galley = ui
+        .painter()
+        .layout_no_wrap(label.to_string(), font(fs, weight), text_color);
     p.galley(
         pos2(x, r.center().y - galley.size().y / 2.0),
         galley,
@@ -399,8 +401,10 @@ pub fn path_label(ui: &mut Ui, t: &Tokens, text: &str) -> Response {
     let fid = font(size::FOOTNOTE, Weight::Regular);
     let w = ui.available_width().max(40.0);
     let shown = truncate_middle(ui.ctx(), text, &fid, w);
-    let r = ui.add(egui::Label::new(RichText::new(shown).font(fid).color(t.text_faint)).truncate());
-    r.on_hover_text(text)
+    // Shows the shortened path, announces the whole one (VoiceOver, tests).
+    let sw = galley(ui, &shown, fid.clone(), t.text_faint).size().x + 2.0;
+    let (r, _) = ui.allocate_exact_size(vec2(sw.min(w), 18.0), Sense::hover());
+    text_at(ui, r, &shown, text, fid, t.text_faint, egui::Align::Min)
 }
 
 /// A rounded tag (a file's reason, a state).
@@ -669,9 +673,9 @@ pub fn hero(
     let id = ui.id().with(("hero", title_text));
     let avail = ui.available_height();
     // Height of everything but the picture, from the last frame: the picture takes what is
-    // left (between 96 and 200 points), so the action button never needs scrolling.
+    // left (between 96 and HERO_MAX points), so the action button never needs scrolling.
     let rest: f32 = ui.data(|d| d.get_temp(id.with("rest"))).unwrap_or(320.0);
-    let side = ((avail - rest) / 1.12).clamp(110.0, isz::HERO_MAX).round();
+    let side = ((avail - rest) / 1.12).clamp(96.0, isz::HERO_MAX).round();
     let mut clicked = false;
     egui::ScrollArea::vertical()
         .id_salt(id)

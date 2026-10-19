@@ -473,7 +473,7 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                     .id_salt("cats")
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        ui.spacing_mut().item_spacing.y = 4.0;
+                        ui.spacing_mut().item_spacing.y = 2.0;
                         categories(app, ui, f, &plan);
                     });
             });
@@ -624,7 +624,7 @@ pub fn category_row(
     let mut x = r.left() + 10.0;
     let mut check_changed = None;
     if let Some((enabled, on, name)) = check {
-        let cb_rect = Rect::from_center_size(pos2(x + 10.0, r.top() + 19.0), vec2(22.0, 22.0));
+        let cb_rect = Rect::from_center_size(pos2(x + 10.0, r.top() + 17.0), vec2(22.0, 22.0));
         let mut v = on;
         let cb = kit::place(ui, cb_rect, |ui| {
             ui.add_enabled_ui(enabled, |ui| kit::check(ui, t, &mut v, &name))
@@ -635,7 +635,7 @@ pub fn category_row(
         }
         x += 30.0;
     } else {
-        p.circle_filled(pos2(x + 10.0, r.top() + 19.0), 5.0, color);
+        p.circle_filled(pos2(x + 10.0, r.top() + 17.0), 5.0, color);
         x += 30.0;
     }
     let size_g = kit::galley(ui, size_text, font(size::BODY, Weight::SemiBold), t.text);
@@ -643,7 +643,7 @@ pub fn category_row(
     p.galley(
         pos2(
             r.right() - 10.0 - size_w,
-            r.top() + 19.0 - size_g.size().y / 2.0,
+            r.top() + 17.0 - size_g.size().y / 2.0,
         ),
         size_g,
         t.text,
@@ -656,7 +656,7 @@ pub fn category_row(
         title_w,
     );
     p.text(
-        pos2(x, r.top() + 19.0),
+        pos2(x, r.top() + 17.0),
         egui::Align2::LEFT_CENTER,
         title_s,
         font(size::BODY, Weight::SemiBold),
@@ -674,13 +674,13 @@ pub fn category_row(
     );
     let count_w = count_g.size().x;
     p.galley(
-        pos2(x, r.top() + 38.0 - count_g.size().y / 2.0),
+        pos2(x, r.top() + 35.0 - count_g.size().y / 2.0),
         count_g,
         t.text_faint,
     );
     let bar = Rect::from_min_max(
-        pos2(x + count_w.max(56.0) + 10.0, r.top() + 35.5),
-        pos2(r.right() - 10.0, r.top() + 40.5),
+        pos2(x + count_w.max(56.0) + 10.0, r.top() + 32.5),
+        pos2(r.right() - 10.0, r.top() + 37.5),
     );
     if share > 0.0 {
         kit::paint_bar(&p, bar, t, share, color);
@@ -958,7 +958,7 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
         kit::risk_color(&t, it.risk)
     };
     let tg = kit::galley(ui, &tag_s, tag_font.clone(), color);
-    let tag_r = Rect::from_min_size(pos2(x0 - 2.0, r.top() + 31.0), tg.size() + vec2(16.0, 5.0));
+    let tag_r = Rect::from_min_size(pos2(x0, r.top() + 31.0), tg.size() + vec2(16.0, 5.0));
     p.rect_filled(tag_r, tag_r.height() / 2.0, color.gamma_multiply(0.16));
     kit::text_at(ui, tag_r, &tag_s, &why, tag_font, color, Align::Center).on_hover_text(&why);
     // Row actions, shown on hover.
@@ -1077,9 +1077,14 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         let rows: Vec<&cleancraft_core::Item> = plan.selected().collect();
         kit::well(&t).show(ui, |ui| {
             ui.set_width(ui.available_width());
+            // A height known from the first frame (the list shrinks to its rows up to
+            // `max_list`), so the dialog opens at its final size and place.
+            let list_h = (rows.len() as f32 * hit::CONFIRM_LINE).min(max_list);
             egui::ScrollArea::vertical()
                 .id_salt("confirm-list")
-                .max_height(max_list)
+                .min_scrolled_height(list_h)
+                .max_height(list_h)
+                .auto_shrink([false, false])
                 .show_rows(ui, hit::CONFIRM_LINE, rows.len(), |ui, range| {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     for it in &rows[range] {

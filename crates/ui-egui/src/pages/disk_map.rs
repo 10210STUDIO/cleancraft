@@ -416,12 +416,7 @@ fn idle(app: &mut CleanApp, ui: &mut Ui) {
             });
             ui.add_space(theme::space::M);
             kit::centered_row(ui, egui::Id::new("disk-map-folder-row"), |ui| {
-                let r = ui.add(
-                    egui::TextEdit::singleline(&mut app.disk_map.folder_text)
-                        .hint_text("~/Projects")
-                        .desired_width(300.0)
-                        .margin(egui::Margin::symmetric(10, 7)),
-                );
+                let r = kit::text_field(ui, &t, &mut app.disk_map.folder_text, "~/Projects", 300.0);
                 r.widget_info(|| {
                     egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Folder to map")
                 });
@@ -797,6 +792,9 @@ fn treemap(app: &mut CleanApp, ui: &mut Ui, node: &Node, area: egui::Rect) {
     }
 }
 
+/// Height of a line in the list beside the map.
+const LIST_ROW_H: f32 = 52.0;
+
 fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
     let t = app.t;
     kit::card(&t)
@@ -813,13 +811,13 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                 .id_salt("disk-map-list")
                 .max_height(h - 18.0)
                 .auto_shrink([false, false])
-                .show_rows(ui, 44.0, kids.len(), |ui, range| {
+                .show_rows(ui, LIST_ROW_H, kids.len(), |ui, range| {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     for (k, c) in kids[range.clone()].iter().enumerate() {
                         let idx = range.start + k;
                         let locked = node_lock_reason(&app.env, c);
                         let w = ui.available_width();
-                        let (r, row) = ui.allocate_exact_size(vec2(w, 44.0), Sense::hover());
+                        let (r, row) = ui.allocate_exact_size(vec2(w, LIST_ROW_H), Sense::hover());
                         let hov = kit::anim(
                             ui.ctx(),
                             row.id.with("hov"),
@@ -837,8 +835,8 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                         let mut on = was;
                         let label = format!("Select {}", c.name);
                         let cb_rect = egui::Rect::from_center_size(
-                            egui::pos2(r.left() + 16.0, r.center().y),
-                            vec2(20.0, 20.0),
+                            egui::pos2(r.left() + 18.0, r.center().y),
+                            vec2(22.0, 22.0),
                         );
                         let cb = kit::place(ui, cb_rect, |ui| {
                             ui.add_enabled_ui(locked.is_none(), |ui| {
@@ -850,14 +848,14 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                             toggle(app, &c.path, on);
                         }
                         // Colour dot matching the block.
-                        let dot = egui::pos2(r.left() + 38.0, r.center().y);
+                        let dot = egui::pos2(r.left() + 42.0, r.center().y);
                         let color = if idx < MAX_BLOCKS {
                             block_color(idx, c.is_dir)
                         } else {
                             Color32::from_rgb(0x44, 0x48, 0x50)
                         };
                         let ir =
-                            egui::Rect::from_center_size(dot + vec2(4.0, 0.0), vec2(16.0, 16.0));
+                            egui::Rect::from_center_size(dot + vec2(4.0, 0.0), vec2(18.0, 18.0));
                         icons::paint(
                             ui.painter(),
                             ir,
@@ -870,8 +868,8 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                         kit::text_at(
                             ui,
                             egui::Rect::from_min_max(
-                                egui::pos2(r.right() - size_w - 10.0, r.top()),
-                                egui::pos2(r.right() - 6.0, r.top() + 26.0),
+                                egui::pos2(r.right() - size_w - 12.0, r.top() + 4.0),
+                                egui::pos2(r.right() - 8.0, r.top() + 28.0),
                             ),
                             &size_text,
                             &size_text,
@@ -879,12 +877,12 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                             t.text,
                             Align::Max,
                         );
-                        let x0 = r.left() + 56.0;
+                        let x0 = r.left() + 62.0;
                         let name_w = (r.right() - size_w - 20.0 - x0).max(40.0);
                         let nf = font(size::BODY, Weight::Medium);
                         let name_s = kit::truncate_middle(ui.ctx(), &c.name, &nf, name_w);
                         let name_rect = egui::Rect::from_min_size(
-                            egui::pos2(x0, r.top() + 4.0),
+                            egui::pos2(x0, r.top() + 6.0),
                             vec2(name_w, 22.0),
                         );
                         if c.is_dir {
@@ -914,14 +912,15 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                         }
                         // Share bar, or the reason it is locked.
                         let line = egui::Rect::from_min_max(
-                            egui::pos2(x0, r.top() + 29.0),
-                            egui::pos2(r.right() - 10.0, r.top() + 40.0),
+                            egui::pos2(x0, r.top() + 31.0),
+                            egui::pos2(r.right() - 12.0, r.top() + 46.0),
                         );
                         if let Some(why) = &locked {
                             let text = format!("locked: {why}");
                             let lf = font(size::FOOTNOTE, Weight::Regular);
-                            let s = kit::truncate_middle(ui.ctx(), &text, &lf, line.width());
-                            kit::text_at(ui, line, &s, &text, lf, t.text_faint, Align::Min);
+                            let s = kit::truncate_end(ui.ctx(), &text, &lf, line.width());
+                            kit::text_at(ui, line, &s, &text, lf, t.text_faint, Align::Min)
+                                .on_hover_text(&text);
                         } else {
                             let bar = egui::Rect::from_min_size(
                                 egui::pos2(line.left(), line.center().y - 2.0),

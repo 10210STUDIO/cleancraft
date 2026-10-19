@@ -65,7 +65,9 @@ fn location_picker(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         p.text = app.env.display(dir);
     }
     kit::card(&t).show(ui, |ui| {
-        ui.set_max_width(520.0);
+        ui.set_width(ui.available_width().min(600.0));
+        ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+        ui.spacing_mut().item_spacing.y = 4.0;
         ui.label(
             RichText::new("Where to look")
                 .font(crate::theme::font(crate::theme::size::TITLE3, crate::theme::Weight::SemiBold))
@@ -170,6 +172,7 @@ fn location_picker(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             &t,
             "Library, Documents, Desktop, iCloud, Photos and Music libraries and apps are left out.",
         );
+    });
     });
     ui.data_mut(|d| d.insert_temp(id, p));
     ui.add_space(8.0);
