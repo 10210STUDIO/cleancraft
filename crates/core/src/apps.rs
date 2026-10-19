@@ -4,8 +4,10 @@
 //!
 //! For each app: name, bundle id, version, size (the shared [`tree_size`] formula), when it was
 //! last opened (Spotlight, `mdls -name kMDItemLastUsedDate -raw`), where it came from (App Store
-//! receipt, Setapp folder, other), the maker (from the bundle id) and whether it is part of macOS
-//! (never removable).
+//! receipt, Setapp folder, other), the developer ([`developer_name`]: the code signature, else the
+//! copyright line of Info.plist) and whether it is part of macOS (never removable: only apps in
+//! `/System`, or Apple's own apps installed with macOS such as Safari; Apple's App Store apps
+//! like iMovie or Pages are removable).
 
 use std::path::{Path, PathBuf};
 
@@ -59,9 +61,13 @@ pub struct AppInfo {
     #[serde(default)]
     pub last_active: Option<i64>,
     pub store: Store,
-    /// The maker, from the bundle id: "com.google.Chrome" gives "Google".
+    /// The developer: the name in the Developer ID signature ("Google LLC"), else the copyright
+    /// line of Info.plist, else a known name from the bundle id ([`developer_name`]).
     pub vendor: String,
-    /// Part of macOS or signed by Apple as macOS software: never removable.
+    /// Part of macOS, never removable: in `/System` (`/System/Applications`,
+    /// `/System/Library/CoreServices`), an Apple app installed with macOS (`com.apple.` id and
+    /// no App Store receipt, such as Safari) or signed as macOS software ("Software Signing").
+    /// Apple's App Store apps (iMovie, GarageBand, Pages, Numbers, Keynote) are not.
     pub apple: bool,
     /// Sparkle appcast address (`SUFeedURL`), when the app has one.
     pub feed_url: Option<String>,
@@ -90,6 +96,10 @@ pub struct BundleInfo {
     pub short_version: String,
     pub version: String,
     pub feed_url: Option<String>,
+    /// `NSHumanReadableCopyright`, as written.
+    pub copyright: String,
+    /// `CFBundleGetInfoString` (older apps put their copyright there), as written.
+    pub get_info: String,
 }
 
 /// Read an app's Info.plist (binary or XML).
@@ -100,10 +110,8 @@ pub struct BundleInfo {
 /// Read from disk now, so an edited plan cannot hide it.
 pub fn apple_part(p: &Path, depth: usize, by_name: bool) -> Option<String> {
     let apple_id = |id: &str| id.to_ascii_lowercase().starts_with("com.apple.");
-    let apple_app = |a: &Path| {
-        a.extension().is_some_and(|e| e.eq_ignore_ascii_case("app"))
-            && read_bundle(a).is_some_and(|b| apple_id(&b.bundle_id))
-    };
+    let apple_app =
+        |a: &Path| a.extension().is_some_and(|e| e.eq_ignore_ascii_case("app")) && macos_app(a);
     for a in p.ancestors() {
         if apple_app(a) {
             let name = a.file_stem().map(|s| s.to_string_lossy().into_owned());
@@ -161,27 +169,292 @@ pub fn read_bundle(app: &Path) -> Option<BundleInfo> {
         short_version: s("CFBundleShortVersionString"),
         version: s("CFBundleVersion"),
         feed_url: (!feed.is_empty()).then_some(feed),
+        copyright: s("NSHumanReadableCopyright"),
+        get_info: s("CFBundleGetInfoString"),
     })
 }
 
-/// "com.google.Chrome" -> "Google", "org.mozilla.firefox" -> "Mozilla".
+/// The bundle has an App Store receipt (`Contents/_MASReceipt/receipt`).
+pub fn has_store_receipt(app: &Path) -> bool {
+    app.join("Contents/_MASReceipt/receipt").is_file()
+}
+
+/// An app of macOS, read from disk: a `com.apple.` bundle id and no App Store receipt (Safari,
+/// the apps in `/System/Applications` and `/System/Library/CoreServices`). Apple's App Store
+/// apps (iMovie, GarageBand, Pages, Numbers, Keynote, Xcode) carry a receipt and are not.
+pub fn macos_app(app: &Path) -> bool {
+    read_bundle(app).is_some_and(|b| b.bundle_id.to_ascii_lowercase().starts_with("com.apple."))
+        && !has_store_receipt(app)
+}
+
+/// Shown when no source names the developer.
+pub const UNKNOWN_DEVELOPER: &str = "Unknown developer";
+
+/// The maker's part of a bundle id, lower case: "com.jetbrains.goland" gives "jetbrains"
+/// ("" when there is none). Used to find a maker's shared folders, never shown.
+pub fn vendor_segment(bundle_id: &str) -> String {
+    let parts: Vec<&str> = bundle_id.split('.').collect();
+    let raw = match parts.len() {
+        0 | 1 => "",
+        2 => parts[0],
+        _ => parts[1],
+    };
+    raw.to_lowercase()
+}
+
+/// Makers whose bundle id part is not their name as written.
+const KNOWN_MAKERS: &[(&str, &str)] = &[
+    ("adobe", "Adobe"),
+    ("apple", "Apple"),
+    ("belightsoft", "BeLight Software"),
+    ("blenderfoundation", "Blender Foundation"),
+    ("docker", "Docker"),
+    ("figma", "Figma"),
+    ("freecad", "FreeCAD"),
+    ("github", "GitHub"),
+    ("google", "Google"),
+    ("jetbrains", "JetBrains"),
+    ("microsoft", "Microsoft"),
+    ("mozilla", "Mozilla"),
+    ("openai", "OpenAI"),
+    ("tinyspeck", "Slack"),
+    ("valvesoftware", "Valve"),
+    ("videolan", "VideoLAN"),
+    ("anthropic", "Anthropic"),
+    ("spotify", "Spotify"),
+    ("screamingfrog", "Screaming Frog"),
+];
+
+/// Bundle id parts that are never a maker's name.
+const NOT_MAKERS: &[&str] = &[
+    "app", "apps", "co", "com", "corp", "dev", "gmbh", "inc", "io", "llc", "ltd", "mac", "macos",
+    "net", "org", "osx", "www",
+];
+
+/// Last resort: the maker from the bundle id, only when it reads as a name: a known maker
+/// ("com.jetbrains.goland" gives "JetBrains"), a part its developer wrote in mixed case
+/// ("com.SweetScape.010Editor" gives "SweetScape") or a plain word of 4 letters or more
+/// ("com.example.Editor" gives "Example"). Fragments such as "co" or "io" give
+/// [`UNKNOWN_DEVELOPER`].
 pub fn vendor_of(bundle_id: &str) -> String {
     let parts: Vec<&str> = bundle_id.split('.').collect();
-    let raw = if parts.len() >= 3 {
-        parts[1]
-    } else if parts.len() == 2 {
-        parts[0]
-    } else {
-        ""
+    let raw = match parts.len() {
+        0 | 1 => "",
+        2 => parts[0],
+        _ => parts[1],
     };
-    if raw.is_empty() {
-        return "Unknown".into();
+    let low = raw.to_lowercase();
+    if let Some((_, name)) = KNOWN_MAKERS.iter().find(|(k, _)| *k == low) {
+        return (*name).into();
     }
-    let mut c = raw.chars();
-    match c.next() {
-        Some(f) => f.to_uppercase().chain(c).collect(),
-        None => "Unknown".into(),
+    if NOT_MAKERS.contains(&low.as_str()) || !raw.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return UNKNOWN_DEVELOPER.into();
     }
+    let letters = raw.chars().filter(|c| c.is_ascii_alphabetic()).count();
+    if raw.chars().skip(1).any(|c| c.is_ascii_uppercase()) && letters >= 3 {
+        return raw.into();
+    }
+    if letters >= 4 && raw.chars().all(|c| c.is_ascii_lowercase()) {
+        let mut c = raw.chars();
+        if let Some(f) = c.next() {
+            return f.to_uppercase().chain(c).collect();
+        }
+    }
+    UNKNOWN_DEVELOPER.into()
+}
+
+/// Who signed an app, from `codesign -dv --verbose=2` (its first `Authority=` line).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Signer {
+    /// "Software Signing": part of macOS.
+    Macos,
+    /// "Apple Mac OS Application Signing": an App Store app (Apple signs every one, so the
+    /// signature does not name the developer).
+    AppStore,
+    /// "Developer ID Application: Name (TEAMID)" and the other developer certificates.
+    Developer(String),
+    /// Ad hoc, unsigned or not readable.
+    Unknown,
+}
+
+/// Read the signer from `codesign -dv` output (it writes its report to stderr).
+pub fn parse_signer(codesign_out: &str) -> Signer {
+    let Some(first) = codesign_out
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("Authority="))
+    else {
+        return Signer::Unknown;
+    };
+    match first.trim() {
+        "Software Signing" => return Signer::Macos,
+        "Apple Mac OS Application Signing" => return Signer::AppStore,
+        _ => {}
+    }
+    for pre in [
+        "Developer ID Application:",
+        "Apple Distribution:",
+        "3rd Party Mac Developer Application:",
+        "Apple Development:",
+        "Mac Developer:",
+    ] {
+        if let Some(rest) = first.strip_prefix(pre) {
+            let mut name = rest.trim();
+            // "Name (ABCDE12345)": drop the team id.
+            if let Some(open) = name.rfind(" (")
+                && name.ends_with(')')
+            {
+                name = name[..open].trim();
+            }
+            if !name.is_empty() && !name.contains('@') {
+                return Signer::Developer(name.to_string());
+            }
+        }
+    }
+    Signer::Unknown
+}
+
+/// The holder in a copyright line: "Copyright © 2002-2024 JetBrains s.r.o. All rights
+/// reserved." gives "JetBrains s.r.o."; `None` when nothing that reads as a name is left.
+pub fn copyright_holder(line: &str) -> Option<String> {
+    let mut s = line
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())?
+        .to_string();
+    if let Some(i) = s.to_lowercase().find("all rights reserved") {
+        s.truncate(i);
+    }
+    let marks = ["copyright", "(c)", "©", "℗"];
+    let is_year = |w: &str| {
+        let w = w.trim_matches(|c: char| ",.;:".contains(c));
+        !w.is_empty()
+            && w.chars().any(|c| c.is_ascii_digit())
+            && w.chars()
+                .all(|c| c.is_ascii_digit() || "-\u{2013}\u{2014}/".contains(c))
+    };
+    let words: Vec<&str> = s
+        .split_whitespace()
+        .flat_map(|w| {
+            // "©2024" and "(c)2024": split the mark from the year.
+            let lw = w.to_lowercase();
+            match marks
+                .iter()
+                .find(|m| lw.starts_with(*m) && lw.len() > m.len())
+            {
+                Some(m) => vec![&w[..m.len()], &w[m.len()..]],
+                None => vec![w],
+            }
+        })
+        .filter(|w| {
+            let lw = w.to_lowercase();
+            let lw = lw.trim_matches(|c: char| ",.;:".contains(c));
+            !marks.contains(&lw) && !is_year(w) && !["-", "\u{2013}", "\u{2014}"].contains(&lw)
+        })
+        .collect();
+    let mut words = words.as_slice();
+    if words.first().is_some_and(|w| w.eq_ignore_ascii_case("by")) {
+        words = &words[1..];
+    }
+    let mut name = words.join(" ");
+    // Keep the first sentence: "Screaming Frog Ltd. Screaming Frog is a trademark" stops at
+    // "Ltd.".
+    if let Some(i) = name.find(". ") {
+        name.truncate(i + 1);
+    }
+    let mut name = name
+        .trim_matches(|c: char| c.is_whitespace() || ",;:-\u{2013}\u{2014}".contains(c))
+        .to_string();
+    if name.ends_with('.') {
+        let last = name.rsplit(' ').next().unwrap_or("").trim_end_matches('.');
+        let abbrev = last.contains('.')
+            || ["inc", "ltd", "corp", "co", "bv", "ag", "sa", "srl", "spa"]
+                .contains(&last.to_lowercase().as_str());
+        if !abbrev {
+            name.pop();
+        }
+    }
+    let low = name.to_lowercase();
+    let ok = (2..=60).contains(&name.chars().count())
+        && name.chars().any(char::is_alphabetic)
+        && !["rights", "http", "licen", "version", "trademark"]
+            .iter()
+            .any(|w| low.contains(w));
+    ok.then_some(name)
+}
+
+/// The developer from Info.plist alone: the copyright holder, else the copyright part of
+/// `CFBundleGetInfoString`, else [`vendor_of`] the bundle id.
+pub fn plist_developer(b: &BundleInfo) -> String {
+    if let Some(n) = copyright_holder(&b.copyright) {
+        return n;
+    }
+    let low = b.get_info.to_lowercase();
+    if let Some(i) = ["©", "copyright", "(c)"]
+        .iter()
+        .filter_map(|m| low.find(m))
+        .min()
+        && let Some(n) = b.get_info.get(i..).and_then(copyright_holder)
+    {
+        return n;
+    }
+    vendor_of(&b.bundle_id)
+}
+
+/// The developer name shown for an app, best source first: part of macOS gives "Apple"; a
+/// developer certificate gives its name; an App Store signature (Apple signs them all) or
+/// none falls back to Info.plist ([`plist_developer`]).
+pub fn developer_name(b: &BundleInfo, signer: &Signer, part_of_macos: bool) -> String {
+    if part_of_macos {
+        return "Apple".into();
+    }
+    match signer {
+        Signer::Macos => "Apple".into(),
+        Signer::Developer(n) => n.clone(),
+        Signer::AppStore | Signer::Unknown => plist_developer(b),
+    }
+}
+
+/// Time limit for one `codesign -dv`.
+pub const CODESIGN_LIMIT: std::time::Duration = std::time::Duration::from_secs(10);
+/// `codesign` runs at most this many at once.
+pub const CODESIGN_THREADS: usize = 8;
+
+/// `codesign -dv --verbose=2` for each app, several at once, each with [`CODESIGN_LIMIT`].
+/// Results are in the order of `apps`; `Signer::Unknown` when it failed or timed out.
+pub fn signers(env: &Env, apps: &[PathBuf]) -> Vec<Signer> {
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let out: std::sync::Mutex<Vec<Signer>> =
+        std::sync::Mutex::new(vec![Signer::Unknown; apps.len()]);
+    let one = |p: &Path| {
+        let shown = env.display(p);
+        match env.sys.run_timeout(
+            "/usr/bin/codesign",
+            &["-dv", "--verbose=2", &shown],
+            CODESIGN_LIMIT,
+        ) {
+            // codesign writes its report to stderr.
+            Ok(o) => match parse_signer(&o.stderr) {
+                Signer::Unknown => parse_signer(&o.stdout),
+                s => s,
+            },
+            Err(_) => Signer::Unknown,
+        }
+    };
+    std::thread::scope(|sc| {
+        for _ in 0..CODESIGN_THREADS.min(apps.len()) {
+            sc.spawn(|| {
+                loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(p) = apps.get(i) else {
+                        break;
+                    };
+                    let s = one(p);
+                    out.lock().unwrap_or_else(|e| e.into_inner())[i] = s;
+                }
+            });
+        }
+    });
+    out.into_inner().unwrap_or_else(|e| e.into_inner())
 }
 
 /// `mdls -raw` prints "2024-05-01 10:22:33 +0000", or "(null)" when Spotlight has no date.
@@ -197,9 +470,12 @@ pub fn parse_mdls_date(s: &str) -> Option<i64> {
 
 /// True when `codesign -dv` output names Apple's own macOS signing authority.
 pub fn signed_by_apple(codesign_out: &str) -> bool {
-    codesign_out
-        .lines()
-        .any(|l| l.trim() == "Authority=Software Signing")
+    parse_signer(codesign_out) == Signer::Macos
+}
+
+/// Under `/System` (`/System/Applications`, `/System/Library/CoreServices`): part of macOS.
+pub fn in_system(env: &Env, p: &Path) -> bool {
+    p.starts_with(env.sys_path("/System"))
 }
 
 /// The folders apps live in, as (absolute macOS path, apps there are part of macOS).
@@ -242,11 +518,13 @@ pub fn app_paths(env: &Env) -> Vec<(PathBuf, bool)> {
     out
 }
 
-/// The app list. `deep` adds size, last-opened date and the signature check (slower: one
-/// `mdls` and one `codesign` per app); without it the list is quick, for matching leftovers.
+/// The app list. `deep` adds size, last-opened date and the code signature (slower: `mdls`
+/// per app, and `codesign` for every app outside `/System`, run [`CODESIGN_THREADS`] at once);
+/// without it the list is quick and runs no command, for matching leftovers.
 pub fn inventory(env: &Env, deep: bool, progress: &dyn Fn(&str)) -> Vec<AppInfo> {
     let setapp = env.sys_path("/Applications/Setapp");
     let mut out = Vec::new();
+    let mut bundles = Vec::new();
     // Asked once, only when an app needs the app-data fallback.
     let mut full_disk: Option<bool> = None;
     for (path, system) in app_paths(env) {
@@ -258,14 +536,14 @@ pub fn inventory(env: &Env, deep: bool, progress: &dyn Fn(&str)) -> Vec<AppInfo>
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default();
         progress(&name);
-        let store = if path.join("Contents/_MASReceipt/receipt").is_file() {
+        let store = if has_store_receipt(&path) {
             Store::AppStore
         } else if path.starts_with(&setapp) {
             Store::Setapp
         } else {
             Store::Other
         };
-        let mut apple = system || b.bundle_id.starts_with("com.apple.");
+        let apple = system || in_system(env, &path) || macos_app(&path);
         let shown = env.display(&path);
         let (mut size, mut last_used, mut last_active) = (0, None, None);
         if deep {
@@ -278,34 +556,41 @@ pub fn inventory(env: &Env, deep: bool, progress: &dyn Fn(&str)) -> Vec<AppInfo>
                 });
                 last_active = last_active_from_data(env, &b.bundle_id, containers);
             }
-            if !apple
-                && let Ok(o) = env
-                    .sys
-                    .run("/usr/bin/codesign", &["-dv", "--verbose=2", &shown])
-            {
-                // codesign writes its report to stderr.
-                apple = signed_by_apple(&o.stderr) || signed_by_apple(&o.stdout);
-            }
         }
         out.push(AppInfo {
-            vendor: if apple {
-                "Apple".into()
-            } else {
-                vendor_of(&b.bundle_id)
-            },
+            vendor: String::new(),
             path,
             name,
-            bundle_name: b.name,
-            bundle_id: b.bundle_id,
-            version: b.short_version,
-            build: b.version,
+            bundle_name: b.name.clone(),
+            bundle_id: b.bundle_id.clone(),
+            version: b.short_version.clone(),
+            build: b.version.clone(),
             size,
             last_used,
             last_active,
             store,
             apple,
-            feed_url: b.feed_url,
+            feed_url: b.feed_url.clone(),
         });
+        bundles.push(b);
+    }
+    // The signature: who made the app, and whether macOS signed it as its own. Apps already
+    // known to be part of macOS are not asked; every other app is, several at once.
+    let ask: Vec<usize> = if deep {
+        (0..out.len()).filter(|&i| !out[i].apple).collect()
+    } else {
+        Vec::new()
+    };
+    let paths: Vec<PathBuf> = ask.iter().map(|&i| out[i].path.clone()).collect();
+    let mut signed = vec![Signer::Unknown; out.len()];
+    for (i, s) in ask.into_iter().zip(signers(env, &paths)) {
+        signed[i] = s;
+    }
+    for ((a, b), s) in out.iter_mut().zip(&bundles).zip(&signed) {
+        if *s == Signer::Macos {
+            a.apple = true;
+        }
+        a.vendor = developer_name(b, s, a.apple);
     }
     out.sort_by_key(|a| a.name.to_lowercase());
     out
@@ -404,8 +689,132 @@ mod tests {
     fn vendors() {
         assert_eq!(vendor_of("com.google.Chrome"), "Google");
         assert_eq!(vendor_of("org.mozilla.firefox"), "Mozilla");
-        assert_eq!(vendor_of("foo"), "Unknown");
-        assert_eq!(vendor_of("io.x"), "Io");
+        assert_eq!(vendor_of("com.example.Editor"), "Example");
+        assert_eq!(vendor_of("com.SweetScape.010Editor"), "SweetScape");
+        // REVIEW-A 45: names seen on the real Mac.
+        assert_eq!(vendor_of("org.freecad.FreeCAD"), "FreeCAD");
+        assert_eq!(vendor_of("com.jetbrains.goland"), "JetBrains");
+        assert_eq!(vendor_of("com.openai.chat"), "OpenAI");
+        assert_eq!(
+            vendor_of("org.blenderfoundation.blender"),
+            "Blender Foundation"
+        );
+        assert_eq!(vendor_of("com.belightsoft.LiveHome3D"), "BeLight Software");
+        // Fragments are never a name.
+        assert_eq!(vendor_of("co.uk.screamingfrog"), UNKNOWN_DEVELOPER);
+        assert_eq!(vendor_of("io.x"), UNKNOWN_DEVELOPER);
+        assert_eq!(vendor_of("com.abc.x"), UNKNOWN_DEVELOPER);
+        assert_eq!(vendor_of("foo"), UNKNOWN_DEVELOPER);
+        assert_eq!(vendor_of(""), UNKNOWN_DEVELOPER);
+        assert_eq!(vendor_segment("com.JetBrains.goland"), "jetbrains");
+        assert_eq!(vendor_segment("foo.bar"), "foo");
+        assert_eq!(vendor_segment("foo"), "");
+    }
+
+    #[test]
+    fn signers_from_codesign() {
+        let dev = "Executable=/Applications/GoLand.app/Contents/MacOS/goland\nIdentifier=com.jetbrains.goland\nAuthority=Developer ID Application: JetBrains s.r.o. (2ZEFAR8TH3)\nAuthority=Developer ID Certification Authority\nAuthority=Apple Root CA\nTeamIdentifier=2ZEFAR8TH3\n";
+        assert_eq!(
+            parse_signer(dev),
+            Signer::Developer("JetBrains s.r.o.".into())
+        );
+        assert_eq!(
+            parse_signer("Authority=Developer ID Application: Screaming Frog Ltd (ABCDE12345)\n"),
+            Signer::Developer("Screaming Frog Ltd".into())
+        );
+        assert_eq!(
+            parse_signer("Authority=Developer ID Application: Example (Pty) Ltd (ABCDE12345)\n"),
+            Signer::Developer("Example (Pty) Ltd".into())
+        );
+        assert_eq!(
+            parse_signer(
+                "Authority=Apple Mac OS Application Signing\nAuthority=Apple Worldwide Developer Relations Certification Authority\n"
+            ),
+            Signer::AppStore
+        );
+        assert_eq!(
+            parse_signer("Authority=Software Signing\nAuthority=Apple Root CA\n"),
+            Signer::Macos
+        );
+        assert_eq!(
+            parse_signer("Executable=x\nSignature=adhoc\nTeamIdentifier=not set\n"),
+            Signer::Unknown
+        );
+        assert_eq!(
+            parse_signer("Authority=Apple Development: me@example.com (ABCDE12345)\n"),
+            Signer::Unknown
+        );
+    }
+
+    #[test]
+    fn copyright_holders() {
+        let h = |s: &str| copyright_holder(s);
+        assert_eq!(
+            h("Copyright © 2002-2024 JetBrains s.r.o. All rights reserved.").as_deref(),
+            Some("JetBrains s.r.o.")
+        );
+        assert_eq!(
+            h("Copyright © 2001–2024 Apple Inc. All rights reserved.").as_deref(),
+            Some("Apple Inc.")
+        );
+        assert_eq!(h("© 2024 OpenAI.").as_deref(), Some("OpenAI"));
+        assert_eq!(h("©2024 OpenAI").as_deref(), Some("OpenAI"));
+        assert_eq!(
+            h("Copyright (c) 2001-2023, The FreeCAD project association").as_deref(),
+            Some("The FreeCAD project association")
+        );
+        assert_eq!(
+            h("Copyright 2010-2024 Screaming Frog Ltd. Screaming Frog is a trademark.").as_deref(),
+            Some("Screaming Frog Ltd.")
+        );
+        assert_eq!(
+            h("Blender Foundation 2024").as_deref(),
+            Some("Blender Foundation")
+        );
+        assert_eq!(
+            h("Copyright by BeLight Software, Ltd.").as_deref(),
+            Some("BeLight Software, Ltd.")
+        );
+        assert_eq!(h("All rights reserved."), None);
+        assert_eq!(h("© 2024"), None);
+        assert_eq!(h(""), None);
+        assert_eq!(h("Licensed under the Apache License, Version 2.0"), None);
+    }
+
+    #[test]
+    fn developer_name_order() {
+        let b = BundleInfo {
+            bundle_id: "co.uk.screamingfrog.seo.spider".into(),
+            copyright: "© 2024 Screaming Frog Ltd".into(),
+            get_info: "SEO Spider 20.0, Copyright Other Name".into(),
+            ..Default::default()
+        };
+        let dev = Signer::Developer("Screaming Frog Ltd".into());
+        assert_eq!(developer_name(&b, &dev, false), "Screaming Frog Ltd");
+        assert_eq!(developer_name(&b, &dev, true), "Apple");
+        assert_eq!(developer_name(&b, &Signer::Macos, false), "Apple");
+        // App Store: Apple signs every app, so the copyright names the developer.
+        assert_eq!(
+            developer_name(&b, &Signer::AppStore, false),
+            "Screaming Frog Ltd"
+        );
+        let no_copy = BundleInfo {
+            copyright: String::new(),
+            ..b.clone()
+        };
+        assert_eq!(
+            developer_name(&no_copy, &Signer::Unknown, false),
+            "Other Name"
+        );
+        let only_id = BundleInfo {
+            get_info: "SEO Spider 20.0".into(),
+            ..no_copy
+        };
+        // "co" is a fragment, never a name.
+        assert_eq!(
+            developer_name(&only_id, &Signer::Unknown, false),
+            UNKNOWN_DEVELOPER
+        );
     }
 
     #[test]
