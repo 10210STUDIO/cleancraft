@@ -960,7 +960,7 @@ fn similar(sc: &mut Scene<'static>, a: &'static Assets, an: &Ani, root: Xf) {
         mix(an.b, an.a, 0.4),
         mix(an.b, [0.6, 0.3, 0.9], 0.3),
     ];
-    for i in 0..3 {
+    for (i, sky) in skies.into_iter().enumerate() {
         let fi = i as f32 - 1.0;
         let frame = Xf::ID
             .rot_z(-fi * 0.2 * fan)
@@ -978,7 +978,7 @@ fn similar(sc: &mut Scene<'static>, a: &'static Assets, an: &Ani, root: Xf) {
         sc.add(
             &a.photo,
             Xf::ID.at(v3(0.0, 0.06, 0.05)).then(frame),
-            Material::satin(skies[i], scale(skies[i], 0.55)).with_emissive(an.glow(0.3)),
+            Material::satin(sky, scale(sky, 0.55)).with_emissive(an.glow(0.3)),
         );
         sc.add(
             &a.hills,
@@ -1037,7 +1037,7 @@ fn disk_map(sc: &mut Scene<'static>, a: &'static Assets, an: &Ani, root: Xf) {
 
 fn monitor(sc: &mut Scene<'static>, a: &'static Assets, an: &Ani, root: Xf) {
     // Heartbeat: two quick bumps every 1.2 s (faster while scanning).
-    let period = if an.scanning() { 0.85 } else { 1.25 };
+    let period: f32 = if an.scanning() { 0.85 } else { 1.25 };
     let ph = if reduce() {
         0.5
     } else {

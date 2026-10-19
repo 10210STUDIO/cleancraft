@@ -520,9 +520,9 @@ impl Mesh3 {
             m.vertex(b, n);
             m.vertex(c, n);
             m.tri(i, i + 1, i + 2);
-            for k in 0..3 {
+            for &v in t {
                 m.tint
-                    .push(self.tint.get(t[k] as usize).copied().unwrap_or(0.5));
+                    .push(self.tint.get(v as usize).copied().unwrap_or(0.5));
             }
         }
         m.finish()
@@ -1242,14 +1242,14 @@ impl<'a> Scene<'a> {
                 let mut spec = [0.0f32; 3];
                 for l in lights {
                     let d = n.dot(l.dir).max(0.0) * mat.diffuse;
-                    for k in 0..3 {
-                        diff[k] += l.col[k] * d;
+                    for (dk, ck) in diff.iter_mut().zip(l.col) {
+                        *dk += ck * d;
                     }
                     if l.spec && mat.spec > 0.0 {
                         let h = (l.dir + v).norm();
                         let s = n.dot(h).max(0.0).powf(mat.shine) * mat.spec;
-                        for k in 0..3 {
-                            spec[k] += l.col[k] * s;
+                        for (sk, ck) in spec.iter_mut().zip(l.col) {
+                            *sk += ck * s;
                         }
                     }
                 }
