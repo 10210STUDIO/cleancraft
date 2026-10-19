@@ -24,7 +24,7 @@ use crate::app::CleanApp;
 use crate::icons::{self, Icon};
 use crate::jobs::Job;
 use crate::kit;
-use crate::theme::{self, Weight, font, motion};
+use crate::theme::{self, Weight, font, motion, size};
 
 /// Blocks drawn at most; the rest are one "Other items" block.
 pub const MAX_BLOCKS: usize = 40;
@@ -310,7 +310,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: cleancraft_core::FeatureId) {
             if kit::progress(
                 ui,
                 &t,
-                icon,
+                f,
                 &format!("Measuring {what}..."),
                 &status,
                 secs,
@@ -333,7 +333,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: cleancraft_core::FeatureId) {
             kit::progress(
                 ui,
                 &t,
-                icon,
+                f,
                 "Working on the selected items...",
                 &status,
                 secs,
@@ -368,13 +368,13 @@ fn storage_bar(app: &mut CleanApp, ui: &mut Ui) {
             ui.horizontal(|ui| {
                 ui.label(
                     RichText::new(text)
-                        .font(font(13.0, Weight::SemiBold))
+                        .font(font(size::BODY, Weight::SemiBold))
                         .color(t.text),
                 );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.label(
                         RichText::new(format!("Selected: {}", human_size(sel)))
-                            .font(font(12.5, Weight::Medium))
+                            .font(font(size::CALLOUT, Weight::Medium))
                             .color(t.warning),
                     );
                 });
@@ -404,7 +404,7 @@ fn idle(app: &mut CleanApp, ui: &mut Ui) {
     let go = kit::hero(
         ui,
         &t,
-        Icon::DiskMap,
+        cleancraft_core::FeatureId::SpaceLens,
         cleancraft_core::FeatureId::SpaceLens.title(),
         SUBTITLE,
         "Map Home Folder",
@@ -416,12 +416,7 @@ fn idle(app: &mut CleanApp, ui: &mut Ui) {
             });
             ui.add_space(theme::space::M);
             kit::centered_row(ui, egui::Id::new("disk-map-folder-row"), |ui| {
-                let r = ui.add(
-                    egui::TextEdit::singleline(&mut app.disk_map.folder_text)
-                        .hint_text("~/Projects")
-                        .desired_width(300.0)
-                        .margin(egui::Margin::symmetric(10, 7)),
-                );
+                let r = kit::text_field(ui, &t, &mut app.disk_map.folder_text, "~/Projects", 300.0);
                 r.widget_info(|| {
                     egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Folder to map")
                 });
@@ -505,7 +500,7 @@ fn map(app: &mut CleanApp, ui: &mut Ui) {
         let can_back = node.path != root;
         if ui
             .add_enabled_ui(can_back, |ui| {
-                kit::pill(ui, &t, "Back", kit::Kind::Secondary, Some(Icon::Undo))
+                kit::pill(ui, &t, "Back", kit::Kind::Secondary, Some(Icon::Back))
             })
             .inner
             .clicked()
@@ -560,7 +555,7 @@ fn map(app: &mut CleanApp, ui: &mut Ui) {
     ui.horizontal(|ui| {
         ui.label(
             RichText::new(human_size(node.size))
-                .font(font(30.0, Weight::Bold))
+                .font(font(size::LARGE_TITLE, Weight::Bold))
                 .color(icons::lerp(t.sec_a, Color32::WHITE, 0.15)),
         );
         ui.label(
@@ -603,7 +598,7 @@ fn map(app: &mut CleanApp, ui: &mut Ui) {
     kit::bottom_bar(ui, &t, egui::Id::new("disk-map-bottom"), |ui| {
         ui.label(
             RichText::new(format!("{n} selected, {}", human_size(size)))
-                .font(font(14.0, Weight::SemiBold))
+                .font(font(size::BODY, Weight::SemiBold))
                 .color(t.text),
         );
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -746,20 +741,31 @@ fn treemap(app: &mut CleanApp, ui: &mut Ui, node: &Node, area: egui::Rect) {
             } else {
                 rest
             };
-            let galley = p.layout(
-                format!("{label}\n{}", human_size(size)),
-                font(12.0, Weight::SemiBold),
-                Color32::WHITE,
-                rect.width() - 14.0,
-            );
+            // Ink or white, whichever reads better on the block (WCAG), one line for the
+            // name cut at its end (never broken mid-word) and one for the size.
+            let ink = theme::on_color(icons::lerp(top, bottom, 0.35));
+            let nf = font(size::FOOTNOTE, Weight::SemiBold);
+            let sf = font(size::FOOTNOTE, Weight::Regular);
+            let name_s = kit::truncate_end(ui.ctx(), &label, &nf, rect.width() - 16.0);
             let pos = rect.left_top() + vec2(8.0, 7.0);
             let clip = p.with_clip_rect(rect.shrink(2.0));
-            clip.galley(
-                pos + vec2(0.0, 1.0),
-                galley.clone(),
-                Color32::from_black_alpha(90),
+            if ink == Color32::WHITE {
+                clip.text(
+                    pos + vec2(0.0, 1.0),
+                    egui::Align2::LEFT_TOP,
+                    &name_s,
+                    nf.clone(),
+                    Color32::from_black_alpha(90),
+                );
+            }
+            clip.text(pos, egui::Align2::LEFT_TOP, &name_s, nf, ink);
+            clip.text(
+                pos + vec2(0.0, 16.0),
+                egui::Align2::LEFT_TOP,
+                human_size(size),
+                sf,
+                ink.gamma_multiply(0.8),
             );
-            clip.galley(pos, galley, Color32::WHITE);
         }
         let resp = match &target {
             Some((path, true)) => resp.on_hover_text(format!("Open {}", app.env.display(path))),
@@ -786,6 +792,9 @@ fn treemap(app: &mut CleanApp, ui: &mut Ui, node: &Node, area: egui::Rect) {
     }
 }
 
+/// Height of a line in the list beside the map.
+const LIST_ROW_H: f32 = 52.0;
+
 fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
     let t = app.t;
     kit::card(&t)
@@ -802,13 +811,13 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                 .id_salt("disk-map-list")
                 .max_height(h - 18.0)
                 .auto_shrink([false, false])
-                .show_rows(ui, 44.0, kids.len(), |ui, range| {
+                .show_rows(ui, LIST_ROW_H, kids.len(), |ui, range| {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     for (k, c) in kids[range.clone()].iter().enumerate() {
                         let idx = range.start + k;
                         let locked = node_lock_reason(&app.env, c);
                         let w = ui.available_width();
-                        let (r, row) = ui.allocate_exact_size(vec2(w, 44.0), Sense::hover());
+                        let (r, row) = ui.allocate_exact_size(vec2(w, LIST_ROW_H), Sense::hover());
                         let hov = kit::anim(
                             ui.ctx(),
                             row.id.with("hov"),
@@ -826,8 +835,8 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                         let mut on = was;
                         let label = format!("Select {}", c.name);
                         let cb_rect = egui::Rect::from_center_size(
-                            egui::pos2(r.left() + 16.0, r.center().y),
-                            vec2(20.0, 20.0),
+                            egui::pos2(r.left() + 18.0, r.center().y),
+                            vec2(22.0, 22.0),
                         );
                         let cb = kit::place(ui, cb_rect, |ui| {
                             ui.add_enabled_ui(locked.is_none(), |ui| {
@@ -839,14 +848,14 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                             toggle(app, &c.path, on);
                         }
                         // Colour dot matching the block.
-                        let dot = egui::pos2(r.left() + 38.0, r.center().y);
+                        let dot = egui::pos2(r.left() + 42.0, r.center().y);
                         let color = if idx < MAX_BLOCKS {
                             block_color(idx, c.is_dir)
                         } else {
                             Color32::from_rgb(0x44, 0x48, 0x50)
                         };
                         let ir =
-                            egui::Rect::from_center_size(dot + vec2(4.0, 0.0), vec2(16.0, 16.0));
+                            egui::Rect::from_center_size(dot + vec2(4.0, 0.0), vec2(18.0, 18.0));
                         icons::paint(
                             ui.painter(),
                             ir,
@@ -854,13 +863,13 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                             color,
                         );
                         let size_text = human_size(c.size);
-                        let sf = font(13.0, Weight::SemiBold);
+                        let sf = font(size::BODY, Weight::SemiBold);
                         let size_w = kit::galley(ui, &size_text, sf.clone(), t.text).size().x;
                         kit::text_at(
                             ui,
                             egui::Rect::from_min_max(
-                                egui::pos2(r.right() - size_w - 10.0, r.top()),
-                                egui::pos2(r.right() - 6.0, r.top() + 26.0),
+                                egui::pos2(r.right() - size_w - 12.0, r.top() + 4.0),
+                                egui::pos2(r.right() - 8.0, r.top() + 28.0),
                             ),
                             &size_text,
                             &size_text,
@@ -868,12 +877,12 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                             t.text,
                             Align::Max,
                         );
-                        let x0 = r.left() + 56.0;
+                        let x0 = r.left() + 62.0;
                         let name_w = (r.right() - size_w - 20.0 - x0).max(40.0);
-                        let nf = font(13.0, Weight::Medium);
+                        let nf = font(size::BODY, Weight::Medium);
                         let name_s = kit::truncate_middle(ui.ctx(), &c.name, &nf, name_w);
                         let name_rect = egui::Rect::from_min_size(
-                            egui::pos2(x0, r.top() + 4.0),
+                            egui::pos2(x0, r.top() + 6.0),
                             vec2(name_w, 22.0),
                         );
                         if c.is_dir {
@@ -903,14 +912,15 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                         }
                         // Share bar, or the reason it is locked.
                         let line = egui::Rect::from_min_max(
-                            egui::pos2(x0, r.top() + 29.0),
-                            egui::pos2(r.right() - 10.0, r.top() + 40.0),
+                            egui::pos2(x0, r.top() + 31.0),
+                            egui::pos2(r.right() - 12.0, r.top() + 46.0),
                         );
                         if let Some(why) = &locked {
                             let text = format!("locked: {why}");
-                            let lf = font(10.5, Weight::Regular);
-                            let s = kit::truncate_middle(ui.ctx(), &text, &lf, line.width());
-                            kit::text_at(ui, line, &s, &text, lf, t.text_faint, Align::Min);
+                            let lf = font(size::FOOTNOTE, Weight::Regular);
+                            let s = kit::truncate_end(ui.ctx(), &text, &lf, line.width());
+                            kit::text_at(ui, line, &s, &text, lf, t.text_faint, Align::Min)
+                                .on_hover_text(&text);
                         } else {
                             let bar = egui::Rect::from_min_size(
                                 egui::pos2(line.left(), line.center().y - 2.0),
@@ -1000,29 +1010,36 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
         cleancraft_core::fsutil::items(rep.moved.len()),
         rep.skipped.len()
     );
-    super::plan_page::done_view(app, ui, &rep, &summary, |app, ui| {
-        let t = app.t;
-        if !rep.moved.is_empty()
-            && kit::pill(ui, &t, "Undo", kit::Kind::Secondary, Some(Icon::Undo)).clicked()
-        {
-            app.act();
-            start_undo(app, rep.clone());
-        }
-        if kit::pill(
-            ui,
-            &t,
-            "Show History",
-            kit::Kind::Secondary,
-            Some(Icon::History),
-        )
-        .clicked()
-        {
-            app.act();
-            app.navigate("history");
-        }
-        if kit::primary(ui, &t, "Done") {
-            app.act();
-            app.disk_map.phase = Phase::Map;
-        }
-    });
+    super::plan_page::done_view(
+        app,
+        ui,
+        cleancraft_core::FeatureId::SpaceLens,
+        &rep,
+        &summary,
+        |app, ui| {
+            let t = app.t;
+            if !rep.moved.is_empty()
+                && kit::pill(ui, &t, "Undo", kit::Kind::Secondary, Some(Icon::Undo)).clicked()
+            {
+                app.act();
+                start_undo(app, rep.clone());
+            }
+            if kit::pill(
+                ui,
+                &t,
+                "Show History",
+                kit::Kind::Secondary,
+                Some(Icon::History),
+            )
+            .clicked()
+            {
+                app.act();
+                app.navigate("history");
+            }
+            if kit::primary(ui, &t, "Done") {
+                app.act();
+                app.disk_map.phase = Phase::Map;
+            }
+        },
+    );
 }

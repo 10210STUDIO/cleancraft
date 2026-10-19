@@ -167,8 +167,7 @@ fn privacy_toolbar(app: &mut CleanApp, ui: &mut Ui) {
     let t = app.t;
     let mut st = load(ui);
     if plan_has(app, FeatureId::Privacy, &["wifi"])
-        && ui
-            .button(WIFI_BUTTON)
+        && kit::secondary_resp(ui, &t, WIFI_BUTTON)
             .on_hover_text("Open System Settings at Wi-Fi to remove known networks")
             .clicked()
     {
@@ -181,8 +180,7 @@ fn privacy_toolbar(app: &mut CleanApp, ui: &mut Ui) {
         }
     }
     if plan_has(app, FeatureId::Privacy, &["permissions"])
-        && ui
-            .button(RESET_BUTTON)
+        && kit::secondary_resp(ui, &t, RESET_BUTTON)
             .on_hover_text("Take back access you gave to apps")
             .clicked()
     {

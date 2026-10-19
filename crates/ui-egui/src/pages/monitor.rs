@@ -13,10 +13,10 @@ use cleancraft_core::monitor::{
 use egui::{Color32, RichText, Sense, Ui, vec2};
 
 use crate::app::{CleanApp, Page};
-use crate::icons::{self, Icon};
+use crate::icons::Icon;
 use crate::jobs::Job;
 use crate::kit;
-use crate::theme::{Weight, font, space};
+use crate::theme::{Weight, font, size, space};
 
 pub struct State {
     job: Option<Job<(Sampler, Snapshot)>>,
@@ -120,7 +120,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     );
     ui.ctx().request_repaint_after(app.monitor.interval);
     let Some(snap) = app.monitor.last.clone() else {
-        kit::progress(ui, &t, icon, "Reading...", "", 0, false);
+        kit::progress(ui, &t, f, "Reading...", "", 0, false);
         return;
     };
     egui::ScrollArea::vertical()
@@ -132,16 +132,16 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                 ui.add_space(4.0);
             }
             ui.add_space(2.0);
-            ui.spacing_mut().item_spacing.x = space::M;
+            ui.spacing_mut().item_spacing.x = space::GUTTER;
+            // Three columns that stack their cards, so no column ends in a hole.
             ui.columns(3, |cols| {
                 cpu_card(app, &mut cols[0], &snap);
                 memory_card(app, &mut cols[1], &snap);
-                storage_card(app, &mut cols[2], &snap);
-            });
-            ui.add_space(space::M);
-            ui.columns(3, |cols| {
-                battery_card(app, &mut cols[0], &snap);
+                cols[1].add_space(space::GUTTER - 8.0);
                 network_card(app, &mut cols[1], &snap);
+                storage_card(app, &mut cols[2], &snap);
+                cols[2].add_space(space::GUTTER - 8.0);
+                battery_card(app, &mut cols[2], &snap);
             });
             if !snap.problems.is_empty() {
                 ui.add_space(8.0);
@@ -156,49 +156,43 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
 
 fn card(app: &CleanApp, ui: &mut Ui, icon: Icon, title: &str, add: impl FnOnce(&mut Ui)) {
     let t = app.t;
-    kit::card(&t).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.spacing_mut().item_spacing.y = 6.0;
-        ui.horizontal(|ui| {
-            let (r, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
-            icons::paint(ui.painter(), r, icon, t.sec_a);
-            ui.label(
-                RichText::new(title)
-                    .font(font(11.0, Weight::SemiBold))
-                    .color(t.text_faint),
-            );
+    kit::card(&t)
+        .inner_margin(egui::Margin::same(18))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.spacing_mut().item_spacing.y = 8.0;
+            kit::card_head(ui, &t, icon, t.sec_a, title);
+            ui.add_space(2.0);
+            add(ui);
         });
-        add(ui);
-    });
 }
 
 fn big(app: &CleanApp, ui: &mut Ui, text: &str) {
     ui.add(
         egui::Label::new(
             RichText::new(text)
-                .font(font(24.0, Weight::Bold))
+                .font(font(size::TITLE, Weight::Bold))
                 .color(app.t.text),
         )
         .truncate(),
     );
 }
 
-/// A big value with a semicircle gauge on its left.
+/// A semicircle gauge with the value inside it.
 fn gauge_big(app: &CleanApp, ui: &mut Ui, frac: f32, color: Color32, text: &str) {
-    ui.horizontal(|ui| {
-        let (r, _) = ui.allocate_exact_size(vec2(64.0, 40.0), Sense::hover());
-        kit::gauge(
-            ui.painter(),
-            r.center_bottom() - vec2(0.0, 4.0),
-            27.0,
-            frac,
-            color,
-        );
-        ui.vertical(|ui| {
-            ui.add_space(4.0);
-            big(app, ui, text);
-        });
-    });
+    let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 78.0), Sense::hover());
+    let c = egui::pos2(r.left() + 56.0, r.bottom() - 8.0);
+    kit::gauge(ui.painter(), c, 48.0, frac, color);
+    let tr = egui::Rect::from_center_size(c - vec2(0.0, 15.0), vec2(80.0, 30.0));
+    ui.put(
+        tr,
+        egui::Label::new(
+            RichText::new(text)
+                .font(font(size::TITLE, Weight::Bold))
+                .color(app.t.text),
+        )
+        .selectable(false),
+    );
 }
 
 /// A label pair on one line: name on the left, value on the right.
@@ -207,7 +201,7 @@ fn row(app: &CleanApp, ui: &mut Ui, name: &str, value: &str) {
         ui.add(
             egui::Label::new(
                 RichText::new(name)
-                    .font(font(12.5, Weight::Regular))
+                    .font(font(size::CALLOUT, Weight::Regular))
                     .color(app.t.text_dim),
             )
             .truncate(),
@@ -215,7 +209,7 @@ fn row(app: &CleanApp, ui: &mut Ui, name: &str, value: &str) {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(
                 RichText::new(value)
-                    .font(font(12.5, Weight::Medium))
+                    .font(font(size::CALLOUT, Weight::Medium))
                     .color(app.t.text),
             );
         });
@@ -223,7 +217,7 @@ fn row(app: &CleanApp, ui: &mut Ui, name: &str, value: &str) {
 }
 
 fn sparkline(ui: &mut Ui, values: &[f64], color: Color32) {
-    let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 46.0), Sense::hover());
+    let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 56.0), Sense::hover());
     kit::sparkline(ui.painter(), r, values, monitor::CPU_HISTORY, color);
 }
 
@@ -285,14 +279,31 @@ fn memory_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
     let t = app.t;
     let mut purge = false;
     let running = app.monitor.purge.is_some();
-    card(app, ui, Icon::Gear, "MEMORY", |ui| {
+    card(app, ui, Icon::Gear, "Memory", |ui| {
         match &s.memory {
             Some(m) => {
-                big(
-                    app,
-                    ui,
-                    &format!("{} of {}", memory_size(m.used), memory_size(m.total)),
-                );
+                // "7.78 GB" big and "of 16.0 GB" beside it: the figure is never cut, and
+                // VoiceOver hears the whole "7.78 GB of 16.0 GB".
+                let used = memory_size(m.used);
+                let full = format!("{used} of {}", memory_size(m.total));
+                let rest = format!("of {}", memory_size(m.total));
+                ui.horizontal(|ui| {
+                    let fid = font(size::TITLE, Weight::Bold);
+                    let w = kit::galley(ui, &used, fid.clone(), t.text).size().x + 2.0;
+                    let (r, _) = ui.allocate_exact_size(vec2(w, 30.0), Sense::hover());
+                    kit::text_at(ui, r, &used, &full, fid, t.text, egui::Align::Min);
+                    let (r2, _) = ui.allocate_exact_size(
+                        vec2(ui.available_width().max(10.0), 30.0),
+                        Sense::hover(),
+                    );
+                    ui.painter().text(
+                        r2.left_bottom() - vec2(0.0, 6.0),
+                        egui::Align2::LEFT_BOTTOM,
+                        rest,
+                        font(size::CALLOUT, Weight::Medium),
+                        t.text_dim,
+                    );
+                });
                 let frac = m.used_fraction() as f32;
                 let w = ui.available_width();
                 kit::bar(ui, &t, frac, level_color(app, frac), w);
@@ -340,7 +351,7 @@ fn memory_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
 fn storage_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
     let t = app.t;
     let mut go = false;
-    card(app, ui, Icon::DiskMap, "STORAGE", |ui| {
+    card(app, ui, Icon::DiskMap, "Storage", |ui| {
         let st = &s.storage;
         match (st.free, st.total) {
             (Some(free), Some(total)) => {
@@ -373,7 +384,7 @@ fn storage_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
 }
 
 fn battery_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
-    card(app, ui, Icon::Startup, "BATTERY", |ui| match &s.battery {
+    card(app, ui, Icon::Startup, "Battery", |ui| match &s.battery {
         Some(BatteryReading::Present(b)) => {
             let frac = b.percent as f32 / 100.0;
             let color = if frac < 0.2 {
@@ -422,7 +433,7 @@ fn network_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
             .problems
             .iter()
             .any(|p| p.contains("netstat") || p.contains("network"));
-    card(app, ui, Icon::Updates, "NETWORK", |ui| match s.network {
+    card(app, ui, Icon::Updates, "Network", |ui| match s.network {
         Some(n) => {
             row(app, ui, "Download", &rate_text(n.down));
             row(app, ui, "Upload", &rate_text(n.up));

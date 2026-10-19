@@ -49,11 +49,17 @@ pub enum Icon {
     Chevron,
     Picture,
     Gear,
+    /// Chevron pointing left: navigation back (never the Undo arrow).
+    Back,
+    /// Up and down chevrons of a pop-up menu.
+    UpDown,
+    /// A padlock: an item that cannot be selected.
+    Lock,
 }
 
 impl Icon {
     /// Every icon, for tests and the gallery.
-    pub const ALL: [Icon; 31] = [
+    pub const ALL: [Icon; 34] = [
         Icon::Sweep,
         Icon::Junk,
         Icon::Mail,
@@ -85,6 +91,9 @@ impl Icon {
         Icon::Chevron,
         Icon::Picture,
         Icon::Gear,
+        Icon::Back,
+        Icon::UpDown,
+        Icon::Lock,
     ];
 }
 
@@ -474,6 +483,17 @@ fn draw(pen: &Pen<'_>, icon: Icon) {
             pen.line(&[(17.5, 6.5), (6.5, 17.5)]);
         }
         Icon::Chevron => pen.line(&[(9.5, 5.5), (16.0, 12.0), (9.5, 18.5)]),
+        Icon::Back => pen.line(&[(14.5, 5.5), (8.0, 12.0), (14.5, 18.5)]),
+        Icon::Lock => {
+            pen.rrect(5.5, 10.5, 13.0, 9.5, 2.0);
+            pen.line(&[(8.5, 10.5), (8.5, 7.5)]);
+            pen.line(&[(15.5, 10.5), (15.5, 7.5)]);
+            pen.arc(12.0, 7.5, 3.5, 180.0, 360.0);
+        }
+        Icon::UpDown => {
+            pen.line(&[(7.5, 9.5), (12.0, 5.0), (16.5, 9.5)]);
+            pen.line(&[(7.5, 14.5), (12.0, 19.0), (16.5, 14.5)]);
+        }
     }
 }
 
@@ -544,35 +564,120 @@ pub fn glow(p: &Painter, center: Pos2, radius: f32, color: Color32, squash: f32)
     p.add(Shape::mesh(m));
 }
 
-/// A disc filled with a diagonal two-colour gradient (top-left `a`, bottom-right `b`).
-pub fn gradient_disc(p: &Painter, center: Pos2, radius: f32, a: Color32, b: Color32) {
+/// A convex fan (centre colour, outline with colours) with an anti-aliased edge: the fill
+/// stops half a physical pixel inside the outline and a one-pixel ring fades to nothing,
+/// like egui's own tessellator does for its shapes.
+fn feathered_fan(p: &Painter, center: Pos2, center_color: Color32, outline: &[(Pos2, Color32)]) {
+    let n = outline.len();
+    if n < 3 {
+        return;
+    }
+    let px = 1.0 / p.pixels_per_point().max(0.5);
     let mut m = Mesh::default();
-    let seg = 72u32;
     m.vertices.push(Vertex {
         pos: center,
         uv: WHITE_UV,
-        color: lerp(a, b, 0.5),
+        color: center_color,
     });
-    for s in 0..seg {
-        let ang = s as f32 / seg as f32 * TAU;
-        let d = vec2(ang.cos(), ang.sin());
-        // Position along the top-left to bottom-right diagonal, 0..1.
-        let t = ((d.x + d.y) / std::f32::consts::SQRT_2 + 1.0) / 2.0;
+    for i in 0..n {
+        let prev = outline[(i + n - 1) % n].0;
+        let next = outline[(i + 1) % n].0;
+        let q = outline[i].0;
+        let d = (next - prev).normalized();
+        let mut nrm = vec2(d.y, -d.x);
+        if nrm.dot(q - center) < 0.0 {
+            nrm = -nrm;
+        }
         m.vertices.push(Vertex {
-            pos: center + d * radius,
+            pos: q - nrm * px * 0.5,
             uv: WHITE_UV,
-            color: lerp(a, b, t),
+            color: outline[i].1,
+        });
+        m.vertices.push(Vertex {
+            pos: q + nrm * px * 0.5,
+            uv: WHITE_UV,
+            color: Color32::TRANSPARENT,
         });
     }
-    for s in 0..seg {
-        m.add_triangle(0, 1 + s, 1 + (s + 1) % seg);
+    let n = n as u32;
+    for i in 0..n {
+        let j = (i + 1) % n;
+        let (ii, io, ji, jo) = (1 + 2 * i, 2 + 2 * i, 1 + 2 * j, 2 + 2 * j);
+        m.add_triangle(0, ii, ji);
+        m.add_triangle(ii, io, jo);
+        m.add_triangle(ii, jo, ji);
     }
     p.add(Shape::mesh(m));
 }
 
+/// A soft glow of `color` around `center` that stays inside the rounded rectangle `r` (its
+/// corners included): a fan from the centre to the outline, with rings in between.
+pub fn tile_glow(p: &Painter, r: Rect, rounding: f32, center: Pos2, radius: f32, color: Color32) {
+    let rad = rounding.min(r.width() / 2.0).min(r.height() / 2.0);
+    let mut outline = Vec::new();
+    let corners = [
+        (r.right_bottom() - vec2(rad, rad), 0.0f32),
+        (r.left_bottom() + vec2(rad, -rad), 90.0),
+        (r.left_top() + vec2(rad, rad), 180.0),
+        (r.right_top() + vec2(-rad, rad), 270.0),
+    ];
+    for (cc, start) in corners {
+        for i in 0..=10 {
+            let a = (start + 90.0 * i as f32 / 10.0).to_radians();
+            outline.push(cc + vec2(a.cos(), a.sin()) * rad);
+        }
+    }
+    let falloff = |q: Pos2| {
+        let d = ((q - center).length() / radius).clamp(0.0, 1.0);
+        let k = 1.0 - d;
+        color.gamma_multiply(k * k * (3.0 - 2.0 * k))
+    };
+    let steps = 6u32;
+    let n = outline.len() as u32;
+    let mut m = Mesh::default();
+    m.vertices.push(Vertex {
+        pos: center,
+        uv: WHITE_UV,
+        color,
+    });
+    for q in &outline {
+        for s in 1..=steps {
+            let pos = center + (*q - center) * (s as f32 / steps as f32);
+            m.vertices.push(Vertex {
+                pos,
+                uv: WHITE_UV,
+                color: falloff(pos),
+            });
+        }
+    }
+    let v = |i: u32, s: u32| 1 + (i % n) * steps + (s - 1);
+    for i in 0..n {
+        m.add_triangle(0, v(i, 1), v(i + 1, 1));
+        for s in 1..steps {
+            m.add_triangle(v(i, s), v(i, s + 1), v(i + 1, s + 1));
+            m.add_triangle(v(i, s), v(i + 1, s + 1), v(i + 1, s));
+        }
+    }
+    p.add(Shape::mesh(m));
+}
+
+/// A disc filled with a diagonal two-colour gradient (top-left `a`, bottom-right `b`).
+pub fn gradient_disc(p: &Painter, center: Pos2, radius: f32, a: Color32, b: Color32) {
+    let seg = 96u32;
+    let outline: Vec<(Pos2, Color32)> = (0..seg)
+        .map(|s| {
+            let ang = s as f32 / seg as f32 * TAU;
+            let d = vec2(ang.cos(), ang.sin());
+            // Position along the top-left to bottom-right diagonal, 0..1.
+            let t = ((d.x + d.y) / std::f32::consts::SQRT_2 + 1.0) / 2.0;
+            (center + d * radius, lerp(a, b, t))
+        })
+        .collect();
+    feathered_fan(p, center, lerp(a, b, 0.5), &outline);
+}
+
 /// A rounded square filled with a diagonal gradient (used for icon tiles).
 pub fn gradient_tile(p: &Painter, r: Rect, rounding: f32, a: Color32, b: Color32) {
-    let mut m = Mesh::default();
     let c = r.center();
     let rad = rounding.min(r.width() / 2.0).min(r.height() / 2.0);
     let mut outline = Vec::new();
@@ -583,8 +688,8 @@ pub fn gradient_tile(p: &Painter, r: Rect, rounding: f32, a: Color32, b: Color32
         (r.right_top() + vec2(-rad, rad), 270.0),
     ];
     for (cc, start) in corners {
-        for i in 0..=8 {
-            let a = (start + 90.0 * i as f32 / 8.0).to_radians();
+        for i in 0..=10 {
+            let a = (start + 90.0 * i as f32 / 10.0).to_radians();
             outline.push(cc + vec2(a.cos(), a.sin()) * rad);
         }
     }
@@ -592,23 +697,13 @@ pub fn gradient_tile(p: &Painter, r: Rect, rounding: f32, a: Color32, b: Color32
         let v = q - r.min;
         ((v.x / r.width() + v.y / r.height()) / 2.0).clamp(0.0, 1.0)
     };
-    m.vertices.push(Vertex {
-        pos: c,
-        uv: WHITE_UV,
-        color: lerp(a, b, 0.5),
-    });
-    for q in &outline {
-        m.vertices.push(Vertex {
-            pos: *q,
-            uv: WHITE_UV,
-            color: lerp(a, b, diag(*q)),
-        });
+    // Drop repeated points where corners meet (zero-length edges have no normal).
+    outline.dedup_by(|x, y| (*x - *y).length() < 0.01);
+    if outline.len() > 1 && (outline[0] - outline[outline.len() - 1]).length() < 0.01 {
+        outline.pop();
     }
-    let n = outline.len() as u32;
-    for i in 0..n {
-        m.add_triangle(0, 1 + i, 1 + (i + 1) % n);
-    }
-    p.add(Shape::mesh(m));
+    let pts: Vec<(Pos2, Color32)> = outline.iter().map(|q| (*q, lerp(a, b, diag(*q)))).collect();
+    feathered_fan(p, c, lerp(a, b, 0.5), &pts);
 }
 
 /// Linear mix of two colours (premultiplied space).

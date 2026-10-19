@@ -387,6 +387,9 @@ pub struct FakeState {
     pub limits: Vec<(String, Duration)>,
     /// Sources an administrator `mv` fails on ("Operation not permitted").
     pub admin_move_fails: HashSet<PathBuf>,
+    /// Files a command writes when it runs with a successful answer (same keys as
+    /// `answers`): image tools such as `sips` and `qlmanage` that write their output to disk.
+    pub creates: BTreeMap<String, Vec<(PathBuf, Vec<u8>)>>,
 }
 
 impl FakeSys {
@@ -423,6 +426,18 @@ impl FakeSys {
 
     pub fn answer_full(&self, key: &str, out: CmdOut) {
         self.with(|s| s.answers.insert(key.to_string(), out));
+    }
+
+    /// Answer `key` with `stdout` (status 0), and write `bytes` to `file` (inside the fake
+    /// root) each time that command runs, like a tool writing its output file.
+    pub fn answer_creating(&self, key: &str, stdout: &str, file: &Path, bytes: &[u8]) {
+        self.answer(key, stdout);
+        self.with(|s| {
+            s.creates
+                .entry(key.to_string())
+                .or_default()
+                .push((file.to_path_buf(), bytes.to_vec()))
+        });
     }
 
     pub fn calls(&self) -> Vec<String> {
@@ -508,18 +523,32 @@ impl FakeSys {
             {
                 return Err(timed_out(program, limit));
             }
-            s.answers
-                .get(&line)
-                .or_else(|| s.answers.get(&short_line))
-                .or_else(|| s.answers.get(program))
-                .or_else(|| s.answers.get(&short))
-                .cloned()
-                .ok_or_else(|| {
-                    io::Error::new(
-                        io::ErrorKind::NotFound,
-                        format!("fake: no answer for `{line}`"),
-                    )
-                })
+            let keys = [line.as_str(), short_line.as_str(), program, short.as_str()];
+            let Some(key) = keys.iter().find(|k| s.answers.contains_key(**k)) else {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("fake: no answer for `{line}`"),
+                ));
+            };
+            let out = s.answers[*key].clone();
+            if out.ok()
+                && let Some(files) = s.creates.get(*key)
+            {
+                for (f, bytes) in files {
+                    if let Some(root) = &s.root {
+                        assert!(
+                            f.starts_with(root) && !crate::env::has_parent_component(f),
+                            "FakeSys: a command wrote outside the fake root: {}",
+                            f.display()
+                        );
+                    }
+                    if let Some(dir) = f.parent() {
+                        let _ = std::fs::create_dir_all(dir);
+                    }
+                    let _ = std::fs::write(f, bytes);
+                }
+            }
+            Ok(out)
         })
     }
 }

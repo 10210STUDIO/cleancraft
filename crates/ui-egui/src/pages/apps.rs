@@ -28,7 +28,7 @@ use crate::app::CleanApp;
 use crate::icons::{self, Icon};
 use crate::jobs::Job;
 use crate::kit;
-use crate::theme::{Weight, font, motion, space};
+use crate::theme::{Weight, font, motion, size, space};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Group {
@@ -355,7 +355,7 @@ fn remover_page(app: &mut CleanApp, ui: &mut Ui) {
             kit::progress(
                 ui,
                 &t,
-                Icon::Trash,
+                FeatureId::Uninstaller,
                 "Moving to the Trash...",
                 &s,
                 secs,
@@ -376,7 +376,7 @@ fn remover_page(app: &mut CleanApp, ui: &mut Ui) {
             kit::progress(
                 ui,
                 &t,
-                Icon::Remover,
+                FeatureId::Uninstaller,
                 "Looking at your apps",
                 &s,
                 secs,
@@ -476,11 +476,7 @@ fn browse(app: &mut CleanApp, ui: &mut Ui) {
     let t = app.t;
     // Toolbar.
     ui.horizontal(|ui| {
-        let r = ui.add(
-            egui::TextEdit::singleline(&mut app.apps.search)
-                .hint_text("Search apps")
-                .desired_width(240.0),
-        );
+        let r = kit::search_field(ui, &t, &mut app.apps.search, "Search apps", 240.0);
         r.widget_info(|| {
             egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Search apps")
         });
@@ -498,15 +494,11 @@ fn browse(app: &mut CleanApp, ui: &mut Ui) {
             }
         }
         let mut sort = app.apps.sort;
-        egui::ComboBox::from_id_salt("apps-sort")
-            .selected_text(sort.label())
-            .show_ui(ui, |ui| {
-                for s in [SortBy::Size, SortBy::Name, SortBy::LastOpened] {
-                    ui.selectable_value(&mut sort, s, s.label());
-                }
-            })
-            .response
-            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, "Sort"));
+        let choices: Vec<(SortBy, &str)> = [SortBy::Size, SortBy::Name, SortBy::LastOpened]
+            .into_iter()
+            .map(|s| (s, s.label()))
+            .collect();
+        kit::sort_menu(ui, "apps-sort", &mut sort, &choices);
         if sort != app.apps.sort {
             app.act();
             app.apps.sort = sort;
@@ -535,60 +527,80 @@ fn browse(app: &mut CleanApp, ui: &mut Ui) {
     let avail_h = ui.available_height() - 8.0;
     let body =
         egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), avail_h));
-    let left = egui::Rect::from_min_size(body.min, egui::vec2(250.0, avail_h));
-    let right = egui::Rect::from_min_max(egui::pos2(left.right() + 12.0, body.top()), body.max);
+    let left_w = if body.width() < 760.0 { 236.0 } else { 272.0 };
+    let left = egui::Rect::from_min_size(body.min, egui::vec2(left_w, avail_h));
+    let right = egui::Rect::from_min_max(
+        egui::pos2(left.right() + space::GUTTER, body.top()),
+        body.max,
+    );
     ui.allocate_rect(body, egui::Sense::hover());
     ui.scope_builder(egui::UiBuilder::new().max_rect(left), |ui| {
         ui.set_clip_rect(left.expand(24.0).intersect(ui.clip_rect()));
         kit::card(&t)
             .inner_margin(egui::Margin::same(8))
             .show(ui, |ui| {
-                ui.set_min_size(egui::vec2(232.0, avail_h - 18.0));
-                ui.set_max_width(232.0);
-                ui.spacing_mut().item_spacing.y = 4.0;
-                let total = group_count(&app.apps, Group::All).1.max(1);
-                for (k, g) in Group::LIST.into_iter().enumerate() {
-                    if g == Group::Leftovers {
-                        ui.add_space(4.0);
-                        kit::eyebrow(ui, &t, "  Left behind");
-                        ui.add_space(2.0);
-                    }
-                    let (n, size) = group_count(&app.apps, g);
-                    let text = if size > 0 {
-                        format!("{}  {n}  ·  {}", g.title(), human_size(size))
-                    } else {
-                        format!("{}  {n}", g.title())
-                    };
-                    let on = app.apps.group == g;
-                    let count = if g.category().is_some() {
-                        cleancraft_core::fsutil::items(n)
-                    } else if n == 1 {
-                        "1 app".to_string()
-                    } else {
-                        format!("{n} apps")
-                    };
-                    let size_text = if size > 0 {
-                        human_size(size)
-                    } else {
-                        String::new()
-                    };
-                    let r = super::plan_page::category_row(
-                        ui,
-                        &t,
-                        &text,
-                        g.title(),
-                        &size_text,
-                        &count,
-                        size as f32 / total as f32,
-                        kit::series_color(&t, k),
-                        on,
-                        None,
-                    );
-                    if r.row_clicked {
-                        app.act();
-                        app.apps.group = g;
-                    }
-                }
+                ui.set_min_size(egui::vec2(left_w - 18.0, avail_h - 18.0));
+                ui.set_max_width(left_w - 18.0);
+                egui::ScrollArea::vertical()
+                    .id_salt("app-groups")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.spacing_mut().item_spacing.y = 4.0;
+                        let total = group_count(&app.apps, Group::All).1.max(1);
+                        for (k, g) in Group::LIST.into_iter().enumerate() {
+                            if g == Group::Leftovers {
+                                ui.add_space(4.0);
+                                ui.horizontal(|ui| {
+                                    ui.add_space(10.0);
+                                    kit::eyebrow(ui, &t, "Left behind");
+                                });
+                                ui.add_space(2.0);
+                            }
+                            let (n, size) = group_count(&app.apps, g);
+                            let text = if size > 0 {
+                                format!("{}  {n}  ·  {}", g.title(), human_size(size))
+                            } else {
+                                format!("{}  {n}", g.title())
+                            };
+                            let on = app.apps.group == g;
+                            let count = if g.category().is_some() {
+                                cleancraft_core::fsutil::items(n)
+                            } else if n == 1 {
+                                "1 app".to_string()
+                            } else {
+                                format!("{n} apps")
+                            };
+                            let size_text = if size > 0 {
+                                human_size(size)
+                            } else {
+                                String::new()
+                            };
+                            // Empty groups stay listed (so the list does not jump) but step back.
+                            let r = ui
+                                .scope(|ui| {
+                                    if n == 0 {
+                                        ui.multiply_opacity(0.45);
+                                    }
+                                    super::plan_page::category_row(
+                                        ui,
+                                        &t,
+                                        &text,
+                                        g.title(),
+                                        &size_text,
+                                        &count,
+                                        size as f32 / total as f32,
+                                        kit::series_color(&t, k),
+                                        on,
+                                        None,
+                                    )
+                                })
+                                .inner;
+                            if r.row_clicked {
+                                app.act();
+                                app.apps.group = g;
+                            }
+                        }
+                    });
             });
     });
     ui.scope_builder(egui::UiBuilder::new().max_rect(right), |ui| {
@@ -606,13 +618,22 @@ fn browse(app: &mut CleanApp, ui: &mut Ui) {
     });
 }
 
+/// Height of an app in the list.
+const APP_ROW_H: f32 = 58.0;
+
 fn apps_list(app: &mut CleanApp, ui: &mut Ui, h: f32) {
     let t = app.t;
     let rows = visible_apps(&app.apps, &app.settings);
     if rows.is_empty() {
-        ui.add_space(space::XL);
+        ui.add_space(space::XXL);
         ui.vertical_centered(|ui| {
-            ui.label(RichText::new("No apps here.").color(t.text_dim));
+            kit::badge(ui, t.sec_a, Icon::Search, 56.0);
+            ui.add_space(space::M);
+            ui.label(
+                RichText::new("No apps here.")
+                    .font(font(size::TITLE3, Weight::SemiBold))
+                    .color(t.text),
+            );
         });
         return;
     }
@@ -622,11 +643,11 @@ fn apps_list(app: &mut CleanApp, ui: &mut Ui, h: f32) {
         .id_salt("apps-list")
         .max_height(h)
         .auto_shrink([false, false])
-        .show_rows(ui, 56.0, rows.len(), |ui, range| {
+        .show_rows(ui, APP_ROW_H, rows.len(), |ui, range| {
             ui.spacing_mut().item_spacing.y = 0.0;
             for a in &rows[range] {
                 let w = ui.available_width();
-                let (r, resp) = ui.allocate_exact_size(vec2(w, 56.0), Sense::click());
+                let (r, resp) = ui.allocate_exact_size(vec2(w, APP_ROW_H), Sense::click());
                 resp.widget_info(|| {
                     egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &a.name)
                 });
@@ -642,22 +663,21 @@ fn apps_list(app: &mut CleanApp, ui: &mut Ui, h: f32) {
                         Color32::from_white_alpha((10.0 * hov) as u8),
                     );
                 }
-                let tile =
-                    Rect::from_center_size(pos2(r.left() + 28.0, r.center().y), vec2(38.0, 38.0));
-                kit::initial_tile(&p, tile, &a.name, kit::name_color(&a.name));
+                let tile = Rect::from_center_size(
+                    pos2(r.left() + 30.0, r.center().y),
+                    egui::Vec2::splat(crate::theme::icon::APP_ROW + 4.0),
+                );
+                kit::app_icon(ui, tile, &a.name, Some(&a.path));
                 let mut info = vec![];
                 if !a.version.is_empty() {
                     info.push(a.version.clone());
                 }
                 info.push(a.vendor.clone());
                 info.push(a.store.label().to_string());
-                info.push(format!(
-                    "Opened: {}",
-                    apps::last_used_text(a.last_used, now)
-                ));
+                info.push(apps::opened_text(a, now));
                 let info = info.join("  ·  ");
                 let size_text = human_size(a.size);
-                let size_font = font(13.5, Weight::SemiBold);
+                let size_font = font(size::BODY, Weight::SemiBold);
                 let size_w = kit::galley(ui, &size_text, size_font.clone(), t.text)
                     .size()
                     .x;
@@ -683,12 +703,12 @@ fn apps_list(app: &mut CleanApp, ui: &mut Ui, h: f32) {
                 );
                 let x0 = tile.right() + 12.0;
                 let text_w = (r.right() - 40.0 - size_w - x0).max(60.0);
-                let name_font = font(14.0, Weight::SemiBold);
+                let name_font = font(size::BODY, Weight::SemiBold);
                 let name_s = kit::truncate_middle(ui.ctx(), &a.name, &name_font, text_w - 120.0);
                 let name_w = kit::galley(ui, &name_s, name_font.clone(), t.text).size().x;
                 // Painted only: the row button carries the name.
                 p.text(
-                    pos2(x0, r.top() + 19.0),
+                    pos2(x0, r.top() + 20.0),
                     egui::Align2::LEFT_CENTER,
                     name_s,
                     name_font,
@@ -697,17 +717,17 @@ fn apps_list(app: &mut CleanApp, ui: &mut Ui, h: f32) {
                 if a.apple {
                     let tr = Rect::from_min_size(
                         pos2(x0 + name_w + 10.0, r.top() + 10.0),
-                        vec2(110.0, 18.0),
+                        vec2(120.0, 20.0),
                     );
                     kit::place(ui, tr, |ui| {
                         kit::tag(ui, "Part of macOS", t.warning);
                     });
                 }
-                let info_font = font(11.5, Weight::Regular);
+                let info_font = font(size::FOOTNOTE, Weight::Regular);
                 let info_s = kit::truncate_middle(ui.ctx(), &info, &info_font, text_w);
                 kit::text_at(
                     ui,
-                    Rect::from_min_size(pos2(x0, r.top() + 30.0), vec2(text_w, 18.0)),
+                    Rect::from_min_size(pos2(x0, r.top() + 31.0), vec2(text_w, 18.0)),
                     &info_s,
                     &info,
                     info_font,
@@ -726,7 +746,17 @@ fn files_list(app: &mut CleanApp, ui: &mut Ui, h: f32) {
     let t = app.t;
     let ids = visible_files(&app.apps);
     if ids.is_empty() {
-        ui.label(RichText::new("Nothing here.").color(t.text_dim));
+        ui.add_space(space::XXL);
+        ui.vertical_centered(|ui| {
+            kit::badge(ui, t.success, Icon::Check, 56.0);
+            ui.add_space(space::M);
+            ui.label(
+                RichText::new("Nothing here.")
+                    .font(font(size::TITLE3, Weight::SemiBold))
+                    .color(t.text),
+            );
+        });
+        ui.add_space(space::S);
     }
     if let Some(notes) = app.apps.extras.as_ref().map(|p| p.notes.clone()) {
         for n in notes {
@@ -741,6 +771,7 @@ fn files_list(app: &mut CleanApp, ui: &mut Ui, h: f32) {
         .id_salt("apps-files")
         .max_height(h - 20.0)
         .show_rows(ui, 44.0, ids.len(), |ui, range| {
+            ui.spacing_mut().item_spacing.y = 0.0;
             for &id in &ids[range] {
                 if let Some(on) = file_row(app, ui, &plan.items[id]) {
                     toggles.push((id, on));
@@ -762,10 +793,10 @@ fn file_row(app: &CleanApp, ui: &mut Ui, it: &cleancraft_core::Item) -> Option<b
     let t = app.t;
     let mut changed = None;
     let w = ui.available_width();
-    let (r, _) = ui.allocate_exact_size(vec2(w, 40.0), Sense::hover());
+    let (r, _) = ui.allocate_exact_size(vec2(w, 44.0), Sense::hover());
     let shown = app.env.display(&it.path);
     let mut on = it.selected;
-    let cb_rect = Rect::from_center_size(pos2(r.left() + 16.0, r.center().y), vec2(20.0, 20.0));
+    let cb_rect = Rect::from_center_size(pos2(r.left() + 18.0, r.center().y), vec2(22.0, 22.0));
     let cb = kit::place(ui, cb_rect, |ui| {
         ui.add_enabled_ui(toggle, |ui| kit::check(ui, &t, &mut on, &shown))
             .inner
@@ -773,10 +804,10 @@ fn file_row(app: &CleanApp, ui: &mut Ui, it: &cleancraft_core::Item) -> Option<b
     if cb.changed() {
         changed = Some(on);
     }
-    let ir = Rect::from_center_size(pos2(r.left() + 42.0, r.center().y), vec2(16.0, 16.0));
-    icons::paint(ui.painter(), ir, kit::kind_icon(&it.path), t.text_faint);
+    let ir = Rect::from_center_size(pos2(r.left() + 48.0, r.center().y), vec2(20.0, 20.0));
+    crate::images::paint_file_icon(ui, ir, &it.path, crate::file_icons::FileKind::of(&it.path));
     let size_text = human_size(it.size);
-    let size_font = font(13.0, Weight::SemiBold);
+    let size_font = font(size::BODY, Weight::SemiBold);
     let size_w = kit::galley(ui, &size_text, size_font.clone(), t.text)
         .size()
         .x;
@@ -796,11 +827,11 @@ fn file_row(app: &CleanApp, ui: &mut Ui, it: &cleancraft_core::Item) -> Option<b
         Some(l) => format!("{} ({l})", it.reason),
         None => super::plan_page::reason_text(it),
     };
-    let x0 = r.left() + 58.0;
+    let x0 = r.left() + 68.0;
     let avail = r.right() - size_w - 22.0 - x0;
     let why_w = (avail * 0.42).min(300.0);
     let path_w = avail - why_w - 10.0;
-    let pf = font(12.5, Weight::Regular);
+    let pf = font(size::CALLOUT, Weight::Regular);
     let path_s = kit::truncate_middle(ui.ctx(), &shown, &pf, path_w);
     // Painted only: the checkbox carries the path.
     ui.painter().text(
@@ -810,15 +841,16 @@ fn file_row(app: &CleanApp, ui: &mut Ui, it: &cleancraft_core::Item) -> Option<b
         pf,
         t.text,
     );
-    let wf = font(11.0, Weight::Regular);
-    let why_s = kit::truncate_middle(ui.ctx(), &why, &wf, why_w);
+    let wf = font(size::FOOTNOTE, Weight::Regular);
+    let why_s = kit::truncate_end(ui.ctx(), &why, &wf, why_w);
     kit::text_at(
         ui,
         Rect::from_min_size(pos2(x0 + path_w + 10.0, r.top()), vec2(why_w, r.height())),
         &why_s,
         &why,
         wf,
-        kit::risk_color(&t, it.risk),
+        // Reasons explain why a file belongs to the app; they are not warnings.
+        t.text_dim,
         Align::Max,
     );
     changed
@@ -835,13 +867,14 @@ fn files_bottom_bar(app: &mut CleanApp, ui: &mut Ui) {
     kit::bottom_bar(ui, &t, egui::Id::new("apps-files-bottom"), |ui| {
         ui.label(
             RichText::new(human_size(size))
-                .font(font(20.0, Weight::Bold))
+                .font(font(size::TITLE2, Weight::Bold))
                 .color(t.text),
         );
-        ui.label(
-            RichText::new(format!("{n} selected, {}", human_size(size)))
-                .font(font(12.5, Weight::Medium))
-                .color(t.text_dim),
+        kit::quiet_label(
+            ui,
+            &t,
+            &format!("{} selected", cleancraft_core::fsutil::items(n)),
+            &format!("{n} selected, {}", human_size(size)),
         );
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if n > 0 && kit::danger(ui, &t, "Remove Selected") {
@@ -874,7 +907,7 @@ fn detail(app: &mut CleanApp, ui: &mut Ui) {
         .find(|a| a.path == path)
         .cloned();
     let esc = matches!(app.apps.phase, Phase::Browse) && ui.input(|i| i.key_pressed(Key::Escape));
-    let back = kit::pill(ui, &t, "Back to Apps", kit::Kind::Ghost, Some(Icon::Undo)).clicked();
+    let back = kit::pill(ui, &t, "Back to Apps", kit::Kind::Ghost, Some(Icon::Back)).clicked();
     if esc || back {
         app.act();
         app.apps.selected = None;
@@ -891,14 +924,17 @@ fn detail(app: &mut CleanApp, ui: &mut Ui) {
         .unwrap_or_default();
     ui.add_space(space::S);
     ui.horizontal(|ui| {
-        let (r, _) = ui.allocate_exact_size(vec2(52.0, 52.0), Sense::hover());
-        kit::initial_tile(ui.painter(), r, &name, kit::name_color(&name));
-        ui.add_space(4.0);
+        let (r, _) = ui.allocate_exact_size(
+            egui::Vec2::splat(crate::theme::icon::APP_LARGE),
+            Sense::hover(),
+        );
+        kit::app_icon(ui, r, &name, Some(&path));
+        ui.add_space(space::S);
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 3.0;
             ui.label(
                 RichText::new(&name)
-                    .font(font(22.0, Weight::Bold))
+                    .font(font(size::TITLE, Weight::Bold))
                     .color(t.text),
             );
             if let Some(a) = &info {
@@ -906,7 +942,7 @@ fn detail(app: &mut CleanApp, ui: &mut Ui) {
                     ui,
                     &t,
                     &format!(
-                        "Version {}  ·  {}  ·  {}  ·  {}  ·  Opened: {}",
+                        "Version {}  ·  {}  ·  {}  ·  {}  ·  {}",
                         if a.version.is_empty() {
                             "?"
                         } else {
@@ -915,7 +951,7 @@ fn detail(app: &mut CleanApp, ui: &mut Ui) {
                         a.bundle_id,
                         a.vendor,
                         a.store.label(),
-                        apps::last_used_text(a.last_used, now())
+                        apps::opened_text(a, now())
                     ),
                 );
             }
@@ -923,7 +959,7 @@ fn detail(app: &mut CleanApp, ui: &mut Ui) {
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.label(
                 RichText::new(human_size(plan.total_size()))
-                    .font(font(26.0, Weight::Bold))
+                    .font(font(size::NUMBER, Weight::Bold))
                     .color(icons::lerp(t.sec_a, Color32::WHITE, 0.15)),
             );
         });
@@ -943,21 +979,28 @@ fn detail(app: &mut CleanApp, ui: &mut Ui) {
         .filter(|i| i.category != uninstaller::CAT_APP)
         .count();
     kit::bottom_bar(ui, &t, egui::Id::new("apps-detail-bottom"), |ui| {
-        ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing.y = 1.0;
-            ui.label(
-                RichText::new(format!(
-                    "{} selected, {}",
-                    plan.selected_count(),
-                    human_size(plan.selected_size())
-                ))
-                .font(font(14.0, Weight::SemiBold))
-                .color(t.text),
-            );
-            if !app_blocked && files_sel == 0 {
-                kit::dim(ui, &t, "Select files to reset the app.");
-            }
-        });
+        let hint = !app_blocked && files_sel == 0;
+        ui.allocate_ui_with_layout(
+            vec2(300.0, 44.0),
+            egui::Layout::top_down(Align::Min),
+            |ui| {
+                ui.spacing_mut().item_spacing.y = 1.0;
+                // Centred on the bar's line, with or without the hint under it.
+                ui.add_space(if hint { 2.0 } else { 12.0 });
+                ui.label(
+                    RichText::new(format!(
+                        "{} selected, {}",
+                        plan.selected_count(),
+                        human_size(plan.selected_size())
+                    ))
+                    .font(font(size::BODY, Weight::SemiBold))
+                    .color(t.text),
+                );
+                if hint {
+                    kit::dim(ui, &t, "Select files to reset the app.");
+                }
+            },
+        );
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             let un = ui.add_enabled_ui(!bundle_locked, |ui| kit::danger(ui, &t, "Uninstall"));
             if un.inner {
@@ -986,7 +1029,7 @@ fn detail(app: &mut CleanApp, ui: &mut Ui) {
                 rebuild_detail(app, Some(&plan));
             }
             if !app.settings.is_ignored(&path) {
-                let ig = kit::ghost(ui, &t, "Ignore", None);
+                let ig = kit::secondary_resp(ui, &t, "Ignore");
                 if ig
                     .on_hover_text("Never offer this app for removal (Settings > Ignore list)")
                     .clicked()
@@ -1031,7 +1074,7 @@ fn detail(app: &mut CleanApp, ui: &mut Ui) {
                                     c.title,
                                     human_size(plan.category_size(&c.id))
                                 ))
-                                .font(font(13.0, Weight::SemiBold))
+                                .font(font(size::BODY, Weight::SemiBold))
                                 .color(t.text),
                             )
                             .on_hover_text(&c.description);
@@ -1063,9 +1106,8 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, action: Action) {
         Method::Trash => "the Trash",
         Method::Quarantine | Method::AdminQuarantine => "the CleanCraft quarantine",
     };
-    let name = app
-        .apps
-        .selected
+    let selected = app.apps.selected.clone();
+    let name = selected
         .as_ref()
         .and_then(|p| p.file_stem())
         .map(|s| s.to_string_lossy().into_owned())
@@ -1088,18 +1130,24 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, action: Action) {
     let max_list = (ui.ctx().content_rect().height() - 330.0).clamp(120.0, 360.0);
     let resp = kit::modal(egui::Id::new("apps-confirm"), &t).show(ui.ctx(), |ui| {
         ui.set_width(width);
-        kit::dialog_head(
-            ui,
-            &t,
-            if action == Action::RemoveFiles {
-                Icon::Trash
-            } else {
-                Icon::Remover
-            },
-            t.sec_a,
-            &headline,
-            "These exact files will be moved. You can put them back from History.",
-        );
+        let sub = "These exact files will be moved. You can put them back from History.";
+        match (&selected, action) {
+            (Some(p), Action::Uninstall | Action::Reset) => {
+                crate::images::dialog_head_app(ui, &t, p, &headline, sub)
+            }
+            _ => kit::dialog_head(
+                ui,
+                &t,
+                if action == Action::RemoveFiles {
+                    Icon::Trash
+                } else {
+                    Icon::Remover
+                },
+                t.sec_a,
+                &headline,
+                sub,
+            ),
+        }
         ui.add_space(space::M);
         if let Some(note) =
             super::plan_page::admin_note(cleancraft_core::features::admin_count(&plan))
@@ -1170,48 +1218,55 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
         cleancraft_core::fsutil::items(rep.moved.len()),
         rep.skipped.len()
     );
-    super::plan_page::done_view(app, ui, &rep, &summary, |app, ui| {
-        let t = app.t;
-        if !rep.moved.is_empty()
-            && kit::pill(ui, &t, "Undo", kit::Kind::Secondary, Some(Icon::Undo)).clicked()
-        {
-            app.act();
-            let (n, errs) = executor::undo_plan(&app.env, &rep.plan_id);
-            if errs.is_empty() {
-                app.tell(format!("{} put back.", cleancraft_core::fsutil::items(n)));
-            } else {
-                app.warn(format!(
-                    "{} put back, {} could not be: {}",
-                    cleancraft_core::fsutil::items(n),
-                    errs.len(),
-                    errs[0].1
-                ));
+    super::plan_page::done_view(
+        app,
+        ui,
+        FeatureId::Uninstaller,
+        &rep,
+        &summary,
+        |app, ui| {
+            let t = app.t;
+            if !rep.moved.is_empty()
+                && kit::pill(ui, &t, "Undo", kit::Kind::Secondary, Some(Icon::Undo)).clicked()
+            {
+                app.act();
+                let (n, errs) = executor::undo_plan(&app.env, &rep.plan_id);
+                if errs.is_empty() {
+                    app.tell(format!("{} put back.", cleancraft_core::fsutil::items(n)));
+                } else {
+                    app.warn(format!(
+                        "{} put back, {} could not be: {}",
+                        cleancraft_core::fsutil::items(n),
+                        errs.len(),
+                        errs[0].1
+                    ));
+                }
+                app.apps.phase = Phase::Browse;
+                let old = app.apps.detail.clone();
+                rebuild_detail(app, old.as_ref());
+                start_load(app);
             }
-            app.apps.phase = Phase::Browse;
-            let old = app.apps.detail.clone();
-            rebuild_detail(app, old.as_ref());
-            start_load(app);
-        }
-        if kit::pill(
-            ui,
-            &t,
-            "Show History",
-            kit::Kind::Secondary,
-            Some(Icon::History),
-        )
-        .clicked()
-        {
-            app.act();
-            app.apps.phase = Phase::Browse;
-            app.navigate("history");
-        }
-        if kit::primary(ui, &t, "Done") {
-            app.act();
-            app.apps.phase = Phase::Browse;
-            let old = app.apps.detail.clone();
-            rebuild_detail(app, old.as_ref());
-        }
-    });
+            if kit::pill(
+                ui,
+                &t,
+                "Show History",
+                kit::Kind::Secondary,
+                Some(Icon::History),
+            )
+            .clicked()
+            {
+                app.act();
+                app.apps.phase = Phase::Browse;
+                app.navigate("history");
+            }
+            if kit::primary(ui, &t, "Done") {
+                app.act();
+                app.apps.phase = Phase::Browse;
+                let old = app.apps.detail.clone();
+                rebuild_detail(app, old.as_ref());
+            }
+        },
+    );
 }
 
 // ---------- updates ----------
@@ -1224,7 +1279,7 @@ fn updates_page(app: &mut CleanApp, ui: &mut Ui) {
         kit::progress(
             ui,
             &t,
-            Icon::Updates,
+            FeatureId::Updater,
             "Checking for updates",
             &format!("Checking {s}..."),
             secs,
@@ -1236,7 +1291,7 @@ fn updates_page(app: &mut CleanApp, ui: &mut Ui) {
         if kit::hero(
             ui,
             &t,
-            Icon::Updates,
+            FeatureId::Updater,
             FeatureId::Updater.title(),
             "Newer versions of your apps and of macOS. CleanCraft opens the right place to install them.",
             "Check for Updates",
@@ -1257,7 +1312,7 @@ fn updates_page(app: &mut CleanApp, ui: &mut Ui) {
                 1 => "1 update available".to_string(),
                 n => format!("{n} updates available"),
             })
-            .font(font(26.0, Weight::Bold))
+            .font(font(size::NUMBER, Weight::Bold))
             .color(icons::lerp(t.sec_a, Color32::WHITE, 0.15)),
         );
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -1278,88 +1333,132 @@ fn updates_page(app: &mut CleanApp, ui: &mut Ui) {
                 update_row(app, ui, u);
             }
             let failed: Vec<&UpdateInfo> = r.apps.iter().filter(|u| u.error.is_some()).collect();
-            if !failed.is_empty() {
-                ui.add_space(8.0);
-                ui.label(RichText::new("Could not check").font(font(14.0, Weight::SemiBold)));
-                for u in failed {
-                    ui.label(
-                        RichText::new(format!(
-                            "{}: {}",
-                            u.name,
-                            u.error.clone().unwrap_or_default()
-                        ))
-                        .color(t.warning),
-                    );
-                }
-            }
             let current: Vec<&UpdateInfo> = r
                 .apps
                 .iter()
                 .filter(|u| !u.available && u.error.is_none())
                 .collect();
-            if !current.is_empty() {
-                ui.add_space(8.0);
-                ui.label(RichText::new("Up to date").font(font(14.0, Weight::SemiBold)));
-                for u in current {
-                    kit::dim(
-                        ui,
-                        &t,
-                        &format!("{}  {}  ({})", u.name, u.installed, u.source.label()),
-                    );
-                }
-            }
-            if r.not_checked > 0 {
-                kit::dim(
-                    ui,
-                    &t,
-                    &format!(
-                        "{} apps have no update feed CleanCraft can read; they update themselves.",
-                        r.not_checked
-                    ),
-                );
-            }
-            ui.add_space(10.0);
-            ui.label(RichText::new("macOS").font(font(14.0, Weight::SemiBold)));
-            if let Some(e) = &r.macos_error {
-                ui.label(RichText::new(e).color(t.warning));
-            } else if r.macos.is_empty() {
-                kit::dim(ui, &t, "macOS is up to date.");
-            }
-            for m in &r.macos {
-                let mut line = format!("{}  {}", m.title, m.version);
-                if let Some(b) = m.size_bytes {
-                    line.push_str(&format!("  ·  {}", human_size(b)));
-                }
-                if m.restart {
-                    line.push_str("  ·  needs a restart");
-                }
-                ui.label(line);
-            }
-            if (!r.macos.is_empty() || r.macos_error.is_some())
-                && kit::secondary(ui, &t, "Open Software Update")
-            {
-                app.act();
-                if let Err(e) = updater::open_software_update(&app.env) {
-                    app.warn(format!("Could not open System Settings: {e}"));
-                }
-            }
+            ui.add_space(space::S);
+            // Two cards side by side: your apps that need nothing, and macOS.
+            ui.columns(2, |cols| {
+                // Columns are justified; text in a card is not.
+                cols[0].with_layout(egui::Layout::top_down(Align::Min), |ui| {
+                kit::card(&t).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    kit::card_head(ui, &t, Icon::Check, t.success, "Up to date");
+                    ui.add_space(space::XS);
+                    if current.is_empty() {
+                        kit::dim(ui, &t, "No other app was checked.");
+                    }
+                    for u in &current {
+                        kit::dim(
+                            ui,
+                            &t,
+                            &format!("{}  {}  ({})", u.name, u.installed, u.source.label()),
+                        );
+                    }
+                    if r.not_checked > 0 {
+                        ui.add_space(space::XS);
+                        kit::dim(
+                            ui,
+                            &t,
+                            &format!(
+                                "{} apps have no update feed CleanCraft can read; they update themselves.",
+                                r.not_checked
+                            ),
+                        );
+                    }
+                    if !failed.is_empty() {
+                        ui.add_space(space::S);
+                        ui.label(
+                            RichText::new("Could not check")
+                                .font(font(size::BODY, Weight::SemiBold)),
+                        );
+                        for u in &failed {
+                            ui.label(
+                                RichText::new(format!(
+                                    "{}: {}",
+                                    u.name,
+                                    u.error.clone().unwrap_or_default()
+                                ))
+                                .font(font(size::CALLOUT, Weight::Regular))
+                                .color(t.warning),
+                            );
+                        }
+                    }
+                });
+                });
+                // Columns are justified; text in a card is not.
+                cols[1].with_layout(egui::Layout::top_down(Align::Min), |ui| {
+                kit::card(&t).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    kit::card_head(ui, &t, Icon::Gear, t.sec_a, "macOS");
+                    ui.add_space(space::XS);
+                    if let Some(e) = &r.macos_error {
+                        ui.label(RichText::new(e).color(t.warning));
+                    } else if r.macos.is_empty() {
+                        kit::dim(ui, &t, "macOS is up to date.");
+                    }
+                    for m in &r.macos {
+                        // Shown: the title (with the version once) and the size, then a
+                        // restart tag. Announced: the whole line.
+                        let mut line = format!("{}  {}", m.title, m.version);
+                        let mut shown = if m.title.contains(&m.version) {
+                            m.title.clone()
+                        } else {
+                            format!("{}  {}", m.title, m.version)
+                        };
+                        if let Some(b) = m.size_bytes {
+                            line.push_str(&format!("  ·  {}", human_size(b)));
+                            shown.push_str(&format!("  ·  {}", human_size(b)));
+                        }
+                        if m.restart {
+                            line.push_str("  ·  needs a restart");
+                        }
+                        let fid = font(size::BODY, Weight::Regular);
+                        let w = kit::galley(ui, &shown, fid.clone(), t.text).size().x + 2.0;
+                        let (rr, _) = ui.allocate_exact_size(
+                            vec2(w.min(ui.available_width()), 20.0),
+                            Sense::hover(),
+                        );
+                        kit::text_at(ui, rr, &shown, &line, fid, t.text, Align::Min);
+                        if m.restart {
+                            kit::tag(ui, "Restart required", t.warning);
+                        }
+                    }
+                    if !r.macos.is_empty() || r.macos_error.is_some() {
+                        ui.add_space(space::XS);
+                        if kit::secondary(ui, &t, "Open Software Update") {
+                            app.act();
+                            if let Err(e) = updater::open_software_update(&app.env) {
+                                app.warn(format!("Could not open System Settings: {e}"));
+                            }
+                        }
+                    }
+                });
+                });
+            });
         });
 }
 
 fn update_row(app: &mut CleanApp, ui: &mut Ui, u: &UpdateInfo) {
     let t = app.t;
     kit::card(&t)
-        .inner_margin(egui::Margin::symmetric(14, 12))
+        .inner_margin(egui::Margin::symmetric(16, 14))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
-                let (r, _) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::hover());
-                kit::initial_tile(ui.painter(), r, &u.name, kit::name_color(&u.name));
+                let (r, _) = ui.allocate_exact_size(
+                    egui::Vec2::splat(crate::theme::icon::APP_ROW + 8.0),
+                    Sense::hover(),
+                );
+                kit::app_icon(ui, r, &u.name, Some(&u.app));
+                ui.add_space(space::XS);
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 2.0;
                     ui.label(
                         RichText::new(&u.name)
-                            .font(font(14.5, Weight::SemiBold))
+                            .font(font(size::TITLE3, Weight::SemiBold))
                             .color(t.text),
                     );
                     ui.horizontal(|ui| {
@@ -1369,7 +1468,7 @@ fn update_row(app: &mut CleanApp, ui: &mut Ui, u: &UpdateInfo) {
                                 u.installed,
                                 u.latest.clone().unwrap_or_default()
                             ))
-                            .font(font(12.0, Weight::Medium))
+                            .font(font(size::FOOTNOTE, Weight::Medium))
                             .color(icons::lerp(
                                 t.sec_a,
                                 Color32::WHITE,

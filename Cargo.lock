@@ -769,6 +769,7 @@ dependencies = [
  "craft-ui",
  "egui",
  "egui_kittest",
+ "image",
  "serde",
  "serde_json",
 ]
