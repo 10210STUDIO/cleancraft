@@ -19,4 +19,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
+# The app icon generator (examples/app_icon.rs) writes a PNG.
+image = { workspace = true }
 egui_kittest = { workspace = true, features = ["wgpu", "snapshot"] }
