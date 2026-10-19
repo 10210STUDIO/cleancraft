@@ -585,15 +585,15 @@ fn categories(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan) {
     }
 }
 
-struct CatResp {
-    row: egui::Response,
-    row_clicked: bool,
-    check_changed: Option<bool>,
+pub struct CatResp {
+    pub row: egui::Response,
+    pub row_clicked: bool,
+    pub check_changed: Option<bool>,
 }
 
 /// One category card: an optional checkbox, the title and size, the item count and a bar
 /// with the category's share of the total. The row's accessible name is `label`.
-fn category_row(
+pub fn category_row(
     ui: &mut Ui,
     t: &crate::theme::Tokens,
     label: &str,
@@ -606,7 +606,7 @@ fn category_row(
     check: Option<(bool, bool, String)>,
 ) -> CatResp {
     let w = ui.available_width();
-    let (r, resp) = ui.allocate_exact_size(vec2(w, 54.0), Sense::click());
+    let (r, resp) = ui.allocate_exact_size(vec2(w, 48.0), Sense::click());
     resp.widget_info(|| {
         egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, current, label)
     });
@@ -626,48 +626,46 @@ fn category_row(
     let mut x = r.left() + 10.0;
     let mut check_changed = None;
     if let Some((enabled, on, name)) = check {
-        let cb_rect = Rect::from_center_size(pos2(x + 9.0, r.top() + 18.0), vec2(20.0, 20.0));
+        let cb_rect = Rect::from_center_size(pos2(x + 9.0, r.top() + 16.0), vec2(20.0, 20.0));
         let mut v = on;
-        let cb = ui
-            .scope_builder(egui::UiBuilder::new().max_rect(cb_rect), |ui| {
-                ui.add_enabled_ui(enabled, |ui| kit::check(ui, t, &mut v, &name))
-                    .inner
-            })
-            .inner;
+        let cb = kit::place(ui, cb_rect, |ui| {
+            ui.add_enabled_ui(enabled, |ui| kit::check(ui, t, &mut v, &name))
+                .inner
+        });
         if cb.changed() {
             check_changed = Some(v);
         }
         x += 26.0;
     } else {
-        p.circle_filled(pos2(x + 9.0, r.top() + 18.0), 5.0, color);
+        p.circle_filled(pos2(x + 9.0, r.top() + 16.0), 5.0, color);
         x += 26.0;
     }
     let size_g = kit::galley(ui, size_text, font(13.0, Weight::SemiBold), t.text);
     let size_w = size_g.size().x;
     p.galley(
-        pos2(r.right() - 10.0 - size_w, r.top() + 18.0 - size_g.size().y / 2.0),
+        pos2(r.right() - 10.0 - size_w, r.top() + 16.0 - size_g.size().y / 2.0),
         size_g,
         t.text,
     );
     let title_w = r.right() - 18.0 - size_w - x;
     let title_s = kit::truncate_middle(ui.ctx(), title, &font(13.0, Weight::SemiBold), title_w);
     p.text(
-        pos2(x, r.top() + 18.0),
+        pos2(x, r.top() + 16.0),
         egui::Align2::LEFT_CENTER,
         title_s,
         font(13.0, Weight::SemiBold),
         if current { t.text } else { icons::lerp(t.text_dim, t.text, 0.5 + 0.5 * hov) },
     );
     p.text(
-        pos2(x, r.top() + 36.0),
+        pos2(x, r.top() + 33.0),
         egui::Align2::LEFT_CENTER,
         count_text,
         font(10.5, Weight::Regular),
         t.text_faint,
     );
     let bar = Rect::from_min_max(
-        pos2(x + 62.0, r.top() + 34.0),
-        pos2(r.right() - 10.0, r.top() + 38.0),
+        pos2(x + 62.0, r.top() + 31.0),
+        pos2(r.right() - 10.0, r.top() + 35.0),
     );
     kit::paint_bar(&p, bar, t, share, color);
     CatResp {
@@ -836,12 +834,10 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
     // Checkbox, named after the file.
     let cb_rect = Rect::from_center_size(pos2(r.left() + 16.0, r.center().y), vec2(20.0, 20.0));
     let mut on = selected_now;
-    let cb = ui
-        .scope_builder(egui::UiBuilder::new().max_rect(cb_rect), |ui| {
-            ui.add_enabled_ui(!locked, |ui| kit::check(ui, &t, &mut on, &name))
-                .inner
-        })
-        .inner;
+    let cb = kit::place(ui, cb_rect, |ui| {
+        ui.add_enabled_ui(!locked, |ui| kit::check(ui, &t, &mut on, &name))
+            .inner
+    });
     if cb.changed() {
         app.act();
         let every_copy = on
@@ -867,10 +863,10 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
     // Actions and size on the right.
     let right_w = 190.0;
     let actions = Rect::from_min_max(pos2(r.right() - right_w, r.top()), pos2(r.right() - 6.0, r.bottom()));
-    ui.scope_builder(
-        egui::UiBuilder::new()
-            .max_rect(actions)
-            .layout(Layout::right_to_left(Align::Center)),
+    kit::place_with(
+        ui,
+        actions,
+        Layout::right_to_left(Align::Center),
         |ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             let ig = kit::ghost(ui, &t, "Ignore", None)
@@ -912,14 +908,13 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
     let text_w = (r.right() - right_w - 8.0 - x0).max(60.0);
     let name_font = font(13.5, Weight::SemiBold);
     let name_s = kit::truncate_middle(ui.ctx(), &name, &name_font, text_w);
-    kit::text_at(
-        ui,
-        Rect::from_min_size(pos2(x0, r.top() + 6.0), vec2(text_w, 20.0)),
-        &name_s,
-        &name,
+    // Painted only: the checkbox already carries the name for VoiceOver.
+    p.text(
+        pos2(x0, r.top() + 16.0),
+        egui::Align2::LEFT_CENTER,
+        name_s,
         name_font,
         if locked { t.text_dim } else { t.text },
-        Align::Min,
     );
     let why = match &it.locked {
         Some(l) => format!("{} (cannot be selected: {l})", it.reason),
@@ -1092,66 +1087,77 @@ pub fn skipped_card(
     });
 }
 
-fn done(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
+/// The Done screen every cleanup shares: the check, how much moved and where, the summary
+/// line, the buttons (from the caller) and what did not move.
+pub fn done_view(
+    app: &mut CleanApp,
+    ui: &mut Ui,
+    rep: &Report,
+    summary: &str,
+    buttons: impl FnOnce(&mut CleanApp, &mut Ui),
+) {
     let t = app.t;
-    let Phase::Done(rep) = &app.plan_state(f).phase else {
-        return;
-    };
-    let rep = rep.clone();
     let started = kit::first_seen(ui, ("done", &rep.plan_id));
-    let id = egui::Id::new(("done-block", f.as_str()));
+    let id = egui::Id::new(("done-block", &rep.plan_id));
     kit::centered_block(ui, id, |ui| {
         let d = if ui.available_height() < 420.0 { 84.0 } else { 116.0 };
         kit::done_check(ui, &t, d, started);
         ui.add_space(space::M);
         ui.label(
-            RichText::new(features::moved_text([&rep]))
+            RichText::new(features::moved_text([rep]))
                 .font(font(30.0, Weight::Bold))
                 .color(t.text),
         );
         if !rep.moved.is_empty() {
             kit::dim(ui, &t, cleancraft_core::features::SPACE_NOTE);
         }
-        ui.label(
-            RichText::new(format!(
-                "{} moved. {} skipped.",
-                cleancraft_core::fsutil::items(rep.moved.len()),
-                rep.skipped.len()
-            ))
-            .color(t.text_dim),
-        );
+        ui.label(RichText::new(summary).color(t.text_dim));
         ui.add_space(space::L);
-        kit::centered_row(ui, id.with("buttons"), |ui| {
-            if !rep.moved.is_empty()
-                && kit::pill(ui, &t, "Undo", kit::Kind::Secondary, Some(Icon::Undo)).clicked()
-            {
-                app.act();
-                let (n, errs) = executor::undo_plan(&app.env, &rep.plan_id);
-                if errs.is_empty() {
-                    app.tell(format!("{} put back.", cleancraft_core::fsutil::items(n)));
-                } else {
-                    app.warn(format!(
-                        "{} put back, {} could not be: {}",
-                        cleancraft_core::fsutil::items(n),
-                        errs.len(),
-                        errs[0].1
-                    ));
-                }
-                start_scan(app, f);
-            }
-            if kit::pill(ui, &t, "Show History", kit::Kind::Secondary, Some(Icon::History)).clicked() {
-                app.act();
-                app.navigate("history");
-            }
-            if kit::primary(ui, &t, "Done") {
-                app.act();
-                let st = app.plan_state(f);
-                st.phase = Phase::Idle;
-                st.plan = None;
-            }
-        });
+        kit::centered_row(ui, id.with("buttons"), |ui| buttons(app, ui));
         ui.add_space(space::L);
         let h = ui.available_height() - 80.0;
         skipped_card(ui, &t, &app.env, &rep.skipped, h);
+    });
+}
+
+fn done(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
+    let Phase::Done(rep) = &app.plan_state(f).phase else {
+        return;
+    };
+    let rep = rep.clone();
+    let summary = format!(
+        "{} moved. {} skipped.",
+        cleancraft_core::fsutil::items(rep.moved.len()),
+        rep.skipped.len()
+    );
+    done_view(app, ui, &rep, &summary, |app, ui| {
+        let t = app.t;
+        if !rep.moved.is_empty()
+            && kit::pill(ui, &t, "Undo", kit::Kind::Secondary, Some(Icon::Undo)).clicked()
+        {
+            app.act();
+            let (n, errs) = executor::undo_plan(&app.env, &rep.plan_id);
+            if errs.is_empty() {
+                app.tell(format!("{} put back.", cleancraft_core::fsutil::items(n)));
+            } else {
+                app.warn(format!(
+                    "{} put back, {} could not be: {}",
+                    cleancraft_core::fsutil::items(n),
+                    errs.len(),
+                    errs[0].1
+                ));
+            }
+            start_scan(app, f);
+        }
+        if kit::pill(ui, &t, "Show History", kit::Kind::Secondary, Some(Icon::History)).clicked() {
+            app.act();
+            app.navigate("history");
+        }
+        if kit::primary(ui, &t, "Done") {
+            app.act();
+            let st = app.plan_state(f);
+            st.phase = Phase::Idle;
+            st.plan = None;
+        }
     });
 }

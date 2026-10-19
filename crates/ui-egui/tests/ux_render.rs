@@ -21,7 +21,7 @@ use cleancraft_ui_egui::CleanApp;
 use cleancraft_ui_egui::jobs::Job;
 use cleancraft_ui_egui::pages::{plan_page, sweep};
 use egui::epaint::Shape;
-use egui_kittest::kittest::{NodeT, Queryable};
+use egui_kittest::kittest::Queryable;
 
 type H = egui_kittest::Harness<'static, CleanApp>;
 
@@ -404,7 +404,8 @@ fn missing_glyphs(h: &H, inter: &egui::Context) -> Vec<String> {
                 if c.is_whitespace() || c.is_control() {
                     continue;
                 }
-                if !f.has_glyph(&fid, c) {
+                // Inter's own character map (has_glyph would count the fallback box).
+                if !f.fonts.font(&fid.family).characters().contains_key(&c) {
                     bad.push(format!("{c:?} (U+{:04X}) in {text:?}", c as u32));
                 }
             }
@@ -417,24 +418,47 @@ fn missing_glyphs(h: &H, inter: &egui::Context) -> Vec<String> {
 fn inter_only() -> egui::Context {
     let ctx = egui::Context::default();
     ctx.set_fonts(cleancraft_ui_egui::theme::inter_only_fonts());
-    let _ = ctx.run_ui(Default::default(), |_| {});
+    // Fonts set now are used from the next pass.
+    for _ in 0..2 {
+        let mut out = ctx.run_ui(Default::default(), |_| {});
+        out.textures_delta.clear();
+    }
     ctx
 }
 
-/// Controls and text that stick out of the window.
+/// Text the window edge cuts off: the visible part of a text (inside its clip rectangle, so
+/// rows scrolled out of a list do not count) that reaches past the window. Also text cut on
+/// the left or right by its own clip rectangle (nothing scrolls sideways, so that is always
+/// a layout bug).
 fn outside(h: &H, w: f32, hgt: f32) -> Vec<String> {
+    fn walk(s: &Shape, clip: egui::Rect, w: f32, hgt: f32, out: &mut Vec<String>) {
+        match s {
+            Shape::Vec(v) => v.iter().for_each(|x| walk(x, clip, w, hgt, out)),
+            Shape::Text(t) => {
+                let vis = s.visual_bounding_rect().intersect(clip);
+                if vis.is_positive()
+                    && (vis.min.x < -0.5 || vis.min.y < -0.5 || vis.max.x > w + 0.5 || vis.max.y > hgt + 0.5)
+                {
+                    out.push(format!("{:?} at {vis:?}", t.galley.job.text));
+                }
+                let full = s.visual_bounding_rect();
+                let rows_visible = full.y_range().intersects(clip.y_range());
+                if vis.is_positive()
+                    && rows_visible
+                    && (full.min.x < clip.min.x - 1.0 || full.max.x > clip.max.x + 1.0)
+                {
+                    out.push(format!(
+                        "{:?} cut sideways: text {full:?}, clip {clip:?}",
+                        t.galley.job.text
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
     let mut bad = Vec::new();
-    for n in h.query_all_by(|_| true) {
-        let Some(label) = n.accesskit_node().label().or(n.accesskit_node().value()) else {
-            continue;
-        };
-        let r = n.rect();
-        if r.width() <= 0.0 || r.height() <= 0.0 {
-            continue;
-        }
-        if r.min.x < -0.5 || r.min.y < -0.5 || r.max.x > w + 0.5 || r.max.y > hgt + 0.5 {
-            bad.push(format!("{label:?} at {r:?}"));
-        }
+    for cs in &h.output().shapes {
+        walk(&cs.shape, cs.clip_rect, w, hgt, &mut bad);
     }
     bad
 }
@@ -454,6 +478,17 @@ fn no_page_uses_a_glyph_inter_cannot_draw_and_nothing_leaves_the_window() {
             for o in outside(&h, w, hgt) {
                 problems.push(format!("{} at {w}x{hgt}: outside the window: {o}", s.name));
             }
+            // Every sidebar entry is fully visible without scrolling.
+            let mut names: Vec<&str> = FeatureId::ALL.iter().map(|f| f.title()).collect();
+            names.extend(["History", "Settings"]);
+            for n in names {
+                if let Some(node) = h.query_all_by_label(n).next() {
+                    let r = node.rect();
+                    if r.max.y > hgt + 0.5 {
+                        problems.push(format!("{} at {w}x{hgt}: sidebar row {n} at {r:?}", s.name));
+                    }
+                }
+            }
         }
     }
     assert!(problems.is_empty(), "{}", problems.join("\n"));
@@ -463,7 +498,7 @@ fn no_page_uses_a_glyph_inter_cannot_draw_and_nothing_leaves_the_window() {
 fn module_icons_are_shapes_not_text() {
     // Painting an icon never adds text.
     let ctx = egui::Context::default();
-    let out = ctx.run_ui(Default::default(), |ui| {
+    let mut out = ctx.run_ui(Default::default(), |ui| {
         let t = cleancraft_ui_egui::theme::Tokens::dark();
         for f in FeatureId::ALL {
             let (icon, color) = cleancraft_ui_egui::kit::feature_look(&t, f);
@@ -474,6 +509,7 @@ fn module_icons_are_shapes_not_text() {
             cleancraft_ui_egui::icons::paint(ui.painter(), r, icon, egui::Color32::WHITE);
         }
     });
+    out.textures_delta.clear();
     let mut n_text = 0;
     let mut n_shapes = 0;
     for cs in &out.shapes {

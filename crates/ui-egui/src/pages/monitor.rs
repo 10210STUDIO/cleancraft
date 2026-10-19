@@ -10,12 +10,13 @@ use cleancraft_core::fsutil::{human_size, memory_size};
 use cleancraft_core::monitor::{
     self, BatteryReading, PurgeOutcome, Sampler, Snapshot, UNKNOWN, pct, rate_text, uptime_text,
 };
-use egui::{Color32, RichText, Sense, Stroke, Ui, vec2};
+use egui::{Color32, RichText, Sense, Ui, vec2};
 
 use crate::app::{CleanApp, Page};
+use crate::icons::{self, Icon};
 use crate::jobs::Job;
 use crate::kit;
-use crate::theme::{Weight, font};
+use crate::theme::{Weight, font, space};
 
 pub struct State {
     job: Option<Job<(Sampler, Snapshot)>>,
@@ -109,118 +110,138 @@ pub fn poll(app: &mut CleanApp) -> bool {
 
 pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     let t = app.t;
-    let (glyph, color) = kit::feature_look(&t, f);
-    ui.horizontal(|ui| {
-        kit::badge(ui, color, glyph, 44.0);
-        ui.vertical(|ui| {
-            kit::title(ui, &t, f.title());
-            kit::subtitle(
-                ui,
-                &t,
-                "What your Mac is doing right now. Updated every two seconds.",
-            );
-        });
-    });
+    let (icon, _) = kit::feature_look(&t, f);
+    kit::header(
+        ui,
+        &t,
+        icon,
+        f.title(),
+        "What your Mac is doing right now. Updated every two seconds.",
+    );
     ui.ctx().request_repaint_after(app.monitor.interval);
-    ui.add_space(10.0);
     let Some(snap) = app.monitor.last.clone() else {
-        ui.horizontal(|ui| {
-            ui.spinner();
-            ui.label("Reading...");
-        });
+        kit::progress(ui, &t, icon, "Reading...", "", 0, false);
         return;
     };
-    for a in monitor::alerts(&snap) {
-        egui::Frame::new()
-            .fill(t.warning.gamma_multiply(0.15))
-            .stroke(Stroke::new(1.0, t.warning))
-            .corner_radius(8)
-            .inner_margin(8)
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.label(RichText::new(a.text).color(t.text));
+    egui::ScrollArea::vertical()
+        .id_salt("monitor")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            for a in monitor::alerts(&snap) {
+                kit::strip(ui, Icon::Warning, t.warning, &a.text);
+                ui.add_space(4.0);
+            }
+            ui.add_space(2.0);
+            ui.spacing_mut().item_spacing.x = space::M;
+            ui.columns(3, |cols| {
+                cpu_card(app, &mut cols[0], &snap);
+                memory_card(app, &mut cols[1], &snap);
+                storage_card(app, &mut cols[2], &snap);
             });
-        ui.add_space(4.0);
-    }
-    ui.add_space(6.0);
-    ui.columns(3, |cols| {
-        cpu_card(app, &mut cols[0], &snap);
-        memory_card(app, &mut cols[1], &snap);
-        storage_card(app, &mut cols[2], &snap);
-    });
-    ui.add_space(10.0);
-    ui.columns(3, |cols| {
-        battery_card(app, &mut cols[0], &snap);
-        network_card(app, &mut cols[1], &snap);
-    });
-    if !snap.problems.is_empty() {
-        ui.add_space(8.0);
-        kit::dim(ui, &t, &format!("Not read: {}", snap.problems.join("; ")));
-    }
+            ui.add_space(space::M);
+            ui.columns(3, |cols| {
+                battery_card(app, &mut cols[0], &snap);
+                network_card(app, &mut cols[1], &snap);
+            });
+            if !snap.problems.is_empty() {
+                ui.add_space(8.0);
+                kit::dim(ui, &t, &format!("Not read: {}", snap.problems.join("; ")));
+            }
+            ui.add_space(space::M);
+        });
     if app.monitor.confirm_purge {
         confirm_purge(app, ui);
     }
 }
 
-fn card(app: &CleanApp, ui: &mut Ui, title: &str, add: impl FnOnce(&mut Ui)) {
+fn card(app: &CleanApp, ui: &mut Ui, icon: Icon, title: &str, add: impl FnOnce(&mut Ui)) {
     let t = app.t;
     kit::card(&t).show(ui, |ui| {
         ui.set_width(ui.available_width());
-        ui.label(
-            RichText::new(title)
-                .font(font(12.0, Weight::SemiBold))
-                .color(t.text_faint),
-        );
+        ui.spacing_mut().item_spacing.y = 6.0;
+        ui.horizontal(|ui| {
+            let (r, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
+            icons::paint(ui.painter(), r, icon, t.sec_a);
+            ui.label(
+                RichText::new(title)
+                    .font(font(11.0, Weight::SemiBold))
+                    .color(t.text_faint),
+            );
+        });
         add(ui);
     });
 }
 
 fn big(app: &CleanApp, ui: &mut Ui, text: &str) {
-    ui.label(
-        RichText::new(text)
-            .font(font(26.0, Weight::Bold))
-            .color(app.t.text),
+    ui.add(
+        egui::Label::new(
+            RichText::new(text)
+                .font(font(24.0, Weight::Bold))
+                .color(app.t.text),
+        )
+        .truncate(),
     );
+}
+
+/// A big value with a semicircle gauge on its left.
+fn gauge_big(app: &CleanApp, ui: &mut Ui, frac: f32, color: Color32, text: &str) {
+    ui.horizontal(|ui| {
+        let (r, _) = ui.allocate_exact_size(vec2(64.0, 40.0), Sense::hover());
+        kit::gauge(ui.painter(), r.center_bottom() - vec2(0.0, 4.0), 27.0, frac, color);
+        ui.vertical(|ui| {
+            ui.add_space(4.0);
+            big(app, ui, text);
+        });
+    });
 }
 
 /// A label pair on one line: name on the left, value on the right.
 fn row(app: &CleanApp, ui: &mut Ui, name: &str, value: &str) {
     ui.horizontal(|ui| {
-        ui.label(RichText::new(name).color(app.t.text_dim));
+        ui.add(
+            egui::Label::new(
+                RichText::new(name)
+                    .font(font(12.5, Weight::Regular))
+                    .color(app.t.text_dim),
+            )
+            .truncate(),
+        );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(RichText::new(value).color(app.t.text));
+            ui.label(
+                RichText::new(value)
+                    .font(font(12.5, Weight::Medium))
+                    .color(app.t.text),
+            );
         });
     });
 }
 
-fn sparkline(ui: &mut Ui, values: &[f64], color: Color32, well: Color32) {
-    let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 36.0), Sense::hover());
-    let p = ui.painter();
-    p.rect_filled(r, 4, well);
-    if values.len() < 2 {
-        return;
+fn sparkline(ui: &mut Ui, values: &[f64], color: Color32) {
+    let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 46.0), Sense::hover());
+    kit::sparkline(ui.painter(), r, values, monitor::CPU_HISTORY, color);
+}
+
+/// Warm colours as a value nears its limit.
+fn level_color(app: &CleanApp, frac: f32) -> Color32 {
+    let t = app.t;
+    if frac > 0.9 {
+        t.danger
+    } else if frac > 0.75 {
+        t.warning
+    } else {
+        t.sec_a
     }
-    let n = monitor::CPU_HISTORY.max(values.len()) as f32;
-    let start = n - values.len() as f32;
-    let pts: Vec<egui::Pos2> = values
-        .iter()
-        .enumerate()
-        .map(|(i, v)| {
-            let x = r.left() + (start + i as f32) / (n - 1.0) * r.width();
-            let y = r.bottom() - (*v as f32 / 100.0).clamp(0.0, 1.0) * (r.height() - 2.0) - 1.0;
-            egui::pos2(x, y)
-        })
-        .collect();
-    p.add(egui::Shape::line(pts, Stroke::new(1.5, color)));
 }
 
 fn cpu_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
     let t = app.t;
     let history = app.monitor.history.clone();
-    card(app, ui, "CPU", |ui| match &s.cpu {
+    let _ = t;
+    card(app, ui, Icon::Monitor, "CPU", |ui| match &s.cpu {
         Some(c) => {
-            big(app, ui, &pct(c.load));
-            sparkline(ui, &history, t.accent, t.well);
+            let frac = (c.load / 100.0) as f32;
+            gauge_big(app, ui, frac, level_color(app, frac), &pct(c.load));
+            sparkline(ui, &history, app.t.sec_a);
             if let Some(l) = c.load_avg {
                 row(
                     app,
@@ -260,7 +281,7 @@ fn memory_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
     let t = app.t;
     let mut purge = false;
     let running = app.monitor.purge.is_some();
-    card(app, ui, "MEMORY", |ui| {
+    card(app, ui, Icon::Gear, "MEMORY", |ui| {
         match &s.memory {
             Some(m) => {
                 big(
@@ -270,13 +291,7 @@ fn memory_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
                 );
                 let frac = m.used_fraction() as f32;
                 let w = ui.available_width();
-                kit::bar(
-                    ui,
-                    &t,
-                    frac,
-                    if frac > 0.9 { t.warning } else { t.accent },
-                    w,
-                );
+                kit::bar(ui, &t, frac, level_color(app, frac), w);
                 row(app, ui, "Available", &memory_size(m.available()));
                 row(
                     app,
@@ -302,9 +317,12 @@ fn memory_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
         ui.add_space(6.0);
         if running {
             ui.horizontal(|ui| {
-                ui.spinner();
+                let (r, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
+                let time = ui.input(|i| i.time);
+                kit::progress_ring(ui.painter(), r.center(), 14.0, &t, time);
                 ui.label("Freeing memory...");
             });
+            ui.ctx().request_repaint();
         } else if kit::secondary(ui, &t, "Free Up RAM") {
             purge = true;
         }
@@ -318,20 +336,14 @@ fn memory_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
 fn storage_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
     let t = app.t;
     let mut go = false;
-    card(app, ui, "STORAGE", |ui| {
+    card(app, ui, Icon::DiskMap, "STORAGE", |ui| {
         let st = &s.storage;
         match (st.free, st.total) {
             (Some(free), Some(total)) => {
                 big(app, ui, &format!("{} free", human_size(free)));
                 let w = ui.available_width();
                 let used = 1.0 - free as f32 / total.max(1) as f32;
-                kit::bar(
-                    ui,
-                    &t,
-                    used,
-                    if used > 0.9 { t.warning } else { t.accent },
-                    w,
-                );
+                kit::bar(ui, &t, used, level_color(app, used), w);
                 row(app, ui, "Disk size", &human_size(total));
             }
             _ => big(app, ui, UNKNOWN),
@@ -357,9 +369,11 @@ fn storage_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
 }
 
 fn battery_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
-    card(app, ui, "BATTERY", |ui| match &s.battery {
+    card(app, ui, Icon::Startup, "BATTERY", |ui| match &s.battery {
         Some(BatteryReading::Present(b)) => {
-            big(app, ui, &format!("{}%", b.percent));
+            let frac = b.percent as f32 / 100.0;
+            let color = if frac < 0.2 { app.t.danger } else { app.t.success };
+            gauge_big(app, ui, frac, color, &format!("{}%", b.percent));
             row(app, ui, "State", &b.state);
             row(
                 app,
@@ -400,16 +414,19 @@ fn network_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
             .problems
             .iter()
             .any(|p| p.contains("netstat") || p.contains("network"));
-    card(app, ui, "NETWORK", |ui| match s.network {
+    card(app, ui, Icon::Updates, "NETWORK", |ui| match s.network {
         Some(n) => {
             row(app, ui, "Download", &rate_text(n.down));
             row(app, ui, "Upload", &rate_text(n.up));
         }
         None if measuring => {
             ui.horizontal(|ui| {
-                ui.spinner();
+                let (r, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
+                let time = ui.input(|i| i.time);
+                kit::progress_ring(ui.painter(), r.center(), 14.0, &app.t, time);
                 ui.label("Measuring speed...");
             });
+            ui.ctx().request_repaint();
         }
         None => big(app, ui, UNKNOWN),
     });
@@ -419,15 +436,19 @@ fn confirm_purge(app: &mut CleanApp, ui: &mut Ui) {
     let t = app.t;
     let mut go = false;
     let mut close = false;
-    egui::Modal::new(egui::Id::new("confirm-purge")).show(ui.ctx(), |ui| {
-        ui.set_width(460.0);
-        ui.label(RichText::new("Free up memory?").font(font(18.0, Weight::Bold)));
-        ui.label(
+    kit::modal(egui::Id::new("confirm-purge"), &t).show(ui.ctx(), |ui| {
+        ui.set_width(480.0);
+        kit::dialog_head(
+            ui,
+            &t,
+            Icon::Gear,
+            t.sec_a,
+            "Free up memory?",
             "CleanCraft runs the macOS purge command, which clears memory used as disk cache. \
              macOS asks for an administrator password. Apps may feel slower for a moment.",
         );
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
+        ui.add_space(space::L);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if kit::primary(ui, &t, "Free Up RAM Now") {
                 go = true;
             }

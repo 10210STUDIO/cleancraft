@@ -363,6 +363,8 @@ pub fn apply(ctx: &egui::Context, t: &Tokens) {
     visuals.window_corner_radius = CornerRadius::same(radius::XL);
     visuals.menu_corner_radius = CornerRadius::same(radius::M);
     visuals.window_shadow = float_shadow();
+    visuals.slider_trailing_fill = true;
+    visuals.handle_shape = egui::style::HandleShape::Circle;
     visuals.popup_shadow = card_shadow();
     visuals.override_text_color = Some(t.text);
     WidgetPalette {

@@ -175,41 +175,65 @@ fn start(app: &mut CleanApp, a: Action) {
 
 /// A small button whose accessible name says which item it acts on.
 fn row_button(ui: &mut Ui, text: &str, name: String) -> bool {
-    let r = ui.small_button(text);
+    let t = crate::theme::Tokens::dark();
+    let r = kit::ghost(ui, &t, text, None);
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name.clone()));
     r.clicked()
 }
 
-pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
-    let t = app.t;
-    let (glyph, color) = kit::feature_look(&t, f);
-    ui.horizontal(|ui| {
-        kit::badge(ui, color, glyph, 44.0);
-        ui.vertical(|ui| {
-            kit::title(ui, &t, f.title());
-            kit::subtitle(
-                ui,
-                &t,
-                "What opens when you log in, what runs in the background, and the apps working hardest right now.",
-            );
+/// On or Off, as a coloured tag.
+fn state_tag(ui: &mut Ui, t: &crate::theme::Tokens, on: bool) {
+    if on {
+        kit::tag(ui, "On", t.success);
+    } else {
+        kit::tag(ui, "Off", t.text_faint);
+    }
+}
+
+/// Lay out a row: `right` first (from the right edge), then `left` in what is left, so long
+/// texts are cut short instead of running under the buttons.
+fn split_row(ui: &mut Ui, left: impl FnOnce(&mut Ui), right: impl FnOnce(&mut Ui)) {
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        right(ui);
+        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            left(ui);
         });
     });
-    ui.add_space(8.0);
+}
+
+fn short(ui: &mut Ui, text: &str, size: f32, w: Weight, color: egui::Color32) {
+    ui.add(
+        egui::Label::new(RichText::new(text).font(font(size, w)).color(color)).truncate(),
+    );
+}
+
+pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
+    let t = app.t;
+    let (icon, _) = kit::feature_look(&t, f);
+    kit::header(
+        ui,
+        &t,
+        icon,
+        f.title(),
+        "What opens when you log in, what runs in the background, and the apps working hardest right now.",
+    );
     if app.startup.data.is_none() && app.startup.loading.is_none() {
         reload(app);
     }
     if app.startup.busy.is_some() {
-        ui.horizontal(|ui| {
-            ui.spinner();
-            ui.label("Working... macOS may ask for your password.");
-        });
+        kit::progress(
+            ui,
+            &t,
+            icon,
+            "Working... macOS may ask for your password.",
+            "",
+            0,
+            false,
+        );
         return;
     }
     let Some(data) = app.startup.data.clone() else {
-        ui.horizontal(|ui| {
-            ui.spinner();
-            ui.label("Reading startup items...");
-        });
+        kit::progress(ui, &t, icon, "Reading startup items...", "", 0, false);
         return;
     };
     ui.horizontal(|ui| {
@@ -217,7 +241,8 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             + data.login.as_ref().map(|l| l.len()).unwrap_or(0);
         ui.label(
             RichText::new(format!("{n_on} items start automatically"))
-                .font(font(15.0, Weight::SemiBold)),
+                .font(font(20.0, Weight::Bold))
+                .color(t.text),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if kit::secondary(ui, &t, "Refresh") {
@@ -248,10 +273,14 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
 }
 
 fn section(ui: &mut Ui, t: &crate::theme::Tokens, title: &str, desc: &str) {
-    ui.add_space(10.0);
-    ui.label(RichText::new(title).font(font(16.0, Weight::Bold)));
+    ui.add_space(14.0);
+    ui.label(
+        RichText::new(title)
+            .font(font(15.0, Weight::Bold))
+            .color(t.text),
+    );
     kit::dim(ui, t, desc);
-    ui.add_space(4.0);
+    ui.add_space(6.0);
 }
 
 fn login_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot) {
@@ -274,28 +303,50 @@ fn login_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot) {
             Ok(list) => {
                 for it in list {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(&it.name).font(font(13.5, Weight::SemiBold)));
-                        kit::dim(ui, &t, it.path.as_deref().unwrap_or("location unknown"));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if row_button(ui, "Turn Off", format!("Turn Off {}", it.name)) {
-                                app.act();
-                                start(app, Action::RemoveLogin(it.clone()));
-                            }
-                            ui.label(RichText::new("On").color(t.success));
-                        });
+                        ui.set_height(34.0);
+                        split_row(
+                            ui,
+                            |ui| {
+                                let (r, _) = ui.allocate_exact_size(egui::vec2(28.0, 28.0), egui::Sense::hover());
+                                kit::initial_tile(ui.painter(), r, &it.name, kit::name_color(&it.name));
+                                short(ui, &it.name, 13.5, Weight::SemiBold, t.text);
+                                short(
+                                    ui,
+                                    it.path.as_deref().unwrap_or("location unknown"),
+                                    11.5,
+                                    Weight::Regular,
+                                    t.text_faint,
+                                );
+                            },
+                            |ui| {
+                                if row_button(ui, "Turn Off", format!("Turn Off {}", it.name)) {
+                                    app.act();
+                                    start(app, Action::RemoveLogin(it.clone()));
+                                }
+                                state_tag(ui, &t, true);
+                            },
+                        );
                     });
                 }
                 for (id, it) in &data.removed_login {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(&it.name).font(font(13.5, Weight::SemiBold)));
-                        kit::dim(ui, &t, it.path.as_deref().unwrap_or(""));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if row_button(ui, "Turn On", format!("Turn On {}", it.name)) {
-                                app.act();
-                                start(app, Action::RestoreLogin(id.clone(), it.name.clone()));
-                            }
-                            ui.label(RichText::new("Off").color(t.text_faint));
-                        });
+                        ui.set_height(34.0);
+                        split_row(
+                            ui,
+                            |ui| {
+                                let (r, _) = ui.allocate_exact_size(egui::vec2(28.0, 28.0), egui::Sense::hover());
+                                kit::initial_tile(ui.painter(), r, &it.name, egui::Color32::from_gray(90));
+                                short(ui, &it.name, 13.5, Weight::SemiBold, t.text_dim);
+                                short(ui, it.path.as_deref().unwrap_or(""), 11.5, Weight::Regular, t.text_faint);
+                            },
+                            |ui| {
+                                if row_button(ui, "Turn On", format!("Turn On {}", it.name)) {
+                                    app.act();
+                                    start(app, Action::RestoreLogin(id.clone(), it.name.clone()));
+                                }
+                                state_tag(ui, &t, false);
+                            },
+                        );
                     });
                 }
             }
@@ -313,56 +364,68 @@ fn launch_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot, d: Domain) {
         if items.is_empty() {
             ui.label("None.");
         }
-        for it in items {
+        let n = items.len();
+        for (k, it) in items.into_iter().enumerate() {
             ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.label(RichText::new(&it.label).font(font(13.5, Weight::SemiBold)));
-                    let prog = it.program.as_deref().unwrap_or("no program named");
-                    kit::dim(ui, &t, &format!("Runs {prog}"));
-                    let (sig, col) = if !it.program_exists && it.program.is_some() {
-                        (
-                            "Program missing: this item does nothing".to_string(),
-                            t.warning,
-                        )
-                    } else if it.signer.is_weak() {
-                        (it.signer.label(), t.danger)
-                    } else {
-                        (it.signer.label(), t.text_dim)
-                    };
-                    ui.label(RichText::new(sig).size(11.5).color(col));
-                    if let Some(p) = &it.problem {
-                        ui.label(RichText::new(p).size(11.5).color(t.warning));
-                    }
-                });
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if it.apple {
-                        kit::dim(ui, &t, "Part of macOS");
-                        return;
-                    }
-                    if removable && row_button(ui, "Remove", format!("Remove {}", it.label)) {
-                        app.act();
-                        open_remove(app, it);
-                    }
-                    let (text, on) = if it.enabled {
-                        ("Turn Off", false)
-                    } else {
-                        ("Turn On", true)
-                    };
-                    if row_button(ui, text, format!("{text} {}", it.label)) {
-                        app.act();
-                        start(app, Action::Launch(it.clone(), on));
-                    }
-                    if it.enabled {
-                        ui.label(RichText::new("On").color(t.success));
-                    } else {
-                        ui.label(RichText::new("Off").color(t.text_faint));
-                    }
-                    if d.admin() {
-                        kit::dim(ui, &t, "needs password");
-                    }
-                });
+                split_row(
+                    ui,
+                    |ui| {
+                        ui.vertical(|ui| {
+                            ui.spacing_mut().item_spacing.y = 2.0;
+                            short(ui, &it.label, 13.5, Weight::SemiBold, t.text);
+                            let prog = it.program.as_deref().unwrap_or("no program named");
+                            short(ui, &format!("Runs {prog}"), 11.5, Weight::Regular, t.text_faint);
+                            let (sig, col) = if !it.program_exists && it.program.is_some() {
+                                (
+                                    "Program missing: this item does nothing".to_string(),
+                                    t.warning,
+                                )
+                            } else if it.signer.is_weak() {
+                                (it.signer.label(), t.danger)
+                            } else {
+                                (it.signer.label(), t.text_dim)
+                            };
+                            short(ui, &sig, 11.5, Weight::Medium, col);
+                            if let Some(p) = &it.problem {
+                                short(ui, p, 11.5, Weight::Medium, t.warning);
+                            }
+                        });
+                    },
+                    |ui| {
+                        if it.apple {
+                            kit::tag(ui, "Part of macOS", t.text_dim);
+                            return;
+                        }
+                        if removable && row_button(ui, "Remove", format!("Remove {}", it.label)) {
+                            app.act();
+                            open_remove(app, it);
+                        }
+                        let (text, on) = if it.enabled {
+                            ("Turn Off", false)
+                        } else {
+                            ("Turn On", true)
+                        };
+                        if row_button(ui, text, format!("{text} {}", it.label)) {
+                            app.act();
+                            start(app, Action::Launch(it.clone(), on));
+                        }
+                        state_tag(ui, &t, it.enabled);
+                        if d.admin() {
+                            kit::dim(ui, &t, "needs password");
+                        }
+                    },
+                );
             });
-            ui.separator();
+            if k + 1 < n {
+                ui.add_space(2.0);
+                let y = ui.cursor().min.y;
+                ui.painter().hline(
+                    ui.max_rect().x_range(),
+                    y,
+                    egui::Stroke::new(1.0, egui::Color32::from_white_alpha(12)),
+                );
+                ui.add_space(4.0);
+            }
         }
     });
 }
@@ -412,15 +475,27 @@ fn heavy_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot) {
             Ok(v) => {
                 for p in v {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(&p.name).font(font(13.5, Weight::SemiBold)));
-                        ui.label(format!("CPU {:.1}%  Memory {:.1}%", p.cpu, p.mem));
-                        kit::dim(ui, &t, &format!("pid {}", p.pid));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if row_button(ui, "Quit", format!("Quit {}", p.name)) {
-                                app.act();
-                                app.startup.confirm_quit = Some(p.clone());
-                            }
-                        });
+                        ui.set_height(32.0);
+                        split_row(
+                            ui,
+                            |ui| {
+                                let (r, _) = ui.allocate_exact_size(egui::vec2(26.0, 26.0), egui::Sense::hover());
+                                kit::initial_tile(ui.painter(), r, &p.name, kit::name_color(&p.name));
+                                short(ui, &p.name, 13.5, Weight::SemiBold, t.text);
+                                ui.label(
+                                    RichText::new(format!("CPU {:.1}%  Memory {:.1}%", p.cpu, p.mem))
+                                        .font(font(12.0, Weight::Medium))
+                                        .color(t.warning),
+                                );
+                                kit::dim(ui, &t, &format!("pid {}", p.pid));
+                            },
+                            |ui| {
+                                if row_button(ui, "Quit", format!("Quit {}", p.name)) {
+                                    app.act();
+                                    app.startup.confirm_quit = Some(p.clone());
+                                }
+                            },
+                        );
                     });
                 }
             }
@@ -440,21 +515,27 @@ fn confirm_quit(app: &mut CleanApp, ui: &mut Ui) {
         .join(" ");
     let mut go = false;
     let mut close = false;
-    egui::Modal::new(egui::Id::new("startup-quit")).show(ui.ctx(), |ui| {
+    kit::modal(egui::Id::new("startup-quit"), &t).show(ui.ctx(), |ui| {
         ui.set_width(560.0);
-        ui.label(RichText::new(format!("Quit {}?", p.name)).font(font(18.0, Weight::Bold)));
-        kit::dim(
+        kit::dialog_head(
             ui,
             &t,
+            crate::icons::Icon::Stop,
+            t.warning,
+            &format!("Quit {}?", p.name),
             if p.bundle_id.is_some() {
                 "The app is asked to quit, like choosing Quit in its menu. It may ask you to save your work."
             } else {
                 "The program is asked to stop. Unsaved work in it can be lost."
             },
         );
-        ui.label(RichText::new(cmd).monospace().size(11.5));
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
+        ui.add_space(10.0);
+        kit::well(&t).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(RichText::new(cmd).monospace().size(11.5).color(t.text_dim));
+        });
+        ui.add_space(14.0);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if kit::danger(ui, &t, "Quit App") {
                 go = true;
             }
@@ -486,23 +567,29 @@ fn confirm_remove(app: &mut CleanApp, ui: &mut Ui) {
     };
     let mut go = false;
     let mut close = false;
-    egui::Modal::new(egui::Id::new("startup-remove")).show(ui.ctx(), |ui| {
-        ui.set_width(620.0);
-        ui.label(
-            RichText::new(format!("Move this startup file to {dest}?"))
-                .font(font(18.0, Weight::Bold)),
-        );
-        kit::dim(
+    kit::modal(egui::Id::new("startup-remove"), &t).show(ui.ctx(), |ui| {
+        ui.set_width(600.0);
+        kit::dialog_head(
             ui,
             &t,
+            crate::icons::Icon::Trash,
+            t.sec_a,
+            &format!("Move this startup file to {dest}?"),
             "The agent is stopped first, then its file moves. You can put it back from History; it starts again at the next login.",
         );
-        for it in plan.selected() {
-            ui.label(RichText::new(app.env.display(&it.path)).monospace().size(11.5));
-            ui.label(format!("{}  {}", human_size(it.size), it.reason));
-        }
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
+        ui.add_space(10.0);
+        kit::well(&t).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            for it in plan.selected() {
+                ui.label(RichText::new(app.env.display(&it.path)).monospace().size(11.5));
+                ui.label(
+                    RichText::new(format!("{}  {}", human_size(it.size), it.reason))
+                        .color(t.text_dim),
+                );
+            }
+        });
+        ui.add_space(14.0);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if kit::danger(ui, &t, label) {
                 go = true;
             }

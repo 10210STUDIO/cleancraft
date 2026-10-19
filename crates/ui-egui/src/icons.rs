@@ -694,20 +694,3 @@ pub fn illustration(p: &Painter, center: Pos2, side: f32, icon: Icon, a: Color32
     };
     s2.sparkle(4.6, 17.8, 1.1, 0.28);
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn every_icon_paints_shapes_inside_its_box() {
-        let ctx = egui::Context::default();
-        let _ = ctx.run_ui(Default::default(), |ui| {
-            let p = ui.painter();
-            for (i, icon) in Icon::ALL.into_iter().enumerate() {
-                let r = Rect::from_min_size(pos2(i as f32 * 40.0, 0.0), Vec2::splat(32.0));
-                paint(p, r, icon, Color32::WHITE);
-            }
-        });
-    }
-}

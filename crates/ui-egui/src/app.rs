@@ -69,6 +69,8 @@ pub struct CleanApp {
     /// The page the transition animation is running for, and when it started.
     shown_page: Page,
     page_since: f64,
+    /// Height of a sidebar row this frame.
+    row_h: f32,
 }
 
 impl CleanApp {
@@ -97,6 +99,7 @@ impl CleanApp {
             fonts_pass: 0,
             shown_page: Page::Feature(FeatureId::SmartCare),
             page_since: f64::NEG_INFINITY,
+            row_h: 28.0,
         }
     }
 
@@ -200,7 +203,7 @@ impl CleanApp {
             .frame(
                 egui::Frame::new()
                     .fill(t.sidebar)
-                    .inner_margin(egui::Margin::symmetric(12, 16)),
+                    .inner_margin(egui::Margin::symmetric(12, 14)),
             )
             .show(ui, |ui| self.sidebar(ui));
         // Page change: fade in with a short slide up.
@@ -235,7 +238,7 @@ impl CleanApp {
 
     fn sidebar(&mut self, ui: &mut Ui) {
         let t = self.t;
-        let side = ui.max_rect().expand2(vec2(12.0, 16.0));
+        let side = ui.max_rect().expand2(vec2(12.0, 14.0));
         icons::vertical_gradient(
             ui.painter(),
             side,
@@ -260,23 +263,29 @@ impl CleanApp {
                     .color(t.text),
             );
         });
-        ui.add_space(10.0);
+        ui.add_space(8.0);
+        // Rows breathe in tall windows and tighten in short ones, so every entry fits a
+        // 680 pt tall window without scrolling.
+        let headers = GROUPS.iter().filter(|g| !g.0.is_empty()).count() as f32;
+        let rows = GROUPS.iter().map(|g| g.1.len()).sum::<usize>() as f32 + 2.0;
+        let fixed = headers * 22.0 + 16.0;
+        let row_h = ((ui.available_height() - fixed) / rows - 1.0).clamp(24.0, 30.0);
+        self.row_h = row_h;
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                // Compact rows: every entry fits a 680 pt tall window without scrolling.
-                ui.spacing_mut().item_spacing.y = 2.0;
+                ui.spacing_mut().item_spacing.y = 1.0;
                 for (group, feats) in GROUPS {
                     if !group.is_empty() {
-                        ui.add_space(5.0);
-                        ui.horizontal(|ui| {
-                            ui.add_space(8.0);
-                            ui.label(
-                                RichText::new(group.to_uppercase())
-                                    .font(font(10.0, Weight::SemiBold))
-                                    .color(t.text_faint),
-                            );
-                        });
+                        let w = ui.available_width();
+                        let (r, _) = ui.allocate_exact_size(vec2(w, 21.0), Sense::hover());
+                        ui.painter().text(
+                            egui::pos2(r.left() + 8.0, r.bottom() - 4.0),
+                            egui::Align2::LEFT_BOTTOM,
+                            group.to_uppercase(),
+                            font(9.5, Weight::SemiBold),
+                            t.text_faint,
+                        );
                     }
                     for f in *feats {
                         let (icon, color) = kit::feature_look(&t, *f);
@@ -287,14 +296,14 @@ impl CleanApp {
                         }
                     }
                 }
-                ui.add_space(8.0);
+                ui.add_space(7.0);
                 let y = ui.cursor().min.y;
                 ui.painter().hline(
                     ui.max_rect().x_range(),
                     y,
                     Stroke::new(1.0, Color32::from_white_alpha(14)),
                 );
-                ui.add_space(8.0);
+                ui.add_space(7.0);
                 let neutral = Section::Neutral.colors().0;
                 if self.nav_row(ui, Icon::History, neutral, "History", self.page == Page::History) {
                     self.act();
@@ -315,7 +324,8 @@ impl CleanApp {
 
     fn nav_row(&self, ui: &mut Ui, icon: Icon, color: Color32, label: &str, active: bool) -> bool {
         let t = self.t;
-        let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 28.0), Sense::click());
+        let (r, resp) =
+            ui.allocate_exact_size(vec2(ui.available_width(), self.row_h), Sense::click());
         resp.widget_info(|| {
             egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, label)
         });

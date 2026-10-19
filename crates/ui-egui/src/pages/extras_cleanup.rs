@@ -12,12 +12,11 @@ use std::sync::{Arc, Mutex};
 use cleancraft_core::FeatureId;
 use cleancraft_core::features::{privacy, trash};
 use cleancraft_core::fsutil::human_size;
-use egui::{Id, RichText, Ui};
+use egui::{Id, Ui};
 
 use crate::app::CleanApp;
 use crate::kit;
 use crate::pages::plan_page;
-use crate::theme::{Weight, font};
 
 pub const EMPTY_BUTTON: &str = "Empty Trash in Finder";
 pub const EMPTY_CONFIRM: &str = "Empty Trash";
@@ -80,7 +79,9 @@ fn trash_toolbar(app: &mut CleanApp, ui: &mut Ui) {
                 finish_empty(app, out);
             }
             None => {
-                ui.spinner();
+                let (r, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
+                let time = ui.input(|i| i.time);
+                kit::progress_ring(ui.painter(), r.center(), 14.0, &t, time);
                 ui.label("Finder is emptying the Trash...");
                 ui.ctx()
                     .request_repaint_after(std::time::Duration::from_millis(200));
@@ -97,8 +98,7 @@ fn trash_toolbar(app: &mut CleanApp, ui: &mut Ui) {
         store(ui, st);
         return;
     }
-    if ui
-        .button(EMPTY_BUTTON)
+    if kit::secondary_resp(ui, &t, EMPTY_BUTTON)
         .on_hover_text("Finder removes what is in the Trash for good")
         .clicked()
     {
@@ -108,19 +108,18 @@ fn trash_toolbar(app: &mut CleanApp, ui: &mut Ui) {
     if let Some(size) = st.confirm_empty {
         let mut go = false;
         let mut cancel = false;
-        egui::Modal::new(Id::new("confirm-empty-trash")).show(ui.ctx(), |ui| {
+        kit::modal(Id::new("confirm-empty-trash"), &t).show(ui.ctx(), |ui| {
             ui.set_width(520.0);
-            ui.label(
-                RichText::new(format!("Empty the Trash ({})?", human_size(size)))
-                    .font(font(18.0, Weight::Bold)),
-            );
-            kit::dim(
+            kit::dialog_head(
                 ui,
                 &t,
+                crate::icons::Icon::Trash,
+                t.danger,
+                &format!("Empty the Trash ({})?", human_size(size)),
                 "Finder will remove everything in the Trash of every disk for good. This cannot be undone, and CleanCraft cannot put these items back. Mail's deleted messages are not affected.",
             );
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
+            ui.add_space(16.0);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if kit::danger(ui, &t, EMPTY_CONFIRM) {
                     go = true;
                 }
@@ -211,26 +210,32 @@ fn privacy_toolbar(app: &mut CleanApp, ui: &mut Ui) {
         let mut go = false;
         let mut cancel = false;
         let mut toggled = false;
-        egui::Modal::new(Id::new("reset-permissions")).show(ui.ctx(), |ui| {
+        kit::modal(Id::new("reset-permissions"), &t).show(ui.ctx(), |ui| {
             ui.set_width(560.0);
-            ui.label(RichText::new("Reset app permissions").font(font(18.0, Weight::Bold)));
-            kit::dim(
+            kit::dialog_head(
                 ui,
                 &t,
+                crate::icons::Icon::Privacy,
+                t.sec_a,
+                "Reset app permissions",
                 "macOS takes the access back; each app asks again the next time it needs it. An app that is open may need to be restarted.",
             );
-            egui::ScrollArea::vertical()
-                .max_height(320.0)
-                .show(ui, |ui| {
-                    for (_, _, label, on) in list.iter_mut() {
-                        if ui.checkbox(on, label.as_str()).changed() {
-                            toggled = true;
+            ui.add_space(12.0);
+            kit::well(&t).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                egui::ScrollArea::vertical()
+                    .max_height(320.0)
+                    .show(ui, |ui| {
+                        for (_, _, label, on) in list.iter_mut() {
+                            if kit::check_text(ui, &t, on, label.as_str()).changed() {
+                                toggled = true;
+                            }
                         }
-                    }
-                });
-            ui.add_space(8.0);
+                    });
+            });
+            ui.add_space(14.0);
             let n = list.iter().filter(|e| e.3).count();
-            ui.horizontal(|ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if n > 0 && kit::danger(ui, &t, RESET_CONFIRM) {
                     go = true;
                 }

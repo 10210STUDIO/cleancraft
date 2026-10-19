@@ -338,6 +338,7 @@ pub fn tag(ui: &mut Ui, text: &str, color: Color32) -> Response {
     let galley = ui.painter().layout_no_wrap(text.to_string(), fid, color);
     let size = galley.size() + vec2(14.0, 6.0);
     let (r, resp) = ui.allocate_exact_size(size, Sense::hover());
+    resp.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, text));
     let p = ui.painter();
     p.rect_filled(r, r.height() / 2.0, color.gamma_multiply(0.16));
     p.galley(r.center() - galley.size() / 2.0, galley, color);
@@ -498,9 +499,10 @@ pub fn hero(
 ) -> bool {
     let id = ui.id().with(("hero", title_text));
     let avail = ui.available_height();
-    let last: f32 = ui.data(|d| d.get_temp(id)).unwrap_or(avail);
-    // Shrink the picture when the content would not fit.
-    let side = (200.0 - (last - avail).max(0.0)).clamp(96.0, 200.0);
+    // Height of everything but the picture, from the last frame: the picture takes what is
+    // left (between 96 and 200 points), so the action button never needs scrolling.
+    let rest: f32 = ui.data(|d| d.get_temp(id.with("rest"))).unwrap_or(320.0);
+    let side = ((avail - rest) / 1.12).clamp(96.0, 200.0).round();
     let mut clicked = false;
     egui::ScrollArea::vertical()
         .id_salt(id)
@@ -508,8 +510,9 @@ pub fn hero(
         .show(ui, |ui| {
             centered_block(ui, id, |ui| {
                 let time = ui.input(|i| i.time);
-                let (r, _) = ui.allocate_exact_size(vec2(side * 1.3, side), Sense::hover());
+                let (r, _) = ui.allocate_exact_size(vec2(side * 1.3, side * 1.12), Sense::hover());
                 icons::illustration(ui.painter(), r.center(), side, icon, t.sec_a, t.sec_b, time);
+                let start = ui.cursor().min.y;
                 ui.add_space(space::S);
                 ui.label(
                     RichText::new(title_text)
@@ -533,6 +536,11 @@ pub fn hero(
                 if !note.is_empty() {
                     dim(ui, t, note);
                 }
+                let h = ui.cursor().min.y - start;
+                if (h - rest).abs() > 1.0 {
+                    ui.data_mut(|d| d.insert_temp(id.with("rest"), h));
+                    ui.ctx().request_repaint();
+                }
             });
         });
     if !motion::REDUCE_MOTION {
@@ -541,11 +549,20 @@ pub fn hero(
     clicked
 }
 
-/// The big round action button with a breathing halo.
+/// The big action button with a breathing halo: round for a short label, a wide pill for a
+/// long one.
 pub fn round_action(ui: &mut Ui, t: &Tokens, label: &str, d: f32) -> Response {
-    let pad = d * 0.22;
-    let (outer, _) = ui.allocate_exact_size(Vec2::splat(d + pad * 2.0), Sense::hover());
-    let rect = Rect::from_center_size(outer.center(), Vec2::splat(d));
+    let fid = font(19.0, Weight::Bold);
+    let label_w = galley(ui, label, fid.clone(), Color32::WHITE).size().x;
+    let round = label_w < d * 0.78;
+    let size = if round {
+        Vec2::splat(d)
+    } else {
+        vec2(label_w + 72.0, 56.0)
+    };
+    let pad = 22.0;
+    let (outer, _) = ui.allocate_exact_size(size + Vec2::splat(pad * 2.0), Sense::hover());
+    let rect = Rect::from_center_size(outer.center(), size);
     let resp = ui.interact(rect, ui.id().with(("round", label)), Sense::click());
     let enabled = ui.is_enabled();
     resp.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, label));
@@ -555,38 +572,62 @@ pub fn round_action(ui: &mut Ui, t: &Tokens, label: &str, d: f32) -> Response {
     let time = ui.input(|i| i.time);
     let p = ui.painter();
     let c = rect.center();
-    let rad = d / 2.0 * (1.0 + 0.04 * hov) * (1.0 - (1.0 - motion::PRESS_SCALE) * down);
-    // Halo: two rings that grow and fade, half a period apart.
-    for k in 0..2 {
-        let ph = (motion::looped(time, motion::PULSE) + k as f32 * 0.5).fract();
-        let e = motion::ease_out(ph);
-        let a = (1.0 - e) * 0.45;
-        if !motion::REDUCE_MOTION {
-            p.circle_stroke(
-                c,
-                rad * (1.0 + 0.36 * e),
+    let scale = (1.0 + 0.04 * hov) * (1.0 - (1.0 - motion::PRESS_SCALE) * down);
+    let r = Rect::from_center_size(c, size * scale);
+    let corner = r.height() / 2.0;
+    // Halo: two outlines that grow and fade, half a period apart.
+    if !motion::REDUCE_MOTION {
+        for k in 0..2 {
+            let ph = (motion::looped(time, motion::PULSE) + k as f32 * 0.5).fract();
+            let e = motion::ease_out(ph);
+            let a = (1.0 - e) * 0.45;
+            let grow = 18.0 * e;
+            p.rect_stroke(
+                r.expand(grow),
+                corner + grow,
                 Stroke::new(2.0, t.sec_a.gamma_multiply(a)),
+                egui::StrokeKind::Middle,
             );
         }
     }
-    icons::glow(p, c, rad * 1.7, t.sec_a.gamma_multiply(0.30 + 0.1 * hov), 1.0);
-    p.circle_filled(c + vec2(0.0, rad * 0.10), rad, Color32::from_black_alpha(80));
-    let a = icons::lerp(t.sec_a, Color32::WHITE, 0.10 * hov);
-    let b = icons::lerp(t.sec_b, Color32::WHITE, 0.10 * hov);
-    icons::gradient_disc(p, c, rad, a, b);
     icons::glow(
         p,
-        c + vec2(-rad * 0.3, -rad * 0.42),
-        rad * 0.75,
-        Color32::from_white_alpha(40),
-        0.6,
+        c,
+        r.width().max(r.height()) * 0.85,
+        t.sec_a.gamma_multiply(0.26 + 0.1 * hov),
+        r.height() / r.width().max(r.height()),
     );
-    p.circle_stroke(c, rad, Stroke::new(1.5, Color32::from_white_alpha(70)));
+    p.rect_filled(
+        r.translate(vec2(0.0, r.height() * 0.08)),
+        corner,
+        Color32::from_black_alpha(80),
+    );
+    let a = icons::lerp(t.sec_a, Color32::WHITE, 0.10 * hov);
+    let b = icons::lerp(t.sec_b, Color32::WHITE, 0.10 * hov);
+    if round {
+        icons::gradient_disc(p, c, r.width() / 2.0, a, b);
+        icons::glow(
+            p,
+            c + vec2(-r.width() * 0.15, -r.height() * 0.21),
+            r.width() * 0.38,
+            Color32::from_white_alpha(40),
+            0.6,
+        );
+    } else {
+        icons::gradient_tile(p, r, corner, a, b);
+        top_sheen(p, r, corner);
+    }
+    p.rect_stroke(
+        r,
+        corner,
+        Stroke::new(1.5, Color32::from_white_alpha(70)),
+        egui::StrokeKind::Inside,
+    );
     p.text(
         c,
         Align2::CENTER_CENTER,
         label,
-        font(19.0 * rad / (d / 2.0), Weight::Bold),
+        font(19.0 * scale, Weight::Bold),
         t.on_section(),
     );
     resp
@@ -944,15 +985,13 @@ pub fn strip(ui: &mut Ui, icon: Icon, color: Color32, text: &str) {
 /// tests), so shortened paths keep their real text.
 pub fn text_at(ui: &mut Ui, r: Rect, shown: &str, full: &str, fid: FontId, color: Color32, align: egui::Align) -> Response {
     let layout = egui::Layout::left_to_right(egui::Align::Center).with_main_align(align);
-    let resp = ui
-        .scope_builder(egui::UiBuilder::new().max_rect(r).layout(layout), |ui| {
-            ui.add(
-                egui::Label::new(RichText::new(shown).font(fid).color(color))
-                    .selectable(false)
-                    .truncate(),
-            )
-        })
-        .inner;
+    let resp = place_with(ui, r, layout, |ui| {
+        ui.add(
+            egui::Label::new(RichText::new(shown).font(fid).color(color))
+                .selectable(false)
+                .truncate(),
+        )
+    });
     let full = full.to_string();
     resp.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, full.clone()));
     resp
@@ -1051,4 +1090,86 @@ pub fn paint_check(ui: &Ui, t: &Tokens, r: Rect, resp: &Response, on: bool, enab
         let ir = b.shrink(2.5);
         icons::paint_with(&p, ir, Icon::Check, t.on_section().gamma_multiply(k), 2.0);
     }
+}
+
+/// A checkbox with its text to the right; the text is its accessible name.
+pub fn check_text(ui: &mut Ui, t: &Tokens, on: &mut bool, text: &str) -> Response {
+    check_text_font(ui, t, on, text, font(12.5, Weight::Medium), false)
+}
+
+/// `check_text` with a chosen font; `strong` keeps the text bright.
+pub fn check_text_font(
+    ui: &mut Ui,
+    t: &Tokens,
+    on: &mut bool,
+    text: &str,
+    fid: FontId,
+    strong: bool,
+) -> Response {
+    let g = galley(ui, text, fid, t.text_dim);
+    let (r, mut resp) = ui.allocate_exact_size(vec2(26.0 + g.size().x, 24.0), Sense::click());
+    let enabled = ui.is_enabled();
+    if resp.clicked() && enabled {
+        *on = !*on;
+        resp.mark_changed();
+    }
+    let state = *on;
+    resp.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, enabled, state, text));
+    let br = Rect::from_min_size(r.min + vec2(0.0, 2.0), Vec2::splat(20.0));
+    paint_check(ui, t, br, &resp, state, enabled);
+    let color = if resp.hovered() || strong { t.text } else { t.text_dim };
+    let color = if enabled { color } else { t.text_faint };
+    ui.painter().galley(
+        pos2(r.left() + 26.0, r.center().y - g.size().y / 2.0),
+        g,
+        color,
+    );
+    resp
+}
+
+/// The floating action bar pinned to the bottom of the page (stays visible at 680 pt).
+pub fn bottom_bar(ui: &mut Ui, t: &Tokens, id: egui::Id, add: impl FnOnce(&mut Ui)) {
+    egui::Panel::bottom(id)
+        .frame(Frame::new().inner_margin(Margin {
+            left: 0,
+            right: 0,
+            top: 10,
+            bottom: 0,
+        }))
+        .show(ui, |ui| {
+            bar_frame(t).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                let w = ui.available_width();
+                ui.allocate_ui_with_layout(
+                    vec2(w, 40.0),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        ui.set_min_height(40.0);
+                        add(ui);
+                    },
+                );
+            });
+        });
+}
+
+/// A secondary pill, returning its response (to rename it for accessibility).
+pub fn secondary_resp(ui: &mut Ui, t: &Tokens, label: &str) -> Response {
+    pill(ui, t, label, Kind::Secondary, None)
+}
+
+/// Lay out `add` inside `r` without taking space in `ui` (for things drawn over a row or a
+/// tile that already has its place). The default layout is top-down.
+pub fn place<R>(ui: &mut Ui, r: Rect, add: impl FnOnce(&mut Ui) -> R) -> R {
+    place_with(ui, r, egui::Layout::top_down(egui::Align::Min), add)
+}
+
+/// `place` with a layout.
+pub fn place_with<R>(
+    ui: &mut Ui,
+    r: Rect,
+    layout: egui::Layout,
+    add: impl FnOnce(&mut Ui) -> R,
+) -> R {
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(r).layout(layout));
+    add(&mut child)
 }

@@ -106,35 +106,33 @@ pub fn poll(app: &mut CleanApp) -> bool {
 
 pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     let t = app.t;
-    let (glyph, color) = kit::feature_look(&t, f);
-    ui.horizontal(|ui| {
-        kit::badge(ui, color, glyph, 44.0);
-        ui.vertical(|ui| {
-            kit::title(ui, &t, f.title());
-            kit::subtitle(
-                ui,
-                &t,
-                "Housekeeping commands that come with macOS. You see each exact command before it runs; commands cannot be undone, and History records them.",
-            );
-        });
-    });
-    ui.add_space(8.0);
+    let (icon, _) = kit::feature_look(&t, f);
+    kit::header(
+        ui,
+        &t,
+        icon,
+        f.title(),
+        "Housekeeping commands that come with macOS. You see each exact command before it runs; commands cannot be undone, and History records them.",
+    );
     if !app.tasks.loaded && app.tasks.loading.is_none() {
         start_loading(app);
     }
     if let Some(job) = &app.tasks.running {
         let status = job.status();
-        ui.horizontal(|ui| {
-            ui.spinner();
-            ui.label(format!("Running {status}"));
-        });
+        let secs = job.elapsed_secs();
+        kit::progress(ui, &t, icon, &format!("Running {status}"), "", secs, false);
         return;
     }
     if !app.tasks.loaded {
-        ui.horizontal(|ui| {
-            ui.spinner();
-            ui.label("Checking which tasks can run on this Mac...");
-        });
+        kit::progress(
+            ui,
+            &t,
+            icon,
+            "Checking which tasks can run on this Mac...",
+            "",
+            0,
+            false,
+        );
         return;
     }
     let n = app.tasks.selected.len();
@@ -144,7 +142,11 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                 app.act();
                 open_confirm(app);
             }
-            ui.label(format!("{n} selected"));
+            ui.label(
+                RichText::new(format!("{n} selected"))
+                    .font(font(13.5, Weight::Medium))
+                    .color(t.text_dim),
+            );
         } else {
             kit::dim(ui, &t, "Tick the tasks you want to run.");
         }
@@ -162,7 +164,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         .show(ui, |ui| {
             for info in TASKS {
                 task_card(app, ui, info);
-                ui.add_space(6.0);
+                ui.add_space(crate::theme::space::S);
             }
         });
     if app.tasks.confirm.is_some() {
@@ -178,13 +180,18 @@ fn task_card(app: &mut CleanApp, ui: &mut Ui, info: &tasks::TaskInfo) {
         ui.horizontal(|ui| {
             let can = matches!(ready, Some(Ok(_)));
             let mut on = app.tasks.selected.contains(info.id);
-            let cb = ui.add_enabled(
-                can,
-                egui::Checkbox::new(
-                    &mut on,
-                    RichText::new(info.title).font(font(14.5, Weight::SemiBold)),
-                ),
-            );
+            let cb = ui
+                .add_enabled_ui(can, |ui| {
+                    kit::check_text_font(
+                        ui,
+                        &t,
+                        &mut on,
+                        info.title,
+                        font(14.5, Weight::SemiBold),
+                        true,
+                    )
+                })
+                .inner;
             if cb.changed() {
                 app.act();
                 if on {
@@ -194,29 +201,33 @@ fn task_card(app: &mut CleanApp, ui: &mut Ui, info: &tasks::TaskInfo) {
                 }
             }
             if info.admin {
-                ui.label(
-                    RichText::new("Administrator password")
-                        .font(font(11.0, Weight::Medium))
-                        .color(t.warning),
-                );
+                kit::tag(ui, "Administrator password", t.warning);
             }
-            ui.label(
-                RichText::new(format!("{} risk", info.risk.label()))
-                    .font(font(11.0, Weight::Medium))
-                    .color(kit::risk_color(&t, info.risk)),
+            kit::tag(
+                ui,
+                &format!("{} risk", info.risk.label()),
+                kit::risk_color(&t, info.risk),
             );
         });
+        ui.horizontal(|ui| {
+            ui.add_space(26.0);
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 4.0;
         ui.label(RichText::new(info.description).color(t.text_dim));
         let command = match &ready {
             Some(Ok(p)) => p.commands().join("\n"),
             _ => info.command.to_string(),
         };
-        ui.label(
-            RichText::new(format!("Command: {command}"))
-                .monospace()
-                .size(11.5)
-                .color(t.text_faint),
-        );
+        kit::well(&t)
+            .inner_margin(egui::Margin::symmetric(10, 6))
+            .show(ui, |ui| {
+                ui.label(
+                    RichText::new(format!("Command: {command}"))
+                        .monospace()
+                        .size(11.5)
+                        .color(t.text_faint),
+                );
+            });
         if let Some(Err(why)) = &ready {
             ui.label(RichText::new(why).color(t.warning));
         }
@@ -242,7 +253,7 @@ fn task_card(app: &mut CleanApp, ui: &mut Ui, info: &tasks::TaskInfo) {
             ui.label(
                 RichText::new(why)
                     .font(font(11.5, Weight::Medium))
-                    .color(t.accent),
+                    .color(t.sec_a),
             );
         }
         if let Some(r) = app.tasks.results.get(info.id).cloned() {
@@ -277,7 +288,7 @@ fn task_card(app: &mut CleanApp, ui: &mut Ui, info: &tasks::TaskInfo) {
                 } else {
                     format!("Show log of {}", info.title)
                 };
-                if ui.small_button(label).clicked() {
+                if kit::ghost(ui, &t, &label, None).clicked() {
                     app.act();
                     if open {
                         app.tasks.show_log.remove(info.id);
@@ -286,15 +297,14 @@ fn task_card(app: &mut CleanApp, ui: &mut Ui, info: &tasks::TaskInfo) {
                     }
                 }
                 if open {
-                    egui::Frame::new()
-                        .fill(t.well)
-                        .inner_margin(egui::Margin::same(8))
-                        .show(ui, |ui| {
-                            ui.label(RichText::new(&r.output).monospace().size(11.5));
-                        });
+                    kit::well(&t).show(ui, |ui| {
+                        ui.label(RichText::new(&r.output).monospace().size(11.5));
+                    });
                 }
             }
         }
+            });
+        });
     });
 }
 
@@ -321,16 +331,20 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
     };
     let mut go = false;
     let mut close = false;
-    egui::Modal::new(egui::Id::new("tasks-confirm")).show(ui.ctx(), |ui| {
-        ui.set_width(640.0);
-        ui.label(RichText::new(format!("Run {} tasks?", ok.len())).font(font(18.0, Weight::Bold)));
-        kit::dim(
+    let max_list = (ui.ctx().content_rect().height() - 300.0).clamp(120.0, 380.0);
+    kit::modal(egui::Id::new("tasks-confirm"), &t).show(ui.ctx(), |ui| {
+        ui.set_width((ui.ctx().content_rect().width() - 120.0).clamp(420.0, 640.0));
+        kit::dialog_head(
             ui,
             &t,
+            crate::icons::Icon::Tasks,
+            t.sec_a,
+            &format!("Run {} tasks?", ok.len()),
             "These exact commands will run, in this order. They cannot be undone.",
         );
+        ui.add_space(12.0);
         egui::ScrollArea::vertical()
-            .max_height(380.0)
+            .max_height(max_list)
             .show(ui, |ui| {
                 for p in &ok {
                     let Some(info) = tasks::info(&p.id) else {
@@ -356,8 +370,8 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
                     );
                 }
             });
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
+        ui.add_space(14.0);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if !ok.is_empty() && kit::primary(ui, &t, "Run") {
                 go = true;
             }

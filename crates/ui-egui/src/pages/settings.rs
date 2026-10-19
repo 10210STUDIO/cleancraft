@@ -1,11 +1,26 @@
 //! Settings: where removed items go, the ignore list, thresholds, agents, menu bar.
 
 use cleancraft_core::executor::Method;
-use egui::{RichText, Ui};
+use egui::{RichText, Sense, Ui, vec2};
 
 use crate::app::CleanApp;
+use crate::icons::{self, Icon};
 use crate::kit;
-use crate::theme::{Weight, font};
+use crate::theme::{Weight, font, space};
+
+/// A card's heading with its icon.
+fn heading(ui: &mut Ui, t: &crate::theme::Tokens, icon: Icon, text: &str) {
+    ui.horizontal(|ui| {
+        let (r, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
+        icons::paint(ui.painter(), r, icon, t.sec_a);
+        ui.label(
+            RichText::new(text)
+                .font(font(14.5, Weight::SemiBold))
+                .color(t.text),
+        );
+    });
+    ui.add_space(2.0);
+}
 
 #[derive(Default)]
 pub struct State {
@@ -15,13 +30,20 @@ pub struct State {
 
 pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
     let t = app.t;
-    kit::title(ui, &t, "Settings");
-    ui.add_space(8.0);
+    kit::header(
+        ui,
+        &t,
+        Icon::Settings,
+        "Settings",
+        "Where removed items go, what scans leave alone, and how big and old files are judged.",
+    );
     let mut changed = false;
-    egui::ScrollArea::vertical().show(ui, |ui| {
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
         kit::card(&t).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(RichText::new("Removed items go to").font(font(14.0, Weight::SemiBold)));
+            heading(ui, &t, Icon::Trash, "Removed items go to");
             let mut m = app.settings.method;
             ui.radio_value(
                 &mut m,
@@ -38,10 +60,10 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                 changed = true;
             }
         });
-        ui.add_space(8.0);
+        ui.add_space(space::M);
         kit::card(&t).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(RichText::new("Ignore list").font(font(14.0, Weight::SemiBold)));
+            heading(ui, &t, Icon::Shield, "Ignore list");
             kit::dim(
                 ui,
                 &t,
@@ -51,8 +73,10 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
             for (i, p) in list.iter().enumerate() {
                 ui.horizontal(|ui| {
                     let shown = app.env.display(p);
-                    ui.label(&shown);
-                    let r = ui.small_button("Remove");
+                    let (r, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
+                    icons::paint(ui.painter(), r, Icon::Folder, t.text_faint);
+                    ui.label(RichText::new(&shown).color(t.text));
+                    let r = kit::ghost(ui, &t, "Remove", Some(Icon::Close));
                     r.widget_info(|| {
                         egui::WidgetInfo::labeled(
                             egui::WidgetType::Button,
@@ -78,7 +102,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                 if r.changed() {
                     app.act();
                 }
-                if ui.button("Add to Ignore List").clicked() {
+                if kit::secondary(ui, &t, "Add to Ignore List") {
                     let raw = app.settings_page.new_ignore.trim().to_string();
                     if raw.is_empty() {
                         app.act();
@@ -96,10 +120,10 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                 }
             });
         });
-        ui.add_space(8.0);
+        ui.add_space(space::M);
         kit::card(&t).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(RichText::new("Thresholds").font(font(14.0, Weight::SemiBold)));
+            heading(ui, &t, Icon::LargeOld, "Thresholds");
             let mut mb = (app.settings.large_min_bytes / 1_000_000) as u32;
             if ui
                 .add(egui::Slider::new(&mut mb, 10..=5000).text("Large file minimum (MB)"))
@@ -127,10 +151,10 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                 changed = true;
             }
         });
-        ui.add_space(8.0);
+        ui.add_space(space::M);
         kit::card(&t).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(RichText::new("AI agents").font(font(14.0, Weight::SemiBold)));
+            heading(ui, &t, Icon::Sweep, "AI agents");
             if ui
                 .checkbox(
                     &mut app.settings.agents_may_clean,
