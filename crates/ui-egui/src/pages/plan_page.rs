@@ -319,6 +319,28 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     let Some(plan) = app.plan_state(f).plan.clone() else {
         return;
     };
+    // Nothing found: the module's object at rest, one line, the notes, Scan Again.
+    if plan.items.is_empty() {
+        let started = kit::first_seen(ui, ("empty", &plan.id));
+        kit::centered_block(ui, egui::Id::new(("empty-block", f.as_str())), |ui| {
+            kit::done_hero(ui, &t, f, 150.0, started);
+            ui.add_space(space::M);
+            ui.label(
+                RichText::new("Nothing to clean here.")
+                    .font(font(size::TITLE2, Weight::SemiBold))
+                    .color(t.text),
+            );
+            for note in &plan.notes {
+                kit::dim(ui, &t, note);
+            }
+            ui.add_space(space::L);
+            if kit::secondary(ui, &t, "Scan Again") {
+                app.act();
+                start_scan(app, f);
+            }
+        });
+        return;
+    }
     // Summary: the big total and the sentence under it.
     ui.horizontal_top(|ui| {
         kit::display(ui, &t, &human_size(plan.total_size()));
@@ -348,19 +370,7 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             },
         );
     });
-    if plan.items.is_empty() {
-        ui.add_space(space::XL);
-        ui.vertical_centered(|ui| {
-            kit::badge(ui, t.success, Icon::Check, 72.0);
-            ui.add_space(space::M);
-            ui.label(
-                RichText::new("Nothing to clean here.")
-                    .font(font(size::TITLE2, Weight::SemiBold))
-                    .color(t.text),
-            );
-        });
-        return;
-    }
+
     // Bottom bar first, so it always has its place at the bottom of the window.
     let (sel_count, sel_size) = app
         .plan_state(f)
@@ -406,11 +416,24 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             });
         });
     ui.add_space(space::M);
-    // One toolbar over both columns: search, sort and selection, in one row at 1060 pt.
+    // One toolbar over both columns: search, sort and selection. A module's own buttons
+    // (Wi-Fi Settings, Reset Permissions, Select Copies...) join the row when they fit and
+    // get a second row, aligned right, when they do not: nothing ever overlaps.
+    let extras_id = egui::Id::new(("plan-extras-w", f.as_str()));
+    let extras_w: f32 = ui.data(|d| d.get_temp(extras_id)).unwrap_or(0.0);
+    // Search 220 (160 at least), sort about 140, Select All and Select None about 210.
+    let core_w = 160.0 + 140.0 + 210.0 + 4.0 * space::S;
+    let extras_inline = extras_w <= 0.5 || ui.available_width() - core_w >= extras_w + space::S;
+    let search_w = (ui.available_width()
+        - 140.0
+        - 210.0
+        - if extras_inline { extras_w } else { 0.0 }
+        - 5.0 * space::S)
+        .clamp(160.0, 220.0);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = space::S;
         let st = app.plan_state(f);
-        let r = kit::search_field(ui, &t, &mut st.search, "Search", 220.0);
+        let r = kit::search_field(ui, &t, &mut st.search, "Search", search_w);
         r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Search"));
         if r.changed() {
             app.act();
@@ -447,9 +470,18 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                 }
                 keep_a_copy(app, f);
             }
-            super::extras::results_toolbar(app, ui, f);
+            if extras_inline {
+                extras_row(app, ui, f, extras_id);
+            }
         });
     });
+    if !extras_inline {
+        ui.add_space(space::S);
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.set_height(crate::theme::hit::SECONDARY);
+            extras_row(app, ui, f, extras_id);
+        });
+    }
     ui.add_space(space::M);
     let avail_h = ui.available_height() - 4.0;
     let body =
@@ -509,6 +541,18 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                     });
             });
     });
+}
+
+/// The module's own toolbar buttons, measured so the toolbar can place them next frame.
+fn extras_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, id: egui::Id) {
+    let start = ui.cursor().max.x;
+    super::extras::results_toolbar(app, ui, f);
+    let w = (start - ui.cursor().max.x).max(0.0);
+    let last: f32 = ui.data(|d| d.get_temp(id)).unwrap_or(0.0);
+    if (w - last).abs() > 0.5 {
+        ui.data_mut(|d| d.insert_temp(id, w));
+        ui.ctx().request_discard("toolbar buttons changed width");
+    }
 }
 
 /// The category column: "All items" and one card per category with a share bar.

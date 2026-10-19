@@ -643,6 +643,25 @@ pub fn card_head(ui: &mut Ui, t: &Tokens, icon: Icon, color: Color32, title_text
     });
 }
 
+/// Draw a module's hero (heroes.rs). Its glow reaches the edges of its square, so it may
+/// paint over the page margin and the scroll area's edge (never over the sidebar): no hard
+/// edge where a scroll area would clip it.
+pub fn show_hero(
+    ui: &mut Ui,
+    feature: cleancraft_core::FeatureId,
+    phase: crate::heroes::HeroPhase,
+    progress: f32,
+    size: Vec2,
+) -> Response {
+    let mut clip = ui.ctx().content_rect();
+    clip.min.x += space::SIDEBAR;
+    ui.scope(|ui| {
+        ui.set_clip_rect(clip);
+        crate::heroes::show(ui, feature, phase, progress, size)
+    })
+    .inner
+}
+
 /// Center content vertically: remembers the last height of the block under `id`.
 pub fn centered_block<R>(ui: &mut Ui, id: egui::Id, add: impl FnOnce(&mut Ui) -> R) -> R {
     let avail = ui.available_height();
@@ -692,7 +711,7 @@ pub fn hero(
         .show(ui, |ui| {
             centered_block(ui, id, |ui| {
                 // The module's own 3D object (heroes.rs), idle.
-                crate::heroes::show(
+                show_hero(
                     ui,
                     feature,
                     crate::heroes::HeroPhase::Idle,
@@ -847,7 +866,7 @@ pub fn progress(
         let avail = ui.available_height();
         let d = if avail < 460.0 { 170.0 } else { 220.0 };
         // The module's 3D object at work (heroes.rs, scanning).
-        crate::heroes::show(
+        show_hero(
             ui,
             feature,
             crate::heroes::HeroPhase::Scanning,
@@ -976,7 +995,7 @@ pub fn done_hero(
     d: f32,
     started: f64,
 ) {
-    let r = crate::heroes::show(
+    let r = show_hero(
         ui,
         feature,
         crate::heroes::HeroPhase::Done,

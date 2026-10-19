@@ -378,7 +378,7 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile, w: f32, tile_h: 
                     .font(font(size::CALLOUT, Weight::Regular))
                     .color(t.text_dim),
             )
-            .truncate(),
+            .wrap(),
         );
     });
     // How much of what was found is selected, just above the controls.

@@ -282,11 +282,28 @@ fn memory_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
     card(app, ui, Icon::Gear, "Memory", |ui| {
         match &s.memory {
             Some(m) => {
-                big(
-                    app,
-                    ui,
-                    &format!("{} of {}", memory_size(m.used), memory_size(m.total)),
-                );
+                // "7.78 GB" big and "of 16.0 GB" beside it: the figure is never cut, and
+                // VoiceOver hears the whole "7.78 GB of 16.0 GB".
+                let used = memory_size(m.used);
+                let full = format!("{used} of {}", memory_size(m.total));
+                let rest = format!("of {}", memory_size(m.total));
+                ui.horizontal(|ui| {
+                    let fid = font(size::TITLE, Weight::Bold);
+                    let w = kit::galley(ui, &used, fid.clone(), t.text).size().x + 2.0;
+                    let (r, _) = ui.allocate_exact_size(vec2(w, 30.0), Sense::hover());
+                    kit::text_at(ui, r, &used, &full, fid, t.text, egui::Align::Min);
+                    let (r2, _) = ui.allocate_exact_size(
+                        vec2(ui.available_width().max(10.0), 30.0),
+                        Sense::hover(),
+                    );
+                    ui.painter().text(
+                        r2.left_bottom() - vec2(0.0, 6.0),
+                        egui::Align2::LEFT_BOTTOM,
+                        rest,
+                        font(size::CALLOUT, Weight::Medium),
+                        t.text_dim,
+                    );
+                });
                 let frac = m.used_fraction() as f32;
                 let w = ui.available_width();
                 kit::bar(ui, &t, frac, level_color(app, frac), w);

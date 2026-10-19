@@ -308,11 +308,11 @@ impl CleanApp {
                                 },
                             ));
                         let gh = g.size().y;
-                        ui.painter().galley(
-                            egui::pos2(r.left() + 10.0, r.bottom() - 4.0 - gh),
-                            g,
-                            t.text_faint,
-                        );
+                        // More air above the label than under it, so it reads with the
+                        // group below.
+                        let y = r.top() + (r.height() - gh) * 0.62;
+                        ui.painter()
+                            .galley(egui::pos2(r.left() + 10.0, y), g, t.text_faint);
                     }
                     for f in *feats {
                         let (icon, color) = kit::feature_look(&t, *f);

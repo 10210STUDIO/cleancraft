@@ -1400,14 +1400,31 @@ fn updates_page(app: &mut CleanApp, ui: &mut Ui) {
                         kit::dim(ui, &t, "macOS is up to date.");
                     }
                     for m in &r.macos {
+                        // Shown: the title (with the version once) and the size, then a
+                        // restart tag. Announced: the whole line.
                         let mut line = format!("{}  {}", m.title, m.version);
+                        let mut shown = if m.title.contains(&m.version) {
+                            m.title.clone()
+                        } else {
+                            format!("{}  {}", m.title, m.version)
+                        };
                         if let Some(b) = m.size_bytes {
                             line.push_str(&format!("  ·  {}", human_size(b)));
+                            shown.push_str(&format!("  ·  {}", human_size(b)));
                         }
                         if m.restart {
                             line.push_str("  ·  needs a restart");
                         }
-                        ui.label(RichText::new(line).font(font(size::BODY, Weight::Regular)));
+                        let fid = font(size::BODY, Weight::Regular);
+                        let w = kit::galley(ui, &shown, fid.clone(), t.text).size().x + 2.0;
+                        let (rr, _) = ui.allocate_exact_size(
+                            vec2(w.min(ui.available_width()), 20.0),
+                            Sense::hover(),
+                        );
+                        kit::text_at(ui, rr, &shown, &line, fid, t.text, Align::Min);
+                        if m.restart {
+                            kit::tag(ui, "Restart required", t.warning);
+                        }
                     }
                     if !r.macos.is_empty() || r.macos_error.is_some() {
                         ui.add_space(space::XS);
