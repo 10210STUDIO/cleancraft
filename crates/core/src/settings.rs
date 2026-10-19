@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::env::Env;
 use crate::executor::Method;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct Settings {
     /// Where removed items go.
@@ -29,7 +29,16 @@ pub struct Settings {
     pub keep_languages: Vec<String>,
     /// Quick Sweep: modules the user turned off (shown dimmed, not run).
     pub sweep_skip: Vec<crate::plan::FeatureId>,
+    /// Play interface sounds (scan finished, cleanup finished, errors).
+    pub sounds: bool,
+    /// Loudness of interface sounds, 0.0 to 1.0.
+    pub sound_volume: f32,
+    /// Also play a very soft tick on switches and taps (off unless the user turns it on).
+    pub sound_ticks: bool,
 }
+
+/// Interface sounds start at this loudness (0.0 to 1.0).
+pub const DEFAULT_SOUND_VOLUME: f32 = 0.6;
 
 impl Default for Settings {
     fn default() -> Self {
@@ -43,6 +52,9 @@ impl Default for Settings {
             menu_bar: true,
             keep_languages: Vec::new(),
             sweep_skip: Vec::new(),
+            sounds: true,
+            sound_volume: DEFAULT_SOUND_VOLUME,
+            sound_ticks: false,
         }
     }
 }
@@ -102,5 +114,45 @@ impl Settings {
         self.ignore
             .iter()
             .any(|i| p.starts_with(i) || crate::policy::starts_with_ci(p, i))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_settings_file_from_before_sounds_still_loads_with_sounds_on() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let env = Env::fake(dir.path());
+        std::fs::create_dir_all(env.data_dir()).expect("dir");
+        // Written by an earlier version: no sound fields.
+        std::fs::write(
+            Settings::path(&env),
+            r#"{"method":"trash","ignore":[],"large_min_bytes":1000,"old_days":30,
+               "downloads_days":90,"agents_may_clean":false,"menu_bar":true,
+               "keep_languages":[],"sweep_skip":[]}"#,
+        )
+        .expect("write");
+        let (s, warning) = Settings::load_checked(&env);
+        assert!(warning.is_none(), "{warning:?}");
+        assert_eq!(s.large_min_bytes, 1000);
+        assert!(s.sounds);
+        assert_eq!(s.sound_volume, DEFAULT_SOUND_VOLUME);
+        assert!(!s.sound_ticks);
+    }
+
+    #[test]
+    fn sound_settings_round_trip() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let env = Env::fake(dir.path());
+        let s = Settings {
+            sounds: false,
+            sound_volume: 0.25,
+            sound_ticks: true,
+            ..Settings::default()
+        };
+        s.save(&env).expect("save");
+        assert_eq!(Settings::load(&env), s);
     }
 }

@@ -10,6 +10,7 @@ pub mod kit;
 pub mod motion;
 pub mod pages;
 pub mod render3d;
+pub mod sound;
 pub mod theme;
 
 pub use app::{CleanApp, Page};

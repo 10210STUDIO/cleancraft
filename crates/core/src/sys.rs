@@ -151,6 +151,16 @@ pub trait Sys: Send + Sync {
     fn open_url(&self, url: &str) -> io::Result<()>;
     /// True on macOS.
     fn is_macos(&self) -> bool;
+    /// Start a program and return at once, without waiting for it or reading its output
+    /// (short fire-and-forget helpers such as `afplay` for interface sounds). The default
+    /// refuses, so an implementation has to opt in.
+    fn spawn(&self, program: &str, args: &[&str]) -> io::Result<()> {
+        let _ = args;
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            format!("{program} cannot be started without waiting here"),
+        ))
+    }
 }
 
 /// The real operating system.
@@ -287,6 +297,20 @@ impl Sys for RealSys {
     fn is_macos(&self) -> bool {
         cfg!(target_os = "macos")
     }
+
+    fn spawn(&self, program: &str, args: &[&str]) -> io::Result<()> {
+        let mut child = Command::new(program)
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()?;
+        // Reap it when it ends, so no zombie process is left behind.
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+        Ok(())
+    }
 }
 
 ///
@@ -390,6 +414,9 @@ pub struct FakeState {
     /// Files a command writes when it runs with a successful answer (same keys as
     /// `answers`): image tools such as `sips` and `qlmanage` that write their output to disk.
     pub creates: BTreeMap<String, Vec<(PathBuf, Vec<u8>)>>,
+    /// Programs started without waiting ([`Sys::spawn`]), as "program arg arg". Kept apart
+    /// from `calls` so fire-and-forget helpers do not disturb tests that count commands.
+    pub spawned: Vec<String>,
 }
 
 impl FakeSys {
@@ -442,6 +469,11 @@ impl FakeSys {
 
     pub fn calls(&self) -> Vec<String> {
         self.with(|s| s.calls.clone())
+    }
+
+    /// Every program started with [`Sys::spawn`], as "program arg arg".
+    pub fn spawned(&self) -> Vec<String> {
+        self.with(|s| s.spawned.clone())
     }
 
     pub fn admin_calls(&self) -> Vec<String> {
@@ -615,6 +647,15 @@ impl Sys for FakeSys {
     fn is_macos(&self) -> bool {
         self.with(|s| s.macos)
     }
+
+    fn spawn(&self, program: &str, args: &[&str]) -> io::Result<()> {
+        let line = std::iter::once(program)
+            .chain(args.iter().copied())
+            .collect::<Vec<_>>()
+            .join(" ");
+        self.with(|s| s.spawned.push(line));
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -734,6 +775,15 @@ mod tests {
             (out.status, out.stdout.as_str(), out.stderr.as_str()),
             (3, "hi\n", "err\n")
         );
+    }
+
+    #[test]
+    fn fake_spawn_is_recorded_apart_from_calls() {
+        let fake = FakeSys::new();
+        fake.spawn("/usr/bin/afplay", &["-v", "0.50", "/x/a.wav"])
+            .expect("spawn");
+        assert_eq!(fake.spawned(), vec!["/usr/bin/afplay -v 0.50 /x/a.wav"]);
+        assert!(fake.calls().is_empty());
     }
 
     #[test]
