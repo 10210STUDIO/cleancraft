@@ -25,6 +25,8 @@ fn dom2_ticking_pictures_moves_the_photos_library() {
     );
     mac.home_file("Pictures/holiday.jpg", 300_000);
     let mut h = harness(&mac);
+    // The tool sits in the "Files" section of the sidebar.
+    click(&mut h, "Files");
     click(&mut h, "Disk Map");
     click(&mut h, "Map Home Folder");
     click(&mut h, "Select Pictures");
@@ -44,6 +46,8 @@ fn dom1_typed_lowercase_documents_can_be_emptied() {
     // Stands for ~/Documents: macOS volumes are case-insensitive by default.
     let secret = mac.home_file("documents/tax-return-2025.pdf", 400_000);
     let mut h = harness(&mac);
+    // The tool sits in the "Files" section of the sidebar.
+    click(&mut h, "Files");
     click(&mut h, "Disk Map");
     type_into(&mut h, "Folder to map", "~/documents");
     click(&mut h, "Map Folder");
@@ -66,6 +70,8 @@ fn documents_and_library_rows_stay_locked() {
     mac.home_file("Documents/report.pdf", 700_000);
     mac.home_file("Library/Caches/x/y", 100_000);
     let mut h = harness(&mac);
+    // The tool sits in the "Files" section of the sidebar.
+    click(&mut h, "Files");
     click(&mut h, "Disk Map");
     click(&mut h, "Map Home Folder");
     click(&mut h, "Select Documents");

@@ -54,6 +54,8 @@ fn duplicate_sets_keep_one_copy() {
     age(&b1, 5);
     age(&b2, 10);
     let mut h = harness(&mac);
+    // The tool sits in the "Files" section of the sidebar.
+    click(&mut h, "Files");
     click(&mut h, "Duplicates");
     assert!(has(&h, "Home folder"), "location picker missing");
     click(&mut h, "Scan");
@@ -124,6 +126,8 @@ fn every_copy_selected_is_refused_by_core() {
     mac.write(&x, &d);
     mac.write(&y, &d);
     let mut h = harness(&mac);
+    // The tool sits in the "Files" section of the sidebar.
+    click(&mut h, "Files");
     click(&mut h, "Duplicates");
     click(&mut h, "Scan");
     // Bypass the UI guard: the run itself refuses.
@@ -155,6 +159,8 @@ fn similar_pictures_keep_the_biggest() {
     save_scene(&small, 320, 240, 0, -6, 4, ImageFormat::Bmp);
     save_scene(&other, 640, 480, 1, 0, 5, ImageFormat::Png);
     let mut h = harness(&mac);
+    // The tool sits in the "Files" section of the sidebar.
+    click(&mut h, "Files");
     click(&mut h, "Similar Images");
     assert!(has_text(&h, "Pictures and Downloads"));
     click(&mut h, "Scan");

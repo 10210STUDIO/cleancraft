@@ -38,6 +38,8 @@ fn downloads_scan_select_clean_undo() {
     age(&old, 400);
     let clip = mac.home_file("Movies/clip.mov", 3_000_000);
     let mut h = harness(&mac);
+    // The tool sits in the "Files" section of the sidebar.
+    click(&mut h, "Files");
     click(&mut h, "Large & Old Files");
     click(&mut h, "Downloads");
     assert!(has(&h, "Looking in: Downloads"));
@@ -79,6 +81,8 @@ fn typed_folder_checked_with_enter_and_esc() {
     let w = mac.home_file("Work/video.mp4", 2_400_000);
     mac.home_file("Downloads/other.zip", 2_400_000);
     let mut h = harness(&mac);
+    // The tool sits in the "Files" section of the sidebar.
+    click(&mut h, "Files");
     click(&mut h, "Large & Old Files");
     click(&mut h, "Another folder");
     type_into(&mut h, "Folder path", "~/Documents");
@@ -123,6 +127,8 @@ fn downloads_by_source_app() {
         "0083;65f1c2a0;Safari;2\n",
     );
     let mut h = harness(&mac);
+    // The tool sits in the "Files" section of the sidebar.
+    click(&mut h, "Files");
     click(&mut h, "Large & Old Files");
     click(&mut h, "Downloads by source app");
     click(&mut h, "Scan");
@@ -148,6 +154,8 @@ fn permission_denied_and_file_in_use() {
     let a = mac.home_file("Movies/a.mov", 2_200_000);
     let b = mac.home_file("Movies/b.mov", 2_300_000);
     let mut h = harness(&mac);
+    // The tool sits in the "Files" section of the sidebar.
+    click(&mut h, "Files");
     click(&mut h, "Large & Old Files");
     click(&mut h, "Scan");
     click(&mut h, "Select All");

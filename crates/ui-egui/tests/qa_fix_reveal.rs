@@ -21,6 +21,8 @@ fn reveal_only_for_paths_that_exist() {
     let fs = mac.env.fake_sys().unwrap();
     fs.answer("open", "");
     let mut h = harness(&mac);
+    // The tool sits in the "Protect" section of the sidebar.
+    click(&mut h, "Protect");
     click(&mut h, "Privacy Traces");
     click(&mut h, "Scan");
     let plan = h.state().plans[&FeatureId::Privacy]

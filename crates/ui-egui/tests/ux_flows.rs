@@ -63,6 +63,8 @@ fn click(h: &mut H, label: &str) {
 fn system_junk_flow_fits_the_smallest_window() {
     let mac = testkit_cleanup::junk_mac();
     let mut h = harness(&mac);
+    // The tool sits in the "Clean" section of the sidebar.
+    click(&mut h, "Clean");
     click(&mut h, "System Junk");
     let before = h.state().action_count();
     click(&mut h, "Scan");
@@ -88,6 +90,8 @@ fn system_junk_flow_fits_the_smallest_window() {
 fn stop_ends_a_plan_scan_and_changes_nothing() {
     let mac = testkit_cleanup::junk_mac();
     let mut h = harness(&mac);
+    // The tool sits in the "Clean" section of the sidebar.
+    click(&mut h, "Clean");
     click(&mut h, "System Junk");
     h.state_mut().plan_state(FeatureId::SystemJunk).phase =
         plan_page::Phase::Scanning(Job::waiting("~/Library/Caches"));
@@ -110,6 +114,8 @@ fn stop_ends_a_plan_scan_and_changes_nothing() {
 fn scans_that_cannot_stop_show_no_stop_button() {
     let mac = testkit_cleanup::trash_mac();
     let mut h = harness(&mac);
+    // The tool sits in the "Clean" section of the sidebar.
+    click(&mut h, "Clean");
     click(&mut h, "Trash Bins");
     assert!(!plan_page::can_stop(FeatureId::TrashBins));
     h.state_mut().plan_state(FeatureId::TrashBins).phase =

@@ -238,29 +238,72 @@ fn quick_sweep_scan_lists_each_module_with_its_state() {
     assert!(has(&h, &format!("{}: done", ids[0].title())));
 }
 
-/// REVIEW-A 18: the page header (title and explanation) is already there on the start screen,
-/// at the same place as on the scanning and results screens, so nothing jumps.
+/// REVIEW-A 18 (with the lead's section layout): in a section with several tools the
+/// switcher at the top stays at the same place from the start screen to scanning and results,
+/// so nothing at the top of the page jumps when Scan is clicked.
 #[test]
-fn start_screen_has_the_page_header_in_place() {
-    let m = testkit_monitor::sweep_mac();
+fn section_switcher_stays_in_place_across_phases() {
+    let m = FakeMac::sample();
     base(&m);
     let mut h = harness(&m, 1060.0, 680.0);
-    h.state_mut().sweep.sources = Some(testkit_monitor::sweep_sources());
+    h.state_mut().navigate("system_junk");
     settle(&mut h);
-    let title_at = |h: &H| {
-        h.get_all_by_label("Quick Sweep")
-            .filter(|n| n.accesskit_node().role() != Role::Button)
-            .map(|n| n.rect())
-            .next()
-            .expect("page title")
-    };
-    let idle = title_at(&h);
-    h.state_mut().sweep.phase = sweep::Phase::Scanning(Job::waiting("System Junk"));
+    let at = |h: &H| h.get_by_label("System Junk").rect();
+    let idle = at(&h);
+    h.state_mut().plan_state(FeatureId::SystemJunk).phase =
+        plan_page::Phase::Scanning(Job::waiting("~/Library/Caches"));
     settle(&mut h);
-    let scanning = title_at(&h);
-    assert!(
-        (idle.min - scanning.min).length() < 0.5,
-        "title moved from {idle:?} to {scanning:?}"
+    let scanning = at(&h);
+    h.state_mut().plan_state(FeatureId::SystemJunk).phase = plan_page::Phase::Idle;
+    settle(&mut h);
+    click(&mut h, "Scan");
+    let results = at(&h);
+    for r in [scanning, results] {
+        assert!(
+            (idle.min - r.min).length() < 0.5,
+            "switcher moved from {idle:?} to {r:?}"
+        );
+    }
+}
+
+/// The lead's sidebar: seven sections and History and Settings, 44 pt rows; a section opens
+/// the tool it showed last.
+#[test]
+fn sidebar_sections_open_their_last_tool() {
+    let m = FakeMac::sample();
+    base(&m);
+    let mut h = harness(&m, 1060.0, 680.0);
+    for name in [
+        "Quick Sweep",
+        "Clean",
+        "Protect",
+        "Speed",
+        "Apps",
+        "Files",
+        "Live Monitor",
+        "History",
+        "Settings",
+    ] {
+        let r = h.get_by_label(name).rect();
+        assert!((r.height() - 44.0).abs() < 0.5, "{name}: {r:?}");
+        assert!(r.max.y <= 680.0, "{name} below the window");
+    }
+    click(&mut h, "Clean");
+    assert_eq!(
+        h.state().page,
+        cleancraft_ui_egui::Page::Feature(FeatureId::SystemJunk)
+    );
+    click(&mut h, "Trash Bins");
+    assert_eq!(
+        h.state().page,
+        cleancraft_ui_egui::Page::Feature(FeatureId::TrashBins)
+    );
+    click(&mut h, "Settings");
+    click(&mut h, "Clean");
+    assert_eq!(
+        h.state().page,
+        cleancraft_ui_egui::Page::Feature(FeatureId::TrashBins),
+        "the section reopens its last tool"
     );
 }
 

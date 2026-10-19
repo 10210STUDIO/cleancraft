@@ -18,6 +18,8 @@ fn ignored_app_leaves_the_list_and_is_never_offered() {
     mac.home_file("Library/Caches/com.example.KeepMe/c", 10_000);
     mac.spotlight_finds_nothing();
     let mut h = harness(&mac);
+    // The tool sits in the "Apps" section of the sidebar.
+    click(&mut h, "Apps");
     click(&mut h, "App Remover");
     assert!(has(&h, "Keep Me") && has(&h, "Other"));
     click(&mut h, "Keep Me");

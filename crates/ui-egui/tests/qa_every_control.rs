@@ -301,7 +301,7 @@ const CLICKABLE: &[Role] = &[
 ];
 
 /// The sidebar is the left panel, 232 points wide.
-const SIDEBAR_RIGHT: f32 = 232.0;
+const SIDEBAR_RIGHT: f32 = cleancraft_ui_egui::theme::space::SIDEBAR;
 /// Shell controls tested once by `shell_controls_respond`, not on every page.
 const SHELL_LABELS: &[&str] = &["Dismiss"];
 
@@ -411,7 +411,9 @@ fn controls(ns: &[N], with_sidebar: bool) -> Vec<(Key, N)> {
         if in_sidebar != with_sidebar {
             continue;
         }
-        if !with_sidebar && SHELL_LABELS.contains(&n.label.as_str()) {
+        // The section switcher's segments (one per tool) are shell controls too: they are
+        // clicked in `shell_controls_respond`, and a page's exploration stays on its tool.
+        if !with_sidebar && (SHELL_LABELS.contains(&n.label.as_str()) || is_tool_title(&n.label)) {
             continue;
         }
         let role = role_name(n.role);
@@ -626,14 +628,54 @@ fn with_node(h: &H, key: &Key, with_sidebar: bool, f: impl FnOnce(&egui_kittest:
     }
 }
 
-/// Click a sidebar row like a user.
+/// A tool's name (a segment of a section switcher).
+fn is_tool_title(label: &str) -> bool {
+    cleancraft_ui_egui::app::GROUPS
+        .iter()
+        .any(|(_, fs)| fs.len() > 1 && fs.iter().any(|f| f.title() == label))
+}
+
+/// Open a page like a user: its sidebar entry, then (a section with several tools) its
+/// segment in the switcher at the top of the page.
 fn nav(h: &mut H, title: &str) -> Result<(), String> {
-    let key = Key {
+    let groups = cleancraft_ui_egui::app::GROUPS;
+    let section = groups
+        .iter()
+        .find(|(_, fs)| fs.len() > 1 && fs.iter().any(|f| f.title() == title))
+        .map(|(name, _)| *name);
+    let row = Key {
         role: "Button".into(),
-        label: title.into(),
+        label: section.unwrap_or(title).into(),
         nth: 0,
     };
-    use_control(h, &key, true)
+    use_control(h, &row, true)?;
+    if section.is_some() {
+        let segment = Key {
+            role: "Button".into(),
+            label: title.into(),
+            nth: 0,
+        };
+        click_segment(h, &segment)?;
+    }
+    Ok(())
+}
+
+/// Click a switcher segment (page area, kept out of `controls`).
+fn click_segment(h: &mut H, key: &Key) -> Result<(), String> {
+    let found = h
+        .root()
+        .children_recursive()
+        .find(|n| {
+            let a = n.accesskit_node();
+            role_name(a.role()) == key.role && a.label().unwrap_or_default() == key.label
+        })
+        .is_some();
+    if !found {
+        return Err(format!("{}: no such segment", key.label));
+    }
+    h.get_by_label(&key.label).click();
+    steps(h);
+    Ok(())
 }
 
 struct PageSpec {
@@ -1224,11 +1266,10 @@ fn shell_controls_respond() {
         .map(|(k, _)| k)
         .collect();
     drop(h);
+    // One row per section (the sections' tools are in each page's switcher).
     let mut names: Vec<String> = Vec::new();
-    for (_, feats) in cleancraft_ui_egui::app::GROUPS {
-        for f in *feats {
-            names.push(f.title().to_string());
-        }
+    for (name, _) in cleancraft_ui_egui::app::GROUPS {
+        names.push(name.to_string());
     }
     names.push("History".into());
     names.push("Settings".into());
@@ -1260,6 +1301,54 @@ fn shell_controls_respond() {
             failures.push(format!("{}: page did not change", k.show()));
         }
         failures.extend(bad_texts(&nodes(&h)));
+    }
+
+    // Section switchers: every segment opens its tool.
+    println!("\n== Section switchers");
+    for (name, feats) in cleancraft_ui_egui::app::GROUPS {
+        if feats.len() < 2 {
+            continue;
+        }
+        for f in *feats {
+            let mut h = harness(&mac);
+            h.state_mut().navigate("settings");
+            steps(&mut h);
+            let row = Key {
+                role: "Button".into(),
+                label: name.to_string(),
+                nth: 0,
+            };
+            if let Err(e) = use_control(&mut h, &row, true) {
+                failures.push(e);
+                continue;
+            }
+            // Start from another tool of the section, so the segment has a page to switch to.
+            let other = feats.iter().find(|x| *x != f).copied().unwrap_or(*f);
+            h.state_mut().page = cleancraft_ui_egui::Page::Feature(other);
+            steps(&mut h);
+            let before = h.state().action_count();
+            let key = Key {
+                role: "Button".into(),
+                label: f.title().to_string(),
+                nth: 0,
+            };
+            let r = click_segment(&mut h, &key);
+            let ok = r.is_ok()
+                && h.state().action_count() > before
+                && h.state().page == cleancraft_ui_egui::Page::Feature(*f);
+            println!(
+                "| {name} > {} | {} |",
+                f.title(),
+                if ok { "ok" } else { "FAIL" }
+            );
+            if !ok {
+                failures.push(format!(
+                    "{name} > {}: segment did not open its tool",
+                    f.title()
+                ));
+            }
+            failures.extend(bad_texts(&nodes(&h)));
+        }
     }
 
     // Full Disk Access banner: shown when access is missing.

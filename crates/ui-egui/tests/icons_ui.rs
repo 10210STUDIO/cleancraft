@@ -75,6 +75,8 @@ fn app_remover_shows_the_placeholder_then_the_real_icon() {
     let mut h = harness(&m.mac);
     let ctx = h.ctx.clone();
     images::install(&ctx, &m.mac.env, Mode::Manual);
+    // The tool sits in the "Apps" section of the sidebar.
+    click(&mut h, "Apps");
     click(&mut h, "App Remover");
 
     // Before the work ran: the initial tile, the requests queued, no tool run in a frame.
@@ -128,6 +130,8 @@ fn a_failed_icon_keeps_the_placeholder_and_is_asked_once() {
     let mut h = harness(&mac);
     let ctx = h.ctx.clone();
     images::install(&ctx, &mac.env, Mode::Sync);
+    // The tool sits in the "Apps" section of the sidebar.
+    click(&mut h, "Apps");
     click(&mut h, "App Remover");
     assert_eq!(images::shown(&ctx, &app), Some(Shown::Placeholder));
     let n = tool_calls(&mac);
@@ -145,6 +149,8 @@ fn detail_confirmation_and_opened_text_use_the_app() {
     let mut h = harness(&m.mac);
     let ctx = h.ctx.clone();
     images::install(&ctx, &m.mac.env, Mode::Sync);
+    // The tool sits in the "Apps" section of the sidebar.
+    click(&mut h, "Apps");
     click(&mut h, "App Remover");
     assert!(has_text(&h, "Opened: 2 days ago"));
     assert!(has_text(&h, "Opened: No record"), "Notes Pro has no date");
@@ -176,6 +182,8 @@ fn app_updates_rows_show_real_icons() {
     let mut h = harness(&mac);
     let ctx = h.ctx.clone();
     images::install(&ctx, &mac.env, Mode::Sync);
+    // The tool sits in the "Apps" section of the sidebar.
+    click(&mut h, "Apps");
     click(&mut h, "App Updates");
     click(&mut h, "Check for Updates");
     assert!(has(&h, "2.0 -> 2.1"));
@@ -199,6 +207,8 @@ fn startup_items_show_the_app_behind_login_items_and_agents() {
     let mut h = harness(&m);
     let ctx = h.ctx.clone();
     images::install(&ctx, &m.env, Mode::Sync);
+    // The tool sits in the "Speed" section of the sidebar.
+    click(&mut h, "Speed");
     click(&mut h, "Startup Items");
     assert!(h.state().startup.data.is_some());
     assert_eq!(images::shown(&ctx, &dropbox), Some(Shown::Image));
@@ -344,6 +354,8 @@ fn without_a_loader_everything_is_a_placeholder() {
     // UI tests that do not install one (all the older ones) never run icon tools.
     let m = icon_mac();
     let mut h = harness(&m.mac);
+    // The tool sits in the "Apps" section of the sidebar.
+    click(&mut h, "Apps");
     click(&mut h, "App Remover");
     assert_eq!(images::shown(&h.ctx, &m.editor), None);
     assert_eq!(tool_calls(&m.mac), 0);
@@ -400,6 +412,9 @@ fn icons_render() {
             h.step();
         }
         images::install(&h.ctx.clone(), &mac.env, Mode::Sync);
+        // App Remover sits in the "Apps" section of the sidebar.
+        h.get_by_label("Apps").click();
+        h.run();
         h.get_by_label("App Remover").click();
         for _ in 0..6 {
             h.step();

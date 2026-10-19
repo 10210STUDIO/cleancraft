@@ -13,6 +13,8 @@ use egui_kittest::kittest::Queryable;
 fn scan_review_clean_undo() {
     let mac = FakeMac::sample();
     let mut h = harness(&mac);
+    // The tool sits in the "Clean" section of the sidebar.
+    click(&mut h, "Clean");
     click(&mut h, "System Junk");
     click(&mut h, "Scan");
     let plan = h.state().plans[&cleancraft_core::FeatureId::SystemJunk]
@@ -75,6 +77,8 @@ fn errors_are_shown_per_file() {
     let browser = mac.env.home_path("Library/Caches/com.example.Browser");
     let editor = mac.env.home_path("Library/Caches/com.example.Editor");
     let mut h = harness(&mac);
+    // The tool sits in the "Clean" section of the sidebar.
+    click(&mut h, "Clean");
     click(&mut h, "System Junk");
     click(&mut h, "Scan");
     mac.env.inject_fault(&browser, Fault::PermissionDenied);
@@ -90,6 +94,8 @@ fn errors_are_shown_per_file() {
 fn cancel_moves_nothing() {
     let mac = FakeMac::sample();
     let mut h = harness(&mac);
+    // The tool sits in the "Clean" section of the sidebar.
+    click(&mut h, "Clean");
     click(&mut h, "System Junk");
     click(&mut h, "Scan");
     click(&mut h, "Review and Clean");
@@ -106,9 +112,10 @@ fn cancel_moves_nothing() {
 fn every_sidebar_entry_is_inside_the_window() {
     let mac = FakeMac::sample();
     let h = harness(&mac);
-    let mut labels: Vec<&str> = cleancraft_core::FeatureId::ALL
+    // One entry per section; each tool is reached through its section (switcher).
+    let mut labels: Vec<&str> = cleancraft_ui_egui::app::GROUPS
         .iter()
-        .map(|f| f.title())
+        .map(|(name, _)| *name)
         .collect();
     labels.extend(["History", "Settings"]);
     for l in labels {

@@ -14,6 +14,8 @@ use egui::accesskit::Role;
 use egui_kittest::kittest::Queryable;
 
 fn clean_junk(h: &mut H) {
+    // The tool sits in the "Clean" section of the sidebar.
+    click(h, "Clean");
     click(h, "System Junk");
     click(h, "Scan");
     click(h, "Review and Clean");
@@ -122,6 +124,10 @@ fn settings_are_saved_and_change_what_happens() {
     assert!(has(&h, &mac.env.display(&browser)));
 
     // Agents may clean and a threshold: each saved.
+    // Lower on the page (15 pt body text since round 3): scroll to it like a user.
+    h.get_by_label("Let AI agents (MCP) carry out confirmed cleanups")
+        .scroll_to_me();
+    steps(&mut h);
     click(&mut h, "Let AI agents (MCP) carry out confirmed cleanups");
     assert!(Settings::load(&mac.env).agents_may_clean);
     h.get_by_role_and_label(Role::Slider, "Large file minimum (MB)")
@@ -132,6 +138,8 @@ fn settings_are_saved_and_change_what_happens() {
     assert_ne!(saved.large_min_bytes, Settings::default().large_min_bytes);
 
     // The next scan leaves the ignored folder out; the cleanup goes to the quarantine.
+    // The tool sits in the "Clean" section of the sidebar.
+    click(&mut h, "Clean");
     click(&mut h, "System Junk");
     click(&mut h, "Scan");
     let plan = h.state().plans[&FeatureId::SystemJunk]
@@ -156,6 +164,8 @@ fn settings_are_saved_and_change_what_happens() {
     click(&mut h, "Settings");
     click(&mut h, &format!("Remove {}", mac.env.display(&browser)));
     assert!(Settings::load(&mac.env).ignore.is_empty());
+    // The tool sits in the "Clean" section of the sidebar.
+    click(&mut h, "Clean");
     click(&mut h, "System Junk");
     click(&mut h, "Done");
     click(&mut h, "Scan");

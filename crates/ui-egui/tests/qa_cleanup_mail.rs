@@ -20,6 +20,8 @@ fn plan(h: &H) -> Plan {
 
 fn open(mac: &FakeMac) -> H {
     let mut h = harness(mac);
+    // The tool sits in the "Clean" section of the sidebar.
+    click(&mut h, "Clean");
     click(&mut h, "Mail Downloads");
     click(&mut h, "Scan");
     h

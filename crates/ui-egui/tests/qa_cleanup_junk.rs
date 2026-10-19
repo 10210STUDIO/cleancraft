@@ -50,6 +50,8 @@ fn set_search(h: &mut H, text: &str) {
 
 fn open_junk(mac: &FakeMac) -> H {
     let mut h = harness(mac);
+    // The tool sits in the "Clean" section of the sidebar.
+    click(&mut h, "Clean");
     click(&mut h, "System Junk");
     click(&mut h, "Scan");
     h

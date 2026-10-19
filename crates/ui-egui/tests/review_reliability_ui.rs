@@ -92,6 +92,8 @@ fn cache_rows(h: &H, mac: &FakeMac) -> usize {
 fn confirm_dialog_with_thousands_of_items_lays_out_only_visible_rows() {
     let mac = many_caches(3000);
     let mut h = harness(&mac);
+    // The tool sits in the "Clean" section of the sidebar.
+    click(&mut h, "Clean");
     click(&mut h, "System Junk");
     click(&mut h, "Scan");
     assert_eq!(
@@ -140,6 +142,8 @@ fn damaged_settings_are_reported_and_the_ignore_list_survives() {
         Some(&full[..full.len() - 4]),
         "the damaged file is not kept as a copy"
     );
+    // The tool sits in the "Clean" section of the sidebar.
+    click(&mut h, "Clean");
     click(&mut h, "System Junk");
     click(&mut h, "Scan");
     let proposed = h.state().plans[&FeatureId::SystemJunk]
@@ -163,6 +167,8 @@ fn damaged_settings_are_reported_and_the_ignore_list_survives() {
 fn dead_cleanup_job_is_reported() {
     let mac = FakeMac::sample();
     let mut h = async_harness(&mac);
+    // The tool sits in the "Clean" section of the sidebar.
+    click(&mut h, "Clean");
     click(&mut h, "System Junk");
     click(&mut h, "Scan");
     assert!(wait_until(&mut h, |h| phase_is(
@@ -193,6 +199,8 @@ fn dead_cleanup_job_is_reported() {
 fn item_list_of_thousands_lays_out_only_visible_rows() {
     let mac = many_caches(3000);
     let mut h = harness(&mac);
+    // The tool sits in the "Clean" section of the sidebar.
+    click(&mut h, "Clean");
     click(&mut h, "System Junk");
     click(&mut h, "Scan");
     let rows = cache_rows(&h, &mac);
@@ -212,6 +220,8 @@ fn item_list_of_thousands_lays_out_only_visible_rows() {
 fn switching_pages_while_scanning_keeps_the_result() {
     let mac = FakeMac::sample();
     let mut h = async_harness(&mac);
+    // The tool sits in the "Clean" section of the sidebar.
+    click(&mut h, "Clean");
     click(&mut h, "System Junk");
     click(&mut h, "Scan");
     click(&mut h, "History");
@@ -220,6 +230,8 @@ fn switching_pages_while_scanning_keeps_the_result() {
         FeatureId::SystemJunk,
         "results"
     )));
+    // The tool sits in the "Clean" section of the sidebar.
+    click(&mut h, "Clean");
     click(&mut h, "System Junk");
     let plan = h.state().plans[&FeatureId::SystemJunk]
         .plan
@@ -234,6 +246,8 @@ fn switching_pages_while_scanning_keeps_the_result() {
 fn move_to_trash_cannot_be_clicked_twice() {
     let mac = FakeMac::sample();
     let mut h = async_harness(&mac);
+    // The tool sits in the "Clean" section of the sidebar.
+    click(&mut h, "Clean");
     click(&mut h, "System Junk");
     click(&mut h, "Scan");
     assert!(wait_until(&mut h, |h| phase_is(
@@ -275,6 +289,8 @@ fn move_to_trash_cannot_be_clicked_twice() {
 fn scan_button_is_gone_while_scanning_and_undo_runs_once() {
     let mac = FakeMac::sample();
     let mut h = async_harness(&mac);
+    // The tool sits in the "Clean" section of the sidebar.
+    click(&mut h, "Clean");
     click(&mut h, "System Junk");
     h.get_by_label("Scan").click();
     h.step();
@@ -304,6 +320,8 @@ fn scan_button_is_gone_while_scanning_and_undo_runs_once() {
 fn history_undo_after_trash_emptied_says_why() {
     let mac = FakeMac::sample();
     let mut h = harness(&mac);
+    // The tool sits in the "Clean" section of the sidebar.
+    click(&mut h, "Clean");
     click(&mut h, "System Junk");
     click(&mut h, "Scan");
     click(&mut h, "Review and Clean");
@@ -326,6 +344,8 @@ fn ignore_and_history_survive_a_restart() {
     let editor = mac.env.home_path("Library/Caches/com.example.Editor");
     {
         let mut h = harness(&mac);
+        // The tool sits in the "Clean" section of the sidebar.
+        click(&mut h, "Clean");
         click(&mut h, "System Junk");
         click(&mut h, "Scan");
         type_into(&mut h, "Search", "example.editor");
@@ -336,6 +356,8 @@ fn ignore_and_history_survive_a_restart() {
     }
     // A new window on the same Mac.
     let mut h = harness(&mac);
+    // The tool sits in the "Clean" section of the sidebar.
+    click(&mut h, "Clean");
     click(&mut h, "System Junk");
     click(&mut h, "Scan");
     let plan = h.state().plans[&FeatureId::SystemJunk]

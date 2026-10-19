@@ -23,6 +23,8 @@ fn plan(h: &H) -> Plan {
 
 fn open(mac: &FakeMac) -> H {
     let mut h = harness(mac);
+    // The tool sits in the "Protect" section of the sidebar.
+    click(&mut h, "Protect");
     click(&mut h, "Privacy Traces");
     click(&mut h, "Scan");
     h
