@@ -182,8 +182,8 @@ fn error() -> Vec<f32> {
         let partials = [(1.0, 1.0), (2.0, 0.30), (3.0, 0.12), (4.0, 0.04)];
         let start = (at * SR) as usize;
         let mut ph = [0.0f32; 4];
-        for i in start..b.len() {
-            let t = (i - start) as f32 / SR;
+        for (n, out) in b[start..].iter_mut().enumerate() {
+            let t = n as f32 / SR;
             let e = attack(t, 0.008) * (-t / 0.11).exp();
             let mut v = 0.0;
             for (k, (r, a)) in partials.iter().enumerate() {
@@ -191,7 +191,7 @@ fn error() -> Vec<f32> {
                 // Higher partials fade faster: the tone darkens as it decays.
                 v += a * ph[k].sin() * (-t * 6.0 * (r - 1.0)).exp();
             }
-            b[i] += 0.6 * e * v;
+            *out += 0.6 * e * v;
         }
     }
     lowpass(&mut b, 4000.0);
@@ -244,8 +244,8 @@ fn voice(
 ) {
     let start = (at * SR) as usize;
     let detune = 2f32.powf(1.5 / 1200.0);
-    for i in start..b.len() {
-        let t = (i - start) as f32 / SR;
+    for (n, out) in b[start..].iter_mut().enumerate() {
+        let t = n as f32 / SR;
         let a = attack(t, att);
         let mut v = 0.0;
         for (r, pa, d) in partials {
@@ -256,15 +256,15 @@ fn voice(
             let w = TAU * f * r * t;
             v += pa * e * 0.5 * (w.sin() + (w * detune).sin());
         }
-        b[i] += amp * a * v;
+        *out += amp * a * v;
     }
 }
 
 fn sine_note(b: &mut [f32], at: f32, f: f32, amp: f32, att: f32, tau: f32) {
     let start = (at * SR) as usize;
-    for i in start..b.len() {
-        let t = (i - start) as f32 / SR;
-        b[i] += amp * attack(t, att) * (-t / tau).exp() * (TAU * f * t).sin();
+    for (n, out) in b[start..].iter_mut().enumerate() {
+        let t = n as f32 / SR;
+        *out += amp * attack(t, att) * (-t / tau).exp() * (TAU * f * t).sin();
     }
 }
 
@@ -381,26 +381,28 @@ fn reverb(dry: &[f32], wet: f32) -> Vec<f32> {
     // 10 ms pre-delay keeps the attack clean.
     let pre = (0.010 * SR) as usize;
     let mut out = Vec::with_capacity(dry.len());
-    for i in 0..dry.len() {
+    for (i, &d) in dry.iter().enumerate() {
         let input = if i >= pre { dry[i - pre] * 0.015 } else { 0.0 };
         let mut acc = 0.0;
-        for k in 0..8 {
-            let bufk = &mut comb_bufs[k];
-            let y = bufk[comb_idx[k]];
-            comb_lp[k] = y * (1.0 - damp) + comb_lp[k] * damp;
-            bufk[comb_idx[k]] = input + comb_lp[k] * feedback;
-            comb_idx[k] = (comb_idx[k] + 1) % bufk.len();
+        for ((bufk, idx), lp) in comb_bufs
+            .iter_mut()
+            .zip(comb_idx.iter_mut())
+            .zip(comb_lp.iter_mut())
+        {
+            let y = bufk[*idx];
+            *lp = y * (1.0 - damp) + *lp * damp;
+            bufk[*idx] = input + *lp * feedback;
+            *idx = (*idx + 1) % bufk.len();
             acc += y;
         }
-        for k in 0..4 {
-            let bufk = &mut all_bufs[k];
-            let bv = bufk[all_idx[k]];
+        for (bufk, idx) in all_bufs.iter_mut().zip(all_idx.iter_mut()) {
+            let bv = bufk[*idx];
             let y = -acc + bv;
-            bufk[all_idx[k]] = acc + bv * 0.5;
-            all_idx[k] = (all_idx[k] + 1) % bufk.len();
+            bufk[*idx] = acc + bv * 0.5;
+            *idx = (*idx + 1) % bufk.len();
             acc = y;
         }
-        out.push(dry[i] + wet * acc * 3.0);
+        out.push(d + wet * acc * 3.0);
     }
     out
 }
