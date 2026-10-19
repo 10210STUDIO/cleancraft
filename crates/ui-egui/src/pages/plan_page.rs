@@ -477,10 +477,11 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     });
     if !extras_inline {
         ui.add_space(space::S);
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            ui.set_height(crate::theme::hit::SECONDARY);
-            extras_row(app, ui, f, extras_id);
-        });
+        ui.allocate_ui_with_layout(
+            vec2(ui.available_width(), crate::theme::hit::SECONDARY),
+            Layout::right_to_left(Align::Center),
+            |ui| extras_row(app, ui, f, extras_id),
+        );
     }
     ui.add_space(space::M);
     let avail_h = ui.available_height() - 4.0;
