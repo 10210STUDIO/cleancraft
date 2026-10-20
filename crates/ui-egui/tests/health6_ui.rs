@@ -233,7 +233,7 @@ fn trash_card_from_facts() {
     h.state_mut().health.set(Read {
         facts: f,
         history,
-        growth: None,
+        maps: Vec::new(),
     });
     steps(&mut h);
     assert!(has_text(&h, "The Trash holds 6.00 GB"));

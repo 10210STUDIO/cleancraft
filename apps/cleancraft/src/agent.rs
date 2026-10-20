@@ -148,6 +148,8 @@ pub fn run(env: &Env) -> anyhow::Result<()> {
         );
     }
     notify::claim_agent(env, std::process::id()).map_err(anyhow::Error::msg)?;
+    // Notifications posted as CleanCraft, opening the app when clicked (osascript fallback).
+    crate::native_notify::install(env);
     let (to_ui, models) = mpsc::channel::<MenuModel>();
     let (actions, from_ui) = mpsc::channel::<MenuAction>();
     let worker_env = env.clone();
@@ -312,7 +314,10 @@ mod tests {
             .find(|c| c.starts_with("/usr/bin/osascript"))
             .unwrap_or_default();
         assert!(
-            line.ends_with("end run -- -e Editor went to the Trash Its leftovers take 12 MB."),
+            line.ends_with(&format!(
+                "end run -- -e Editor went to the Trash Its leftovers take 12 MB. {}",
+                notify::MENU_HINT
+            )),
             "{line}"
         );
         assert_eq!(model.reviews.len(), 1);

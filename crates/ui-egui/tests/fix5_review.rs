@@ -782,7 +782,7 @@ fn u26_settings_assistants_switch_and_quarantine_line() {
     base(&m);
     let mut h = harness(&m);
     go(&mut h, "settings");
-    let n = h.get_by_label("Let AI assistants clean after you confirm (MCP)");
+    let n = h.get_by_label("Let AI assistants clean after you confirm");
     assert_eq!(n.accesskit_node().role(), Role::Switch);
     assert!(has(&h, "CleanCraft quarantine"));
     assert!(has_text(

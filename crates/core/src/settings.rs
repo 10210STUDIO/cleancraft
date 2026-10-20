@@ -58,6 +58,16 @@ pub struct Settings {
     pub watch_trash_offer: bool,
     /// Menu bar agent: check new apps and startup items with Threat Check's rules.
     pub watch_new_items: bool,
+    /// The first-launch steps (welcome, Full Disk Access, AI apps) were shown. Set as soon
+    /// as the first step shows, so they appear only on the very first launch, whatever
+    /// happened then. A settings file from before this field counts as set up (existing
+    /// users never see the steps); a fresh install (no file) starts with false.
+    #[serde(default = "set_up")]
+    pub setup_done: bool,
+}
+
+fn set_up() -> bool {
+    true
 }
 
 /// Interface sounds start at this loudness (0.0 to 1.0).
@@ -92,6 +102,7 @@ impl Default for Settings {
             notifications_paused: false,
             watch_trash_offer: false,
             watch_new_items: false,
+            setup_done: false,
         }
     }
 }
@@ -123,16 +134,25 @@ impl Settings {
                 } else {
                     "Your settings file could not be read, so default settings are in use (ignore list empty).".to_string()
                 };
-                (Settings::default(), Some(msg))
+                // A damaged file means CleanCraft ran here before: no first-launch steps.
+                let s = Settings {
+                    setup_done: true,
+                    ..Settings::default()
+                };
+                (s, Some(msg))
             }
         }
     }
 
     pub fn load(env: &Env) -> Settings {
-        std::fs::read(Self::path(env))
-            .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_default()
+        match std::fs::read(Self::path(env)) {
+            Err(_) => Settings::default(),
+            // A file that cannot be read still means CleanCraft ran here before.
+            Ok(b) => serde_json::from_slice(&b).unwrap_or(Settings {
+                setup_done: true,
+                ..Settings::default()
+            }),
+        }
     }
 
     pub fn save(&self, env: &Env) -> std::io::Result<()> {

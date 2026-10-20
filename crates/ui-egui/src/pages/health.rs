@@ -8,7 +8,7 @@
 use std::time::{Duration, Instant};
 
 use cleancraft_core::fsutil::{count, human_size};
-use cleancraft_core::health::{self, Card, Facts, Growth, Level, State as Verdict};
+use cleancraft_core::health::{self, Card, Facts, Growth, Level, MapSummary, State as Verdict};
 use cleancraft_core::monitor::BatteryReading;
 use cleancraft_core::space_history::{self, History};
 use egui::{Color32, RichText, Ui, vec2};
@@ -26,7 +26,8 @@ pub const RANGES: [(&str, i64); 3] = [("7 days", 7), ("30 days", 30), ("90 days"
 pub struct Read {
     pub facts: Facts,
     pub history: History,
-    pub growth: Option<Growth>,
+    /// The kept measures of folders ("what grew" compares two of them).
+    pub maps: Vec<MapSummary>,
 }
 
 #[derive(Default)]
@@ -34,6 +35,8 @@ pub struct State {
     pub facts: Option<Facts>,
     pub cards: Vec<Card>,
     pub history: History,
+    pub maps: Vec<MapSummary>,
+    /// What grew over the chart's range (from `maps`).
     pub growth: Option<Growth>,
     job: Option<Job<Read>>,
     pub checked: Option<Instant>,
@@ -52,8 +55,19 @@ impl State {
         self.cards = health::recommendations(&r.facts);
         self.facts = Some(r.facts);
         self.history = r.history;
-        self.growth = r.growth;
+        self.maps = r.maps;
         self.checked = Some(Instant::now());
+        self.regrow();
+    }
+
+    /// Compare the measures again for the chart's range.
+    pub fn regrow(&mut self) {
+        let now = self
+            .facts
+            .as_ref()
+            .map(|f| f.now)
+            .unwrap_or_else(|| chrono::Utc::now().timestamp());
+        self.growth = health::what_grew_in(&self.maps, now, RANGES[self.range].1);
     }
 }
 
@@ -68,7 +82,7 @@ pub fn refresh(app: &mut CleanApp) {
         Read {
             facts: health::gather(&env, now, progress),
             history: space_history::load(&env).history,
-            growth: health::what_grew(&env),
+            maps: health::map_summaries(&env),
         }
     }));
 }
@@ -219,19 +233,40 @@ fn summary(app: &mut CleanApp, ui: &mut Ui) {
                             .font(font(size::TITLE, Weight::Bold))
                             .color(t.text),
                     );
-                    let line = if why.is_empty() {
-                        "No rule that needs attention applies right now.".to_string()
+                    if why.is_empty() {
+                        kit::dim(ui, &t, "No rule that needs attention applies right now.");
                     } else {
-                        format!("Why: {}.", why.join("; "))
-                    };
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(line)
-                                .font(font(size::CALLOUT, Weight::Regular))
-                                .color(t.text_dim),
-                        )
-                        .wrap(),
-                    );
+                        // A short list of reasons, not one long sentence.
+                        ui.spacing_mut().item_spacing.y = 2.0;
+                        kit::dim(
+                            ui,
+                            &t,
+                            &format!(
+                                "{} need attention:",
+                                count(why.len(), "thing", "things")
+                            ),
+                        );
+                        for w in why.iter().take(4) {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(format!("\u{2022}  {w}"))
+                                        .font(font(size::CALLOUT, Weight::Regular))
+                                        .color(t.text_dim),
+                                )
+                                .wrap(),
+                            );
+                        }
+                        if why.len() > 4 {
+                            kit::dim(
+                                ui,
+                                &t,
+                                &format!(
+                                    "and {} more, in Recommendations below.",
+                                    why.len() - 4
+                                ),
+                            );
+                        }
+                    }
                 },
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -351,6 +386,9 @@ fn rec_row(app: &mut CleanApp, ui: &mut Ui, c: &Card, i: usize) {
                     app.act();
                     // Opens the page (a scan from here only looks); nothing runs here.
                     app.open_route(&c.route);
+                    if let Some(l) = &c.landing {
+                        app.tell(l.clone());
+                    }
                 }
             });
         });
@@ -534,6 +572,7 @@ fn chart_card(app: &mut CleanApp, ui: &mut Ui) {
                 if let Some(i) = kit::choice_pills(ui, &t, &names, app.health.range) {
                     app.act();
                     app.health.range = i;
+                    app.health.regrow();
                 }
             });
         });
@@ -546,12 +585,17 @@ fn chart_card(app: &mut CleanApp, ui: &mut Ui) {
             .as_ref()
             .and_then(|f| f.disk_total)
             .or_else(|| app.health.history.samples.last().and_then(|s| s.total));
-        let guide_v = total.map(|tot| {
-            (tot as f64 * health::ATTENTION_FREE_FRACTION).max(health::ATTENTION_FREE_BYTES as f64)
-        });
+        // One line for "low": the disk alert's threshold from Settings (10% when the alert
+        // is off), the same value the menu bar warns at (U7-16).
+        let pct = match app.settings.disk_low_percent {
+            0 => (health::URGENT_FREE_FRACTION * 100.0).round() as u8,
+            p => p,
+        };
+        let guide_label = format!("Low ({pct}% free)");
+        let guide_v = total.map(|tot| tot as f64 * f64::from(pct) / 100.0);
         let guide = guide_v.map(|v| kit::ChartGuide {
             value: v,
-            label: "Getting low",
+            label: &guide_label,
             color: t.warning,
         });
         let w = ui.available_width();
@@ -590,24 +634,32 @@ fn grew_card(app: &mut CleanApp, ui: &mut Ui) {
         ui.set_width(ui.available_width());
         kit::card_head(ui, &t, Icon::Folder, t.sec_a, "What grew");
         ui.add_space(space::S);
+        let (measures, first) = health::measures(&app.health.maps);
         match app.health.growth.clone() {
             None => {
-                kit::dim(
-                    ui,
-                    &t,
-                    "Map a folder in Disk Map twice (days apart) to see which folders grew in between.",
-                );
+                let line = match (measures, first) {
+                    (0, _) => "CleanCraft measures your home folder once a day while it runs. The first measure is not done yet.".to_string(),
+                    (_, Some(at)) if health::ago(at, chrono::Utc::now().timestamp()) == "today" => {
+                        "First measure taken today. Come back tomorrow to see what grew.".to_string()
+                    }
+                    (_, Some(at)) => format!(
+                        "First measure taken {}. The next one comes with tomorrow's launch or scheduled scan.",
+                        date(at)
+                    ),
+                    _ => String::new(),
+                };
+                kit::dim(ui, &t, &line);
                 ui.add_space(space::XS);
                 if kit::secondary(ui, &t, "Open Disk Map") {
                     app.act();
-                    app.open_route(&cleancraft_core::route::AppRoute::Feature(
+                    app.open_route(&cleancraft_core::route::AppRoute::Scan(
                         cleancraft_core::FeatureId::SpaceLens,
                     ));
                 }
             }
             Some(g) => {
                 let span = format!(
-                    "{}: Disk Map scans of {} and {} compared.",
+                    "{}: measures of {} and {} compared.",
                     app.env.display(&g.root),
                     date(g.from),
                     date(g.to)
@@ -624,17 +676,30 @@ fn grew_card(app: &mut CleanApp, ui: &mut Ui) {
                         ),
                     );
                 }
-                for x in g.grew.iter().take(6) {
+                for (i, x) in g.grew.iter().take(6).enumerate() {
                     ui.horizontal(|ui| {
                         let shown = app.env.display(&x.path);
                         let fid = font(size::CALLOUT, Weight::Medium);
                         let w = (ui.available_width() - 150.0).max(120.0);
-                        kit::quiet_label(
-                            ui,
-                            &t,
-                            &kit::truncate_middle(ui.ctx(), &shown, &fid, w),
-                            &shown,
-                        );
+                        // Each folder opens in Disk Map (look only).
+                        let r = ui.push_id(("grew", i), |ui| {
+                            kit::link(ui, &t, &kit::truncate_middle(ui.ctx(), &shown, &fid, w))
+                        });
+                        let r = r.inner.on_hover_text(format!("Open {shown} in Disk Map"));
+                        r.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::Button,
+                                true,
+                                format!("Open {shown} in Disk Map"),
+                            )
+                        });
+                        if r.clicked() {
+                            app.act();
+                            app.open_route(&cleancraft_core::route::AppRoute::Feature(
+                                cleancraft_core::FeatureId::SpaceLens,
+                            ));
+                            super::disk_map::show_folder(app, x.path.clone());
+                        }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.label(
                                 RichText::new(format!("+{}", human_size(x.after - x.before)))

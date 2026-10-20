@@ -434,6 +434,10 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                     .font(font(size::CALLOUT, Weight::Regular))
                     .color(t.text_dim),
             );
+            // Developer Clutter says where it looked, with a way to add a folder (U7-6).
+            if f == FeatureId::DevClutter {
+                super::dev_clutter::empty_extra(app, ui);
+            }
             // What could not be looked at stays one click away, not in the way.
             if !plan.notes.is_empty() {
                 ui.add_space(space::S);

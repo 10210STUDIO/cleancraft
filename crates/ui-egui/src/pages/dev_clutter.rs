@@ -95,6 +95,70 @@ pub fn banner_text(tools: &[ToolReport]) -> Option<String> {
     ))
 }
 
+/// The empty result's extra lines: where it looked, Add Code Folder... and Code Folders in
+/// Settings (U7-6).
+pub fn empty_extra(app: &mut CleanApp, ui: &mut Ui) {
+    let t = app.t;
+    let (roots, _) = dev::code_roots(&app.env, &app.settings);
+    let line = if roots.is_empty() {
+        let usual: Vec<String> = dev::DEFAULT_ROOTS
+            .iter()
+            .map(|d| format!("~/{d}"))
+            .collect();
+        format!(
+            "None of the usual code folders ({}) is on this Mac. Add the folder that holds your projects.",
+            usual.join(", ")
+        )
+    } else {
+        let shown: Vec<String> = roots
+            .iter()
+            .map(|p| super::history::short_path(&app.env, p))
+            .collect();
+        format!(
+            "Looked in {}. No build folders or caches to clean there. Your projects in another folder? Add it.",
+            shown.join(", ")
+        )
+    };
+    ui.add_space(space::S);
+    ui.scope(|ui| {
+        ui.set_max_width(560.0);
+        ui.add(
+            egui::Label::new(
+                RichText::new(line)
+                    .font(font(size::CALLOUT, Weight::Regular))
+                    .color(t.text_dim),
+            )
+            .wrap(),
+        );
+    });
+    ui.add_space(space::S);
+    let picking = super::settings::picking_dev(app);
+    kit::centered_row(ui, Id::new("dev-empty-actions"), |ui| {
+        let r = ui
+            .add_enabled_ui(!picking, |ui| {
+                kit::pill(ui, &t, ADD_FOLDER, kit::Kind::Secondary, Some(Icon::Folder))
+            })
+            .inner;
+        if r.clicked() && !picking {
+            app.act();
+            super::settings::pick_dev_root(app);
+        }
+        if kit::ghost(ui, &t, SETTINGS_LINK, None).clicked() {
+            app.act();
+            app.settings_page.focus_dev = true;
+            app.open_route(&cleancraft_core::route::AppRoute::Settings);
+        }
+    });
+    if super::settings::poll_dev_pick(app, ui.ctx()) {
+        // A folder was added: look again at once.
+        plan_page::start_scan(app, FeatureId::DevClutter);
+    }
+}
+
+/// The empty result's buttons.
+pub const ADD_FOLDER: &str = "Add Code Folder...";
+pub const SETTINGS_LINK: &str = "Code Folders in Settings";
+
 pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     let t = app.t;
     let mut st = load(ui);

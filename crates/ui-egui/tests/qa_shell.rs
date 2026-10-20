@@ -124,10 +124,10 @@ fn settings_are_saved_and_change_what_happens() {
 
     // Agents may clean and a threshold: each saved.
     // Lower on the page (15 pt body text since round 3): scroll to it like a user.
-    h.get_by_label("Let AI assistants clean after you confirm (MCP)")
+    h.get_by_label("Let AI assistants clean after you confirm")
         .scroll_to_me();
     steps(&mut h);
-    click(&mut h, "Let AI assistants clean after you confirm (MCP)");
+    click(&mut h, "Let AI assistants clean after you confirm");
     assert!(Settings::load(&mac.env).agents_may_clean);
     // Above the AI group since round 6 (Full Disk Access and Developer Clutter groups):
     // scroll it into view first.
@@ -189,10 +189,10 @@ fn settings_that_cannot_be_saved_say_so() {
     click(&mut h, "Settings");
     // Lower on the page: scroll to it like a user (the switch row is taller than the old
     // checkbox, fix5 U26).
-    h.get_by_label("Let AI assistants clean after you confirm (MCP)")
+    h.get_by_label("Let AI assistants clean after you confirm")
         .scroll_to_me();
     steps(&mut h);
-    click(&mut h, "Let AI assistants clean after you confirm (MCP)");
+    click(&mut h, "Let AI assistants clean after you confirm");
     assert!(has_text(&h, "Settings could not be saved"));
     assert!(!Settings::load(&mac.env).agents_may_clean);
 }

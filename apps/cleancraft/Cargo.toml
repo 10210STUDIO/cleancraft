@@ -29,3 +29,6 @@ craft-quit = { workspace = true, features = ["menu"] }
 # (the same winit eframe uses). muda comes with tray-icon (`tray_icon::menu`).
 tray-icon = { version = "0.26.1", default-features = false }
 winit = { version = "0.30.13", default-features = false }
+# Notifications posted as CleanCraft (not Script Editor), reporting a click, so a click opens
+# the app on the notification's page (U7-2). Safe API; osascript stays the fallback.
+mac-notification-sys = "0.6.15"

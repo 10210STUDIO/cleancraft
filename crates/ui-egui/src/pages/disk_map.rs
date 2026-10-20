@@ -117,6 +117,48 @@ fn volumes(app: &mut CleanApp) -> Vec<Volume> {
     app.disk_map.vols.clone().unwrap_or_default()
 }
 
+/// Start measuring `loc` unless the map is busy or already shows something (a route from Mac
+/// Health: "Open Disk Map" lands on a map being measured, not on the start screen). Only
+/// looks.
+pub fn start_if_idle(app: &mut CleanApp, loc: MapLocation) {
+    if matches!(app.disk_map.phase, Phase::Idle) {
+        app.disk_map.location = loc.clone();
+        start_location(app, loc, false);
+    }
+}
+
+/// Open the map on one folder (a "What grew" row): measured unless a measured tree holds it.
+/// Only looks.
+pub fn show_folder(app: &mut CleanApp, p: PathBuf) {
+    if matches!(
+        app.disk_map.phase,
+        Phase::Scanning(_) | Phase::Working(_) | Phase::Confirm
+    ) {
+        return;
+    }
+    let inside = app
+        .disk_map
+        .trees
+        .values()
+        .find_map(|t| {
+            t.find(&p)
+                .is_some()
+                .then(|| t.root_path().map(Path::to_path_buf))
+        })
+        .flatten();
+    match inside {
+        Some(root) => {
+            let st = &mut app.disk_map;
+            st.root = Some(root);
+            st.current = Some(p);
+            st.selected.clear();
+            st.error = None;
+            st.phase = Phase::Map;
+        }
+        None => start_location(app, MapLocation::Folder(p), false),
+    }
+}
+
 /// Map a location from the picker.
 fn start_location(app: &mut CleanApp, loc: MapLocation, fresh: bool) {
     let root = loc.root(&app.env);
