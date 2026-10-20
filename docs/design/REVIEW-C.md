@@ -79,3 +79,53 @@ Top 5, in order: C1 (cursor, the user's own complaint), C2 (invisible focus), C3
 
 `crates/ui-egui/tests/review_design_c.rs`, all `#[ignore]` and failing on 4e23d58:
 `review_c1_every_control_shows_the_pointing_hand`, `review_c2_keyboard_focus_is_visible`, `review_c3_clicking_a_result_row_toggles_it`, `review_c4_category_names_are_whole_at_the_smallest_window`, `review_c5_confirm_dialog_is_modal_for_pointer_and_keyboard`, `review_c6_unchecked_checkbox_border_reaches_3_to_1`, `review_c7_monitor_buttons_hit_area_matches_the_pill`, `review_c8_primary_pill_fill_has_no_hard_edge`, `review_c9_scan_disc_aligns_with_the_text_column`, `review_c10_first_results_frame_is_consistent`, `review_c11_settings_value_fields_are_named`, `review_c13_hovered_row_path_ends_before_its_buttons`, `review_c16_start_screen_descriptions_have_no_widow`. Pixel tests (C2, C6, C8) pass trivially where no wgpu adapter exists. Remove the `#[ignore]` with the fix.
+
+## Round D verification
+
+Checked on `agent4/design4` at 5000cbd (checked out in this worktree, built and run here): `cargo test -p cleancraft-ui-egui --test review_design_c -- --include-ignored` (10 pass, 3 fail: C4, C7, C11), the full render set at 1x (`pages_render` to a scratch folder) looked at by eye, and the probe harness again (cursor, focus pixels, tab order, modal, first frames). ux4 has not posted a commit for its items yet, so C7, C11, C14, C25 to C29, C36 are unchanged.
+
+Test change on this branch: `review_c1` now hovers only what is painted on screen (`painted_visible`: the control's own shapes cut by their clip rect), because accessibility rects ignore clipping and the old probe hovered category rows scrolled under the bottom bar and a Settings switch clipped by its scroll area, as design4 pointed out. It also asserts that at least 150 controls were hovered, so the filter cannot hide a regression. On main it still fails for every control; on 5000cbd it passes.
+
+| # | Sev | Status | Evidence |
+|---|---|---|---|
+| C1 | S1 | Fixed | `review_c1` passes on 5000cbd (all enabled controls on 9 screens show `PointingHand`), the dialog behind-scrim hover shows the arrow; design4's own `ux_render::every_control_shows_the_pointing_hand` covers all 38 scenes. Disabled controls keep the arrow, fields the I-beam. |
+| C2 | S1 | Fixed | `review_c2` passes; focus changes 736 to 4312 pixels per control. A 2 pt accent ring follows each shape (pill, sidebar row, checkbox, primary), checked on the 2x crops. |
+| C3 | S2 | Fixed | `review_c3` passes: a click on the row name toggles it; rows ease a hover and press tint. |
+| C4 | S2 | Open | `review_c4` still lists 20 cut names at 1060 ("Deve...aches", "Goo...hrome"). Not claimed. |
+| C5 | S2 | Partly | `review_c5` passes: no I-beam behind the scrim (arrow over Search, Sort, Select None), first Tab lands on Cancel. Nothing is focused when the dialog opens and Return still does nothing (target asked for Cancel focused on open; see U10). |
+| C6 | S2 | Fixed | `review_c6` passes (unchecked border at least 3:1 on the card). |
+| C7 | S2 | Open | ux4: `review_c7` still 277 pt for both buttons. |
+| C8 | S2 | Fixed | `review_c8` passes; the 2x crop of Review and Clean shows a smooth sheen with no side edges. |
+| C9 | S2 | Fixed | `review_c9` passes; system-junk-idle-1280x820: disc, title, list and footnote share x 723. |
+| C10 | S2 | Partly | `review_c10` passes: the first results frame shows "52.2 MB" with the category list. The list card is still empty on frame 1 except one stray checkbox at (587, 628), and the bottom bar sits 38 pt lower (y 762 instead of 724) for that frame, a visible jump. |
+| C11 | S2 | Open | ux4: `review_c11` still finds 3 unnamed SpinButtons; the Thresholds sliders still render as egui's ring knob. |
+| C12 | S2 | Open | Confirm dialog at 1060 still shows 11 of 27 rows with no count or fade, fixed width. |
+| C13 | S2 | Fixed | `review_c13` passes; on hover the path is shortened again ("/Users/tester/Librar...rt/MobileSync/Backup/AAA") and ends before Reveal. |
+| C14 | S2 | Open | ux4. |
+| C15 | S2 | Open | Quick Sweep results unchanged: 5 tiles with an empty sixth cell, header style changes from idle. |
+| C16 | S3 | Fixed | `review_c16` passes; System Junk reads "...rebuild on / their own." |
+| C17 | S2 | Open | Privacy Traces at 1060 still has the second toolbar row and cut tags. |
+| C18 | S2 | Open | Red tags unchanged (Firefox history, Duplicates). |
+| C19 | S2 | Open | Three bottom bars unchanged. |
+| C20 | S2 | Open | Header treatments unchanged. |
+| C21 | S2 | Open | Tab order on System Junk results identical to main (Review and Clean before Search, Select None before Select All, two stops per category). |
+| C22 | S2 | Open | system-junk-error-1060x680 on 5000cbd: "Open Privacy Settings" still outside the banner. |
+| C23 | S3 | Open | |
+| C24 | S3 | Open | |
+| C25 | S3 | Open | ux4. |
+| C26 | S3 | Open | ux4. |
+| C27 | S3 | Open | ux4. |
+| C28 | S3 | Open | ux4. |
+| C29 | S3 | Open | ux4. |
+| C30 | S3 | Open | |
+| C31 | S3 | Open | |
+| C32 | S3 | Open | `kit::sort_menu` still uses egui's `selectable_value` rows (pointer added, no check mark, egui selection fill). |
+| C33 | S3 | Open | Segments still `SelectableLabel`, switches `Checkbox`. |
+| C34 | S3 | Partly | `kit::feel` now gives a press tint to sidebar rows (app.rs nav_row), segments, checkboxes, radios, category and result rows (code and probe). Disk Map blocks are ux4's and were not re-checked. |
+| C35 | S3 | Open | List scroll bars still visible at rest. |
+| C36 | S3 | Open | ux4. |
+| C37 | S3 | Open | |
+| C38 | S3 | Open | |
+| C39 | S3 | Open | |
+
+Round D totals: 8 fixed (C1, C2, C3, C6, C8, C9, C13, C16; both S1 items among them), 3 partly (C5, C10, C34), 28 open (9 of them ux4's: C7, C11, C14, C25 to C29, C36; C19 and C20 are shared).
