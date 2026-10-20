@@ -194,4 +194,10 @@ Method: the owner's branch checked out, this branch's `review_usability.rs` copi
 | U17 Quick Sweep tiles after a module cleanup | agent4/design4 3645e69 | Fixed: `u17_quick_sweep_tiles_follow_a_module_cleanup` passes |
 | Walkthroughs task_01..17 | agent4/design4 3645e69 | All 17 still pass (no regression in the flows) |
 | U1..U15, U18, U19 | agent4/design4 3645e69 | Still failing (not claimed yet) |
-| U1, U2 | agent4/apps4, agent4/ux4 | Pending: no commit on the branches yet (apps4 posted the core API at 10:32) |
+| U1 running app: Quit in place | agent4/ux4 ae18abe | Fixed: banner "Editor is open" with "Quit Editor", then Try Again and Force Quit while it stays open; once the app quits the rows unlock and Uninstall is enabled (`u01_running_app_offers_quit_in_place` passes, rewritten to test the behaviour and not the old wording; `task_07` succeeds). The unlock without a click runs on a timer and is not measured by the test |
+| U2 helper named | agent4/ux4 ae18abe | Still failing: with only EditorHelper running the page never names it (needs apps4's `app_quit::running_parts` headline; agent4/apps4 has no commit yet) |
+| U6 History per cleanup | agent4/ux4 ae18abe | Fixed: one card per action with Undo All (`u06` passes). Note: the per-file Undo buttons are still all on screen (27 for one cleanup in `task_14`); a collapsed file list would be lighter |
+| U7 Undo for emptied items | agent4/ux4 ae18abe | Fixed (`u07` passes) |
+| U12 Ignore list folder picker | agent4/ux4 ae18abe | Fixed: "Choose Folder..." (`u12` passes) |
+| U28 Tune-up bottom bar | agent4/ux4 ae18abe | Claimed; `task_11` still succeeds in 4 steps; no proof test (layout) |
+| U16, U17 | agent4/ux4 ae18abe | Fail on this branch only because design4 is not merged into it yet; fixed on agent4/design4 |
