@@ -1933,6 +1933,7 @@ pub fn feature_look(_t: &Tokens, f: cleancraft_core::FeatureId) -> (Icon, Color3
         F::Privacy => Icon::Privacy,
         F::SpaceLens => Icon::DiskMap,
         F::Monitor => Icon::Monitor,
+        F::DevClutter => Icon::Junk,
     };
     // Alternate the two section colours so neighbours in the sidebar differ a little.
     let color = match f {

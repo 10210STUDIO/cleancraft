@@ -12,6 +12,7 @@ use crate::plan::{FeatureId, Item, Plan};
 use crate::policy;
 use crate::settings::Settings;
 
+pub mod dev_clutter;
 pub mod downloads;
 pub mod duplicates;
 pub mod large_old;
@@ -260,6 +261,7 @@ pub fn registry() -> Vec<Box<dyn Feature>> {
         Box::new(mail::MailDownloads),
         Box::new(trash::TrashBins),
         Box::new(privacy::Privacy),
+        Box::new(dev_clutter::DevClutter),
     ]
 }
 

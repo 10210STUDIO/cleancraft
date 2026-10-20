@@ -108,7 +108,8 @@ pub fn mesh(feature: FeatureId, state: HeroState, rect: Rect, ppp: f32) -> (Mesh
     let root = an.root();
     match feature {
         FeatureId::SmartCare => quick_sweep(&mut sc, a, &an, root),
-        FeatureId::SystemJunk => system_junk(&mut sc, a, &an, root),
+        // Developer Clutter shares System Junk's object until it has its own.
+        FeatureId::SystemJunk | FeatureId::DevClutter => system_junk(&mut sc, a, &an, root),
         FeatureId::MailAttachments => mail(&mut sc, a, &an, root),
         FeatureId::TrashBins => trash(&mut sc, a, &an, root),
         FeatureId::Malware => threat(&mut sc, a, &an, root),
@@ -156,7 +157,9 @@ fn look(f: FeatureId) -> Look {
     let sway = |amp| Turn::Sway { amp };
     let (turn, yaw, pitch, elevation, glint) = match f {
         FeatureId::SmartCare => (spin(8.0), 0.2, 0.0, 0.22, v3(-0.32, 0.62, 0.8)),
-        FeatureId::SystemJunk => (spin(4.0), -0.62, 0.0, 0.42, v3(-0.55, 0.85, 0.7)),
+        FeatureId::SystemJunk | FeatureId::DevClutter => {
+            (spin(4.0), -0.62, 0.0, 0.42, v3(-0.55, 0.85, 0.7))
+        }
         FeatureId::MailAttachments => (sway(0.42), -0.28, 0.12, 0.2, v3(-0.7, 0.5, 0.5)),
         FeatureId::TrashBins => (spin(10.0), 0.0, 0.0, 0.3, v3(-0.45, 0.55, 0.8)),
         FeatureId::Malware => (sway(0.5), -0.25, 0.05, 0.16, v3(-0.4, 0.62, 0.6)),
