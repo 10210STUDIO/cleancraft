@@ -120,6 +120,12 @@ fn desktop_installed(env: &Env) -> bool {
 
 /// State of our entry in a JSON settings file.
 fn file_state(path: &Path, binary: Option<&str>) -> ClientState {
+    // A link (a dotfiles folder): replacing it would cut the link, so it is left alone.
+    if std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
+        return ClientState::Invalid(
+            "it is a link to another file, which CleanCraft does not replace".into(),
+        );
+    }
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return ClientState::Found,
@@ -193,6 +199,22 @@ pub fn detect(env: &Env) -> Vec<Client> {
         cli,
     });
     out
+}
+
+/// The exact change, in words and code, for the person to see before choosing Connect.
+pub fn planned_change(env: &Env, c: &Client) -> Option<String> {
+    let bin = server_binary(env)?;
+    Some(match (c.kind, &c.cli) {
+        (ClientKind::ClaudeCode, Some(cli)) => format!(
+            "Runs: {} mcp add --scope user {SERVER} -- {bin} serve",
+            env.display(cli)
+        ),
+        _ => format!(
+            "Adds to {} under mcpServers: {}",
+            env.display(&c.config),
+            entry_json(&bin)
+        ),
+    })
 }
 
 /// `claude mcp list` names our server ("cleancraft: /path serve - ✓ Connected").
@@ -322,7 +344,8 @@ fn indent_before(text: &str, at: usize) -> String {
     }
 }
 
-fn entry_json(binary: &str) -> String {
+/// The exact entry CleanCraft adds, as written into the file (shown before connecting).
+pub fn entry_json(binary: &str) -> String {
     format!(
         "{}: {{\"command\": {}, \"args\": [\"serve\"]}}",
         serde_json::to_string(SERVER).unwrap_or_default(),
@@ -477,6 +500,12 @@ fn backup(env: &Env, path: &Path) -> io::Result<Option<PathBuf>> {
     let ts = chrono::Local::now().format("%Y%m%d-%H%M%S%3f");
     let to = dir.join(format!("{stem}-{ts}.json"));
     std::fs::copy(path, &to)?;
+    // It may hold other servers' keys: readable by the person only.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&to, std::fs::Permissions::from_mode(0o600))?;
+    }
     Ok(Some(to))
 }
 
@@ -666,6 +695,9 @@ pub fn remove_from_file(env: &Env, file: &Path, drop_servers: bool) -> Result<bo
             "{} is not a settings file CleanCraft manages",
             file.display()
         ));
+    }
+    if std::fs::symlink_metadata(file).is_ok_and(|m| m.file_type().is_symlink()) {
+        return Err("it is a link to another file, which CleanCraft does not replace".into());
     }
     let text = std::fs::read_to_string(file).map_err(|e| format!("could not read it: {e}"))?;
     let Some(new) = remove_entry(&text, drop_servers)? else {

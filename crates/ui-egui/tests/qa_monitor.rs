@@ -45,9 +45,16 @@ fn cards_show_the_parsed_reading() {
     assert_eq!(pct(cpu.load), "17%", "17.4% from the sample");
     assert!(has(&h, &uptime_text(s.uptime_secs.unwrap())));
     assert!(has(&h, "1.85, 2.10, 2.30"));
-    for a in &cpu.top {
-        assert!(has(&h, &a.name), "{}", a.name);
-        assert!(has(&h, &pct(a.cpu)), "{} {}", a.name, pct(a.cpu));
+    // Helpers are grouped under their app (round 6): "Google Chrome Helper" shows as
+    // "Google Chrome".
+    for g in cleancraft_core::proc_names::top_groups_by_cpu(&s.processes, cpu.top.len()) {
+        let name = if g.processes > 1 {
+            format!("{} ({} processes)", g.name, g.processes)
+        } else {
+            g.name.clone()
+        };
+        assert!(has(&h, &name), "{name}");
+        assert!(has(&h, &pct(g.cpu)), "{} {}", g.name, pct(g.cpu));
     }
 
     let mem = s.memory.as_ref().unwrap();
@@ -60,8 +67,8 @@ fn cards_show_the_parsed_reading() {
     assert!(has(&h, &memory_size(mem.available())));
     assert!(has(&h, "Normal"));
     assert!(has(&h, &memory_size(mem.swap_used.unwrap())));
-    for a in &mem.top {
-        assert!(has(&h, &memory_size(a.memory)), "{}", a.name);
+    for g in cleancraft_core::proc_names::top_groups_by_memory(&s.processes, mem.top.len()) {
+        assert!(has(&h, &memory_size(g.memory)), "{}", g.name);
     }
 
     let free = s.storage.free.unwrap();

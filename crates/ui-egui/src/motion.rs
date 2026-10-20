@@ -483,10 +483,26 @@ pub fn appear(ctx: &Context, id: Id, index: usize) -> f32 {
 /// Repaint for an ambient loop (idle heroes, halos) at about 30 frames a second, and not at
 /// all while the window is in the background or motion is reduced.
 pub fn ambient_repaint(ctx: &Context) {
-    if reduced() {
+    if reduced() || window_hidden(ctx) {
         return;
     }
     if ctx.input(|i| i.viewport().focused) == Some(false) {
+        return;
+    }
+    ctx.request_repaint_after(std::time::Duration::from_millis(AMBIENT_FRAME_MS));
+}
+
+/// The window is minimised or fully covered by other windows.
+pub fn window_hidden(ctx: &Context) -> bool {
+    ctx.input(|i| {
+        let v = i.viewport();
+        v.minimized == Some(true) || v.occluded == Some(true)
+    })
+}
+
+/// A spinner or progress ring: about 30 fps, nothing while the window is hidden.
+pub fn spinner_repaint(ctx: &Context) {
+    if window_hidden(ctx) {
         return;
     }
     ctx.request_repaint_after(std::time::Duration::from_millis(AMBIENT_FRAME_MS));

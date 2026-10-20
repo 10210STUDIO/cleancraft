@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 
 use cleancraft_core::permissions::{self, Access};
+use cleancraft_core::route::AppRoute;
 use cleancraft_core::{Env, FeatureId, Settings};
 use egui::{Color32, CornerRadius, RichText, Sense, Stroke, Ui, vec2};
 
@@ -15,8 +16,14 @@ use crate::theme::{self, Section, Tokens, Weight, font, icon as isz, motion, siz
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Page {
     Feature(FeatureId),
+    /// Mac Health, a tool of the Live Monitor section ([`EXTRA_TOOLS`]).
+    Health,
     History,
     Settings,
+    /// The guide "Connect an AI agent" (docs/guide-ai-agents.md), opened from Settings.
+    AgentGuide,
+    /// "Use CleanCraft from your AI apps?": shown once at first launch, later from Settings.
+    ConnectAi,
 }
 
 /// The sidebar's entries, in order: one per section, each opening one or more tools. Names
@@ -56,6 +63,45 @@ pub fn group_of(f: FeatureId) -> usize {
         .unwrap_or(0)
 }
 
+/// Tools of a section that are not modules, shown after its modules in the switcher:
+/// (section index in [`GROUPS`], page, title).
+pub const EXTRA_TOOLS: &[(usize, Page, &str)] = &[(6, Page::Health, "Mac Health")];
+
+/// The section a page belongs to (None for History, Settings and the guides).
+pub fn page_group(p: Page) -> Option<usize> {
+    match p {
+        Page::Feature(f) => Some(group_of(f)),
+        other => EXTRA_TOOLS
+            .iter()
+            .find(|(_, x, _)| *x == other)
+            .map(|(i, _, _)| *i),
+    }
+}
+
+/// Every tool of a section, in switcher order: its modules, then its extra tools.
+pub fn section_pages(i: usize) -> Vec<Page> {
+    let mut v: Vec<Page> = GROUPS[i].1.iter().map(|f| Page::Feature(*f)).collect();
+    v.extend(
+        EXTRA_TOOLS
+            .iter()
+            .filter(|(g, _, _)| *g == i)
+            .map(|(_, p, _)| *p),
+    );
+    v
+}
+
+/// A tool's switcher label and icon.
+pub fn page_look(t: &Tokens, p: Page) -> (Icon, &'static str) {
+    match p {
+        Page::Feature(f) => (kit::feature_look(t, f).0, f.title()),
+        Page::Health => (Icon::Check, "Mac Health"),
+        Page::History => (Icon::History, "History"),
+        Page::Settings => (Icon::Settings, "Settings"),
+        Page::AgentGuide => (Icon::File, "Connect an AI Agent"),
+        Page::ConnectAi => (Icon::App, "AI Apps"),
+    }
+}
+
 /// The icon of a sidebar entry (motion3's small 3D section icons).
 pub fn group_icon(i: usize) -> SectionIcon {
     match i {
@@ -85,6 +131,9 @@ pub struct CleanApp {
     pub tasks: pages::tasks::State,
     pub disk_map: pages::disk_map::State,
     pub monitor: pages::monitor::State,
+    pub health: pages::health::State,
+    pub guide: pages::guide::State,
+    pub welcome: pages::welcome::State,
     pub fda: Access,
     /// A message at the top of the page: (text, is_error).
     pub notice: Option<(String, bool)>,
@@ -98,7 +147,7 @@ pub struct CleanApp {
     page_since: f64,
     /// The tool each sidebar section showed last (by index in [`GROUPS`]), so a section
     /// opens where the person left it.
-    pub section_tool: BTreeMap<usize, FeatureId>,
+    pub section_tool: BTreeMap<usize, Page>,
     /// Grows by one each time files leave their place or come back (a cleanup, an uninstall,
     /// a move from Disk Map, an Undo). Pages that keep their own lists compare it with the
     /// value they last saw and reload or drop what moved.
@@ -110,6 +159,27 @@ pub struct CleanApp {
     journal: pages::history::JournalWatch,
     /// "Not Now" on the Full Disk Access banner (for this session).
     pub fda_dismissed: bool,
+    /// What Mac Health has noted already: scans (by plan id and what is left), the last
+    /// Disk Map tree, the last update check, and whether launch work ran.
+    observed: Observed,
+    /// egui's clock (seconds) at the last frame: schedules use it, so tests can move time.
+    pub now: f64,
+    /// The window is minimised or fully covered: nothing ambient runs, Live Monitor pauses.
+    pub window_hidden: bool,
+    /// The egui context, so background work can wake the window when it finishes (no
+    /// polling frames while it runs).
+    pub egui_ctx: Option<egui::Context>,
+}
+
+#[derive(Default)]
+struct Observed {
+    plans: BTreeMap<FeatureId, (String, u64, usize)>,
+    map: Option<(std::path::PathBuf, u64, u64)>,
+    /// A Disk Map summary waiting to be written (when the person leaves Disk Map: writing
+    /// into the mapped folder while it is shown would make the map one file out of date).
+    map_pending: Option<cleancraft_core::health::MapSummary>,
+    updates: Option<usize>,
+    launched: bool,
 }
 
 /// The action behind a notice's Undo button.
@@ -138,6 +208,9 @@ impl CleanApp {
             tasks: Default::default(),
             disk_map: Default::default(),
             monitor: Default::default(),
+            health: Default::default(),
+            guide: Default::default(),
+            welcome: Default::default(),
             fda,
             notice: settings_warning.map(|m| (m, true)),
             notice_undo: None,
@@ -151,6 +224,10 @@ impl CleanApp {
             last_moved: Vec::new(),
             journal: Default::default(),
             fda_dismissed: false,
+            observed: Observed::default(),
+            now: 0.0,
+            window_hidden: false,
+            egui_ctx: None,
         }
     }
 
@@ -192,20 +269,75 @@ impl CleanApp {
         crate::sound::play(&self.env, crate::sound::Cue::Error);
     }
 
-    /// Go to a page by name: a feature id ("system_junk"), "history" or "settings".
+    /// Go to a page by name: a feature id ("system_junk"), "history", "settings", or any
+    /// [`AppRoute`] string ("health", "scan:system_junk", "guide:ai_agents", ...).
     pub fn navigate(&mut self, name: &str) {
+        if let Some(r) = AppRoute::parse(name) {
+            self.open_route(&r);
+        }
+    }
+
+    /// Open a route: a page, a page that starts its scan, App Remover on one app. A route only
+    /// opens and looks; nothing is ever cleaned from here.
+    pub fn open_route(&mut self, r: &AppRoute) {
+        self.flush_health_notes();
         // A notice belongs to the page it was about (REVIEW-U U14).
         self.notice = None;
-        self.page = match name {
-            "history" => Page::History,
-            "settings" => Page::Settings,
-            other => match FeatureId::parse(other) {
-                Some(f) => Page::Feature(f),
-                None => return,
-            },
+        self.page = match r {
+            AppRoute::Feature(f) | AppRoute::Scan(f) => Page::Feature(*f),
+            AppRoute::Health => Page::Health,
+            AppRoute::History => Page::History,
+            AppRoute::Settings => Page::Settings,
+            AppRoute::AgentGuide => Page::AgentGuide,
+            AppRoute::ConnectAi => Page::ConnectAi,
+            AppRoute::UnusedApps | AppRoute::UninstallApp(_) => {
+                Page::Feature(FeatureId::Uninstaller)
+            }
         };
-        if self.page == Page::History {
-            self.history.reload(&self.env);
+        match r {
+            AppRoute::History => self.history.reload(&self.env),
+            AppRoute::Scan(f) => self.start_scan_if_idle(*f),
+            AppRoute::UnusedApps => {
+                self.apps.group = pages::apps::Group::Unused;
+                self.apps.selected = None;
+                if self.apps.list.is_none() && !self.apps.is_loading() {
+                    pages::apps::start_load(self);
+                }
+            }
+            AppRoute::UninstallApp(p) => {
+                let real = self.env.sys_path(&p.to_string_lossy());
+                pages::apps::open_app(self, &real);
+            }
+            AppRoute::ConnectAi => pages::welcome::refresh(self),
+            AppRoute::Health => pages::health::refresh_if_old(self),
+            _ => {}
+        }
+    }
+
+    /// Start a module's scan unless it is scanning or shows results the person may be
+    /// reviewing (those stay; Scan Again is on the page).
+    fn start_scan_if_idle(&mut self, f: FeatureId) {
+        // Pages with their own lists load them; plan pages scan (Quick Sweep, Tune-up,
+        // Startup Items, Disk Map and Live Monitor keep their own start buttons).
+        if matches!(f, FeatureId::Uninstaller | FeatureId::Updater) {
+            if self.apps.list.is_none() && !self.apps.is_loading() {
+                pages::apps::start_load(self);
+            }
+            return;
+        }
+        let own_page = matches!(
+            f,
+            FeatureId::SmartCare
+                | FeatureId::LoginItems
+                | FeatureId::Maintenance
+                | FeatureId::SpaceLens
+                | FeatureId::Monitor
+        );
+        if !own_page && cleancraft_core::features::get(f).is_some() {
+            let st = self.plan_state(f);
+            if st.plan.is_none() && !st.is_busy() {
+                pages::plan_page::start_scan(self, f);
+            }
         }
     }
 
@@ -282,6 +414,97 @@ impl CleanApp {
         self.journal.is_primed()
     }
 
+    /// Notes for Mac Health, from what the pages already did: each scan result (what it
+    /// found, then what is left after cleanups), each finished Disk Map tree, the last update
+    /// check. At the first frame of a real launch: a free space sample and, once, the AI apps
+    /// question. Writes only CleanCraft's own small files; never runs a scan.
+    fn observe(&mut self) {
+        let env = self.env.clone();
+        let mut plans: Vec<cleancraft_core::Plan> = Vec::new();
+        for st in self.plans.values() {
+            if let Some(p) = &st.plan
+                && !st.is_busy()
+            {
+                plans.push(p.clone());
+            }
+        }
+        if let Some(res) = &self.sweep.result {
+            for tile in &res.tiles {
+                if let Some(p) = tile.plan() {
+                    plans.push(p.clone());
+                }
+            }
+        }
+        for p in plans {
+            let Some(f) = p.feature else { continue };
+            let key = (
+                p.id.clone(),
+                p.items.iter().map(|i| i.size).sum::<u64>(),
+                p.items.len(),
+            );
+            if self.observed.plans.get(&f) != Some(&key) {
+                self.observed.plans.insert(f, key);
+                let _ = cleancraft_core::health::note_plan(&env, &p);
+            }
+        }
+        if let Some(tree) = self.disk_map.tree()
+            && let Some(root) = &tree.root
+            && !tree.stopped
+        {
+            let key = (root.path.clone(), root.size, root.files);
+            if self.observed.map.as_ref() != Some(&key) {
+                self.observed.map = Some(key);
+                self.observed.map_pending =
+                    cleancraft_core::health::summarize(tree, chrono::Utc::now().timestamp());
+            }
+        }
+        if self.page != Page::Feature(FeatureId::SpaceLens) {
+            self.flush_health_notes();
+        }
+        let updates = self
+            .apps
+            .updates
+            .as_ref()
+            .map(|r| r.available().count() + r.macos.len());
+        if updates.is_some() && updates != self.observed.updates {
+            let _ = cleancraft_core::health::note_count(
+                &env,
+                FeatureId::Updater,
+                updates.unwrap_or(0),
+                chrono::Utc::now().timestamp(),
+            );
+        }
+        self.observed.updates = updates;
+        if !self.observed.launched && !self.sync {
+            self.observed.launched = true;
+            self.launch_checks();
+        }
+    }
+
+    /// Write what Mac Health keeps that is still waiting (the last Disk Map summary).
+    pub fn flush_health_notes(&mut self) {
+        if let Some(s) = self.observed.map_pending.take() {
+            let _ = cleancraft_core::health::keep_map_summary(&self.env, s);
+        }
+    }
+
+    /// Work done once per launch of the real app (never in tests, which call it directly):
+    /// a free space sample on a background thread, and the AI apps question the first time.
+    pub fn launch_checks(&mut self) {
+        let env = self.env.clone();
+        if self.sync {
+            let _ = cleancraft_core::space_history::record(&env);
+        } else {
+            std::thread::spawn(move || {
+                let _ = cleancraft_core::space_history::record(&env);
+            });
+        }
+        if cleancraft_core::mcp_setup::welcome_due(&self.env) {
+            self.page = Page::ConnectAi;
+            pages::welcome::refresh(self);
+        }
+    }
+
     /// Standard Mac shortcuts (REVIEW-U U10): Cmd+, opens Settings, Cmd+1 to Cmd+7 the
     /// sidebar sections. (Cmd+F is the page's own: it focuses its search field.) None while
     /// a dialog is open.
@@ -306,8 +529,11 @@ impl CleanApp {
         for (i, k) in KEYS.iter().enumerate() {
             if i < GROUPS.len() && ctx.input_mut(|inp| inp.consume_key(cmd, *k)) {
                 self.act();
-                let f = self.section_tool.get(&i).copied().unwrap_or(GROUPS[i].1[0]);
-                self.page = Page::Feature(f);
+                self.page = self
+                    .section_tool
+                    .get(&i)
+                    .copied()
+                    .unwrap_or(Page::Feature(GROUPS[i].1[0]));
             }
         }
     }
@@ -351,6 +577,11 @@ impl CleanApp {
 
     /// Per-frame work that does not draw: finished jobs.
     pub fn logic(&mut self, ctx: &egui::Context) {
+        self.now = ctx.input(|i| i.time);
+        self.window_hidden = crate::motion::window_hidden(ctx);
+        if self.egui_ctx.is_none() {
+            self.egui_ctx = Some(ctx.clone());
+        }
         if !self.fonts_installed {
             // macOS "Reduce motion" (Accessibility > Display), read once through env.sys.
             // Tests run with `sync` and keep motion on without asking.
@@ -375,9 +606,12 @@ impl CleanApp {
         busy |= pages::tasks::poll(self);
         busy |= pages::disk_map::poll(self);
         busy |= pages::monitor::poll(self);
+        busy |= pages::health::poll(self);
+        busy |= pages::welcome::poll(self);
         self.follow_journal();
         // "Open at this page" requests from the menu bar agent and `cleancraft open` (tray6).
         pages::settings::follow_open_requests(self, ctx);
+        self.observe();
         if busy {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
@@ -387,7 +621,8 @@ impl CleanApp {
     pub fn section(&self) -> Section {
         match self.page {
             Page::Feature(f) => Section::of(f),
-            Page::History | Page::Settings => Section::Neutral,
+            Page::Health => Section::of(FeatureId::Monitor),
+            Page::History | Page::Settings | Page::AgentGuide | Page::ConnectAi => Section::Neutral,
         }
     }
 
@@ -407,8 +642,8 @@ impl CleanApp {
             ui.ctx().request_repaint();
             return;
         }
-        if let Page::Feature(f) = self.page {
-            self.section_tool.insert(group_of(f), f);
+        if let Some(g) = page_group(self.page) {
+            self.section_tool.insert(g, self.page);
         }
         let mut content = full;
         content.min.x += space::SIDEBAR;
@@ -448,25 +683,24 @@ impl CleanApp {
             .show(ui, |ui| {
                 // A section with several tools: its switcher, the same in every phase (it
                 // stands in for the compact page header).
-                let multi =
-                    matches!(self.page, Page::Feature(f) if GROUPS[group_of(f)].1.len() > 1);
+                let tools = page_group(self.page).map(section_pages).unwrap_or_default();
+                let multi = tools.len() > 1;
                 kit::set_switcher_shown(ui.ctx(), multi);
-                if let Page::Feature(f) = self.page {
-                    let feats = GROUPS[group_of(f)].1;
-                    if feats.len() > 1 {
-                        let items: Vec<(Icon, &str)> = feats
-                            .iter()
-                            .map(|x| (kit::feature_look(&t, *x).0, x.title()))
-                            .collect();
-                        let sel = feats.iter().position(|x| *x == f).unwrap_or(0);
-                        if let Some(i) = kit::segmented(ui, &t, &items, sel) {
-                            self.act();
-                            if feats[i] != f {
-                                self.page = Page::Feature(feats[i]);
+                if multi {
+                    let items: Vec<(Icon, &str)> =
+                        tools.iter().map(|x| page_look(&t, *x)).collect();
+                    let sel = tools.iter().position(|x| *x == self.page).unwrap_or(0);
+                    if let Some(i) = kit::segmented(ui, &t, &items, sel) {
+                        self.act();
+                        if tools[i] != self.page {
+                            self.notice = None;
+                            self.page = tools[i];
+                            if self.page == Page::Health {
+                                pages::health::refresh_if_old(self);
                             }
                         }
-                        ui.add_space(space::L);
                     }
+                    ui.add_space(space::L);
                 }
                 self.banners(ui);
                 ui.multiply_opacity(0.25 + 0.75 * k);
@@ -476,8 +710,11 @@ impl CleanApp {
                 ));
                 ui.with_visual_transform(shift, |ui| match self.page {
                     Page::Feature(f) => pages::feature_page(self, ui, f),
+                    Page::Health => pages::health::ui(self, ui),
                     Page::History => pages::history::ui(self, ui),
                     Page::Settings => pages::settings::ui(self, ui),
+                    Page::AgentGuide => pages::guide::ui(self, ui),
+                    Page::ConnectAi => pages::welcome::ui(self, ui),
                 });
             });
     }
@@ -511,10 +748,7 @@ impl CleanApp {
             );
         });
         ui.add_space(space::L);
-        let current = match self.page {
-            Page::Feature(f) => Some(group_of(f)),
-            _ => None,
-        };
+        let current = page_group(self.page);
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
@@ -522,9 +756,12 @@ impl CleanApp {
                 for (i, (name, feats)) in GROUPS.iter().enumerate() {
                     if self.nav_row(ui, group_icon(i), name, current == Some(i)) {
                         self.act();
-                        let f = self.section_tool.get(&i).copied().unwrap_or(feats[0]);
                         self.notice = None;
-                        self.page = Page::Feature(f);
+                        self.page = self
+                            .section_tool
+                            .get(&i)
+                            .copied()
+                            .unwrap_or(Page::Feature(feats[0]));
                     }
                 }
                 ui.add_space(space::S);
@@ -741,5 +978,12 @@ impl CleanApp {
                 });
             ui.add_space(8.0);
         }
+    }
+}
+
+impl Drop for CleanApp {
+    /// A Disk Map summary not yet written is kept when the app quits.
+    fn drop(&mut self) {
+        self.flush_health_notes();
     }
 }

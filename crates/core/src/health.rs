@@ -288,9 +288,15 @@ pub fn summarize(tree: &crate::space::Tree, at: i64) -> Option<MapSummary> {
 
 /// Keep a finished Disk Map scan: the two latest summaries of each folder, a few folders.
 pub fn note_disk_map(env: &Env, tree: &crate::space::Tree, at: i64) -> io::Result<bool> {
-    let Some(s) = summarize(tree, at) else {
-        return Ok(false);
-    };
+    match summarize(tree, at) {
+        Some(s) => keep_map_summary(env, s),
+        None => Ok(false),
+    }
+}
+
+/// Keep a summary made with [`summarize`] (the app writes it once the person leaves Disk Map,
+/// so its own file never changes the sizes on screen).
+pub fn keep_map_summary(env: &Env, s: MapSummary) -> io::Result<bool> {
     let mut all = map_summaries(env);
     if all
         .iter()
