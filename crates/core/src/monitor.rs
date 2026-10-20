@@ -195,6 +195,10 @@ pub struct Snapshot {
     pub network: Option<NetRate>,
     /// What could not be read, in plain words.
     pub problems: Vec<String>,
+    /// Every process of the reading (for the grouped top lists); not sent to agents.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub processes: Vec<AppUse>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -550,7 +554,19 @@ pub struct Sampler {
     prev_net: Option<(f64, NetCounters)>,
     /// CPU load of recent samples, oldest first.
     pub cpu_history: Vec<f64>,
+    /// The Trash size and when it was measured: walking the Trash is the costly part of a
+    /// reading, so it is measured again only after [`SLOW_FACTS_SECS`].
+    trash: Option<(f64, (Option<u64>, Option<String>))>,
+    /// Battery cycles and health (ioreg), read again after [`SLOW_FACTS_SECS`].
+    battery_io: Option<(f64, (Option<u32>, Option<u8>))>,
 }
+
+/// Facts that change slowly (Trash size, battery wear) are read at most this often.
+pub const SLOW_FACTS_SECS: f64 = 30.0;
+
+/// The commands one Live Monitor reading runs (the Trash and battery wear only every
+/// [`SLOW_FACTS_SECS`]): sysctl, ps, top, vm_stat, df, pmset, netstat.
+pub const COMMANDS_PER_READING: usize = 7;
 
 fn run_text(env: &Env, prog: &str, args: &[&str]) -> Result<String, String> {
     match env.sys.run(prog, args) {
@@ -680,20 +696,44 @@ impl Sampler {
             }
         };
 
-        let storage = read_storage(env, &mut problems);
+        let trash = match &self.trash {
+            Some((at, v)) if now - at < SLOW_FACTS_SECS && now >= *at => v.clone(),
+            _ => {
+                let v = trash_size(env);
+                self.trash = Some((now, v.clone()));
+                v
+            }
+        };
+        let storage = read_storage_with(env, &mut problems, trash);
 
         // Battery.
         let battery = match run_text(env, "/usr/bin/pmset", &["-g", "batt"]) {
             Ok(s) => match parse_pmset(&s) {
                 Some(None) => Some(BatteryReading::None),
                 Some(Some(mut b)) => {
-                    match run_text(env, "/usr/sbin/ioreg", &["-rn", "AppleSmartBattery"]) {
-                        Ok(io) => {
-                            let (c, h) = battery_health(&parse_ioreg_ints(&io));
-                            b.cycles = c;
-                            b.health = h;
+                    let cached = match &self.battery_io {
+                        Some((at, v)) if now - at < SLOW_FACTS_SECS && now >= *at => Some(*v),
+                        _ => None,
+                    };
+                    let io = match cached {
+                        Some(v) => Some(v),
+                        None => {
+                            match run_text(env, "/usr/sbin/ioreg", &["-rn", "AppleSmartBattery"]) {
+                                Ok(io) => {
+                                    let v = battery_health(&parse_ioreg_ints(&io));
+                                    self.battery_io = Some((now, v));
+                                    Some(v)
+                                }
+                                Err(e) => {
+                                    problems.push(e);
+                                    None
+                                }
+                            }
                         }
-                        Err(e) => problems.push(e),
+                    };
+                    if let Some((c, h)) = io {
+                        b.cycles = c;
+                        b.health = h;
                     }
                     Some(BatteryReading::Present(b))
                 }
@@ -740,11 +780,16 @@ impl Sampler {
             battery,
             network,
             problems,
+            processes: apps.unwrap_or_default(),
         }
     }
 }
 
-fn read_storage(env: &Env, problems: &mut Vec<String>) -> Storage {
+fn read_storage_with(
+    env: &Env,
+    problems: &mut Vec<String>,
+    trash: (Option<u64>, Option<String>),
+) -> Storage {
     let home = env.home().to_string_lossy().into_owned();
     let (total, free) = match run_text(env, "/bin/df", &["-Pk", &home]) {
         Ok(s) => match parse_df(&s) {
@@ -759,7 +804,7 @@ fn read_storage(env: &Env, problems: &mut Vec<String>) -> Storage {
             (None, None)
         }
     };
-    let (trash, trash_note) = trash_size(env);
+    let (trash, trash_note) = trash;
     if let Some(n) = &trash_note {
         problems.push(n.clone());
     }

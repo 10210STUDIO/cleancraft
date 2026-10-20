@@ -2821,3 +2821,242 @@ pub fn place_with<R>(
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(r).layout(layout));
     add(&mut child)
 }
+
+// ---------------------------------------------------------------------------------------
+// Small choices and time charts (Mac Health)
+// ---------------------------------------------------------------------------------------
+
+/// A compact row of text choices ("7 days", "30 days", "90 days") in a glass track; the
+/// chosen one sits on a soft pill. Announced as radio buttons. Returns the index clicked.
+pub fn choice_pills(ui: &mut Ui, t: &Tokens, items: &[&str], selected: usize) -> Option<usize> {
+    let fid = font(size::FOOTNOTE, Weight::SemiBold);
+    let h = 30.0;
+    let pad = 12.0;
+    let widths: Vec<f32> = items
+        .iter()
+        .map(|n| galley(ui, n, fid.clone(), t.text).size().x + pad * 2.0)
+        .collect();
+    let total: f32 = widths.iter().sum::<f32>() + 6.0;
+    let (track, _) = ui.allocate_exact_size(vec2(total, h), Sense::hover());
+    let p = ui.painter().clone();
+    p.rect_filled(track, h / 2.0, Color32::from_black_alpha(60));
+    let mut x = track.left() + 3.0;
+    let mut clicked = None;
+    for (i, name) in items.iter().enumerate() {
+        let r = Rect::from_min_size(pos2(x, track.top() + 3.0), vec2(widths[i], h - 6.0));
+        x += widths[i];
+        let id = ui.id().with(("choice", *name));
+        let resp = ui.interact(r, id, Sense::click());
+        let on = i == selected;
+        resp.widget_info(|| WidgetInfo::selected(WidgetType::RadioButton, true, on, *name));
+        let f = feel(ui, &resp);
+        if on {
+            p.rect_filled(
+                r,
+                r.height() / 2.0,
+                icons::lerp(t.glass_solid(), t.sec_a, 0.25),
+            );
+        } else if f.hov > 0.0 || f.down > 0.0 {
+            p.rect_filled(
+                r,
+                r.height() / 2.0,
+                Color32::from_white_alpha((10.0 * f.hov + 8.0 * f.down) as u8),
+            );
+        }
+        if f.focus {
+            focus_ring(&p, t, r, r.height() / 2.0);
+        }
+        p.text(
+            r.center(),
+            Align2::CENTER_CENTER,
+            *name,
+            fid.clone(),
+            if on {
+                t.text
+            } else {
+                icons::lerp(t.text_dim, t.text, f.hov)
+            },
+        );
+        if resp.clicked() {
+            clicked = Some(i);
+        }
+    }
+    clicked
+}
+
+/// A dashed horizontal guide on a [`time_chart`]: value and label.
+pub struct ChartGuide<'a> {
+    pub value: f64,
+    pub label: &'a str,
+    pub color: Color32,
+}
+
+/// One series over time as a line with a soft area under it, from 0 at the bottom (areas start
+/// at zero, so a fall is never exaggerated). `points` are (seconds since the epoch, value),
+/// oldest first; `x_range` the time span shown; `fmt_y` writes axis and hover values; `fmt_x`
+/// a date. Three value ticks, start and end dates, an optional guide line, and the value
+/// nearest the pointer on hover. With fewer than two points: "Collecting" over a dashed base.
+#[allow(clippy::too_many_arguments)]
+pub fn time_chart(
+    ui: &mut Ui,
+    t: &Tokens,
+    size_v: Vec2,
+    points: &[(i64, f64)],
+    x_range: (i64, i64),
+    color: Color32,
+    guide: Option<ChartGuide<'_>>,
+    fmt_y: &dyn Fn(f64) -> String,
+    fmt_x: &dyn Fn(i64) -> String,
+) -> Response {
+    let (outer, resp) = ui.allocate_exact_size(size_v, Sense::hover());
+    let p = ui.painter_at(outer.expand(4.0));
+    let small = font(size::FOOTNOTE, Weight::Regular);
+    let left_w = 64.0;
+    let plot = Rect::from_min_max(
+        pos2(outer.left() + left_w, outer.top() + 6.0),
+        pos2(outer.right() - 8.0, outer.bottom() - 22.0),
+    );
+    p.rect_filled(plot, radius::S, Color32::from_black_alpha(40));
+    let summary = match (points.first(), points.last()) {
+        (Some(a), Some(b)) => format!(
+            "{} points from {} to {}: {} to {}",
+            points.len(),
+            fmt_x(a.0),
+            fmt_x(b.0),
+            fmt_y(a.1),
+            fmt_y(b.1)
+        ),
+        _ => "No readings yet".into(),
+    };
+    resp.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, &summary));
+    if points.len() < 2 {
+        let y = plot.bottom() - 8.0;
+        p.add(Shape::dashed_line(
+            &[pos2(plot.left() + 8.0, y), pos2(plot.right() - 8.0, y)],
+            Stroke::new(1.0, color.gamma_multiply(0.45)),
+            4.0,
+            4.0,
+        ));
+        p.text(
+            plot.center(),
+            Align2::CENTER_CENTER,
+            "Collecting: one reading per hour while CleanCraft or its menu bar agent runs",
+            small.clone(),
+            t.text_dim,
+        );
+        return resp;
+    }
+    let max_v = points
+        .iter()
+        .map(|q| q.1)
+        .chain(guide.as_ref().map(|g| g.value))
+        .fold(0.0f64, f64::max);
+    let top = nice_ceiling(max_v * 1.1);
+    let (x0, x1) = (x_range.0 as f64, (x_range.1.max(x_range.0 + 1)) as f64);
+    let to_screen = |x: i64, v: f64| {
+        pos2(
+            plot.left() + ((x as f64 - x0) / (x1 - x0)).clamp(0.0, 1.0) as f32 * plot.width(),
+            plot.bottom() - (v / top).clamp(0.0, 1.0) as f32 * plot.height(),
+        )
+    };
+    // Value ticks: 0, half, top.
+    for k in 0..=2 {
+        let v = top * k as f64 / 2.0;
+        let y = plot.bottom() - plot.height() * k as f32 / 2.0;
+        if k > 0 {
+            p.line_segment(
+                [pos2(plot.left(), y), pos2(plot.right(), y)],
+                Stroke::new(1.0, Color32::from_white_alpha(12)),
+            );
+        }
+        p.text(
+            pos2(plot.left() - 8.0, y),
+            Align2::RIGHT_CENTER,
+            fmt_y(v),
+            small.clone(),
+            t.text_faint,
+        );
+    }
+    p.text(
+        pos2(plot.left(), plot.bottom() + 5.0),
+        Align2::LEFT_TOP,
+        fmt_x(x_range.0),
+        small.clone(),
+        t.text_faint,
+    );
+    p.text(
+        pos2(plot.right(), plot.bottom() + 5.0),
+        Align2::RIGHT_TOP,
+        fmt_x(x_range.1),
+        small.clone(),
+        t.text_faint,
+    );
+    if let Some(g) = &guide {
+        let y = to_screen(x_range.0, g.value).y;
+        p.add(Shape::dashed_line(
+            &[pos2(plot.left(), y), pos2(plot.right(), y)],
+            Stroke::new(1.0, g.color.gamma_multiply(0.8)),
+            5.0,
+            4.0,
+        ));
+        p.text(
+            pos2(plot.right() - 6.0, y - 3.0),
+            Align2::RIGHT_BOTTOM,
+            g.label,
+            small.clone(),
+            g.color,
+        );
+    }
+    let pts: Vec<Pos2> = points.iter().map(|(x, v)| to_screen(*x, *v)).collect();
+    let mut m = egui::epaint::Mesh::default();
+    for q in &pts {
+        m.colored_vertex(*q, color.gamma_multiply(0.30));
+        m.colored_vertex(pos2(q.x, plot.bottom()), color.gamma_multiply(0.0));
+    }
+    for i in 0..pts.len() as u32 - 1 {
+        let a = i * 2;
+        m.add_triangle(a, a + 1, a + 2);
+        m.add_triangle(a + 1, a + 3, a + 2);
+    }
+    p.add(Shape::mesh(m));
+    p.add(Shape::line(pts.clone(), Stroke::new(2.0, color)));
+    if let Some(last) = pts.last() {
+        p.circle_filled(*last, 3.0, color);
+    }
+    // Hover: the reading nearest the pointer.
+    if let Some(hp) = resp.hover_pos()
+        && plot.contains(hp)
+        && let Some((i, q)) = pts
+            .iter()
+            .enumerate()
+            .min_by(|a, b| (a.1.x - hp.x).abs().total_cmp(&(b.1.x - hp.x).abs()))
+    {
+        p.line_segment(
+            [pos2(q.x, plot.top()), pos2(q.x, plot.bottom())],
+            Stroke::new(1.0, Color32::from_white_alpha(40)),
+        );
+        p.circle_filled(*q, 4.0, color);
+        let text = format!("{}  {}", fmt_x(points[i].0), fmt_y(points[i].1));
+        let g = p.layout_no_wrap(text, font(size::FOOTNOTE, Weight::Medium), t.text);
+        let w = g.size().x + 14.0;
+        let x = (q.x - w / 2.0).clamp(plot.left(), plot.right() - w);
+        let r = Rect::from_min_size(pos2(x, plot.top() + 4.0), vec2(w, g.size().y + 8.0));
+        p.rect_filled(r, radius::S, DIALOG_WELL);
+        p.galley(r.min + vec2(7.0, 4.0), g, t.text);
+    }
+    resp
+}
+
+/// 1, 2 or 5 times a power of ten, at least `v` (an axis top that reads well).
+pub fn nice_ceiling(v: f64) -> f64 {
+    if v <= 0.0 {
+        return 1.0;
+    }
+    let p = 10f64.powf(v.log10().floor());
+    for m in [1.0, 2.0, 2.5, 5.0, 10.0] {
+        if m * p >= v {
+            return m * p;
+        }
+    }
+    10.0 * p
+}

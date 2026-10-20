@@ -3,13 +3,15 @@
 //! Every number is formatted straight from the last [`Snapshot`]; a value that could not be
 //! read shows "Unknown".
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use cleancraft_core::FeatureId;
 use cleancraft_core::fsutil::{human_size, memory_size};
 use cleancraft_core::monitor::{
-    self, BatteryReading, PurgeOutcome, Sampler, Snapshot, UNKNOWN, pct, rate_text, uptime_text,
+    self, AppUse, BatteryReading, PurgeOutcome, Sampler, Snapshot, UNKNOWN, pct, rate_text,
+    uptime_text,
 };
+use cleancraft_core::proc_names;
 use egui::{Color32, RichText, Sense, Ui, vec2};
 
 use crate::app::{CleanApp, Page};
@@ -27,7 +29,10 @@ pub struct State {
     pub history: Vec<f64>,
     /// Readings taken since the page opened.
     pub samples: u32,
-    last_start: Option<Instant>,
+    /// When the last reading started (egui's clock, seconds).
+    last_start: Option<f64>,
+    /// Show every process instead of grouping helpers under their app.
+    pub by_process: bool,
     /// Time between readings (tests may change it).
     pub interval: Duration,
     confirm_purge: bool,
@@ -43,6 +48,7 @@ impl Default for State {
             history: Vec::new(),
             samples: 0,
             last_start: None,
+            by_process: false,
             interval: Duration::from_secs(2),
             confirm_purge: false,
             purge: None,
@@ -53,9 +59,14 @@ impl Default for State {
 fn start_sample(app: &mut CleanApp) {
     let env = app.env.clone();
     let mut s = app.monitor.sampler.take().unwrap_or_default();
-    app.monitor.last_start = Some(Instant::now());
+    app.monitor.last_start = Some(app.now);
+    // The finished reading wakes the window itself: no frames are drawn while it runs.
+    let wake = app.egui_ctx.clone();
     app.monitor.job = Some(Job::start(app.sync, move |_| {
         let snap = s.sample(&env, monitor::now_secs());
+        if let Some(ctx) = wake {
+            ctx.request_repaint();
+        }
         (s, snap)
     }));
 }
@@ -81,12 +92,15 @@ pub fn poll(app: &mut CleanApp) -> bool {
             busy = true;
         }
     }
+    // Readings only while the page is on screen, at most one per interval.
+    let now = app.now;
     if app.page == Page::Feature(FeatureId::Monitor)
+        && !app.window_hidden
         && app.monitor.job.is_none()
         && app
             .monitor
             .last_start
-            .is_none_or(|t| t.elapsed() >= app.monitor.interval)
+            .is_none_or(|t| now - t >= app.monitor.interval.as_secs_f64() || now < t)
     {
         start_sample(app);
     }
@@ -101,7 +115,8 @@ pub fn poll(app: &mut CleanApp) -> bool {
         } else if job.is_dead() {
             st.job = None;
             st.sampler = Some(Sampler::new());
-        } else {
+        } else if app.egui_ctx.is_none() {
+            // Nothing can wake the window: look again shortly.
             busy = true;
         }
     }
@@ -118,7 +133,10 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         f.title(),
         "What your Mac is doing right now. Updated every two seconds.",
     );
-    ui.ctx().request_repaint_after(app.monitor.interval);
+    // The next reading: one wake-up per interval (none while the window is hidden).
+    if !app.window_hidden {
+        ui.ctx().request_repaint_after(app.monitor.interval);
+    }
     let Some(snap) = app.monitor.last.clone() else {
         kit::progress(ui, &t, f, "Reading...", "", 0, false);
         return;
@@ -155,10 +173,17 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             });
             let low = bottoms.iter().copied().fold(f32::MIN, f32::max);
             let want = bottoms.map(|b| (low - b).max(0.0).round());
-            if want.iter().zip(extra).any(|(a, b)| (a - b).abs() > 0.5) {
-                ui.data_mut(|d| d.insert_temp(key, want));
-                // Next frame (a discarded pass would take another reading).
+            // Settle in a few frames at most: never a loop of frames chasing a pixel.
+            let tries_key = egui::Id::new("monitor-col-tries");
+            let tries: u8 = ui.data(|d| d.get_temp(tries_key)).unwrap_or(0);
+            if want.iter().zip(extra).any(|(a, b)| (a - b).abs() > 1.5) && tries < 3 {
+                ui.data_mut(|d| {
+                    d.insert_temp(key, want);
+                    d.insert_temp(tries_key, tries + 1);
+                });
                 ui.ctx().request_repaint();
+            } else if tries > 0 && want.iter().zip(extra).all(|(a, b)| (a - b).abs() <= 1.5) {
+                ui.data_mut(|d| d.insert_temp(tries_key, 0u8));
             }
             if !snap.problems.is_empty() {
                 ui.add_space(8.0);
@@ -265,6 +290,7 @@ fn level_color(app: &CleanApp, frac: f32) -> Color32 {
 
 fn cpu_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
     let history = app.monitor.history.clone();
+    let mut act = ProcAction::default();
     card(app, ui, Icon::Monitor, "CPU", |ui| match &s.cpu {
         Some(c) => {
             let frac = (c.load / 100.0) as f32;
@@ -296,9 +322,7 @@ fn cpu_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
                     .unwrap_or_else(|| UNKNOWN.into()),
             );
             ui.add_space(4.0);
-            for a in &c.top {
-                row(app, ui, &a.name, &pct(a.cpu));
-            }
+            act = proc_rows(app, ui, s, true, &c.top);
         }
         None => {
             big(app, ui, UNKNOWN);
@@ -312,12 +336,14 @@ fn cpu_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
             );
         }
     });
+    apply(app, act);
 }
 
 fn memory_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
     let t = app.t;
     let mut purge = false;
     let running = app.monitor.purge.is_some();
+    let mut act = ProcAction::default();
     card(app, ui, Icon::Gear, "Memory", |ui| {
         match &s.memory {
             Some(m) => {
@@ -362,9 +388,7 @@ fn memory_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
                         .unwrap_or_else(|| UNKNOWN.into()),
                 );
                 ui.add_space(4.0);
-                for a in &m.top {
-                    row(app, ui, &a.name, &memory_size(a.memory));
-                }
+                act = proc_rows(app, ui, s, false, &m.top);
             }
             None => big(app, ui, UNKNOWN),
         }
@@ -380,7 +404,7 @@ fn memory_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
                         .color(t.text),
                 );
             });
-            ui.ctx().request_repaint();
+            crate::motion::spinner_repaint(ui.ctx());
         } else {
             // In a row of its own: the columns are justified, and the click area must be
             // the painted pill only.
@@ -400,6 +424,7 @@ fn memory_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
         app.act();
         app.monitor.confirm_purge = true;
     }
+    apply(app, act);
 }
 
 fn storage_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
@@ -523,7 +548,7 @@ fn network_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
                         .color(app.t.text_dim),
                 );
             });
-            ui.ctx().request_repaint();
+            crate::motion::spinner_repaint(ui.ctx());
         }
         None => big(app, ui, UNKNOWN),
     });
@@ -570,4 +595,126 @@ fn sentence_case(s: &str) -> String {
         Some(f) => f.to_uppercase().chain(c).collect(),
         None => String::new(),
     }
+}
+
+/// The top list of a card: apps with their helpers grouped ("Brave Browser, 3 processes"),
+/// or each process; each row says in plain words what a known process is (dim second line
+/// when there is room, the whole text on hover). macOS processes never get a Quit link; an
+/// app's row links to Startup Items, where apps using a lot can be quit with confirmation.
+/// What a click in a top list asks for.
+#[derive(Default)]
+struct ProcAction {
+    toggle: bool,
+    quit: bool,
+}
+
+fn apply(app: &mut CleanApp, a: ProcAction) {
+    if a.toggle {
+        app.act();
+        app.monitor.by_process = !app.monitor.by_process;
+    }
+    if a.quit {
+        app.act();
+        app.open_route(&cleancraft_core::route::AppRoute::Feature(
+            FeatureId::LoginItems,
+        ));
+    }
+}
+
+fn proc_rows(
+    app: &CleanApp,
+    ui: &mut Ui,
+    s: &Snapshot,
+    by_cpu: bool,
+    top: &[AppUse],
+) -> ProcAction {
+    let t = app.t;
+    let groups: Vec<proc_names::Group> = if s.processes.is_empty() || app.monitor.by_process {
+        let list: Vec<AppUse> = if s.processes.is_empty() {
+            top.to_vec()
+        } else if by_cpu {
+            monitor::top_by_cpu(&s.processes, monitor::TOP_APPS)
+        } else {
+            monitor::top_by_memory(&s.processes, monitor::TOP_APPS)
+        };
+        list.iter()
+            .map(|a| {
+                let ex = proc_names::explain(&a.name);
+                proc_names::Group {
+                    name: a.name.clone(),
+                    processes: 1,
+                    cpu: a.cpu,
+                    memory: a.memory,
+                    macos: ex.as_ref().is_some_and(|e| e.macos),
+                    what: ex.map(|e| e.what),
+                }
+            })
+            .collect()
+    } else if by_cpu {
+        proc_names::top_groups_by_cpu(&s.processes, monitor::TOP_APPS)
+    } else {
+        proc_names::top_groups_by_memory(&s.processes, monitor::TOP_APPS)
+    };
+    let mut quit = false;
+    let mut toggle = false;
+    for (i, g) in groups.iter().enumerate() {
+        let value = if by_cpu {
+            pct(g.cpu)
+        } else {
+            memory_size(g.memory)
+        };
+        let name = if g.processes > 1 {
+            format!("{} ({} processes)", g.name, g.processes)
+        } else {
+            g.name.clone()
+        };
+        let hover_id = egui::Id::new(("proc-row-hover", by_cpu, i));
+        let was_hovered: bool = ui.data(|d| d.get_temp(hover_id)).unwrap_or(false);
+        let resp = ui
+            .scope(|ui| {
+                row(app, ui, &name, &value);
+                let wide = ui.available_width() >= 240.0;
+                if let Some(w) = &g.what
+                    && wide
+                {
+                    let fid = font(size::CALLOUT, Weight::Medium);
+                    let short = kit::truncate_end(ui.ctx(), w, &fid, ui.available_width());
+                    kit::quiet_label(ui, &t, &short, w);
+                }
+                if was_hovered && !g.macos {
+                    ui.push_id(("quit-link", by_cpu, i), |ui| {
+                        if kit::ghost(ui, &t, "Quit in Startup Items...", None).clicked() {
+                            quit = true;
+                        }
+                    });
+                }
+            })
+            .response;
+        let tip = match (&g.what, g.macos) {
+            (Some(w), true) => format!("{w} CleanCraft never offers to quit it."),
+            (Some(w), false) => {
+                format!("{w} To quit it, use Startup Items, under apps using a lot.")
+            }
+            (None, _) => "To quit it, use Startup Items, under apps using a lot.".to_string(),
+        };
+        let hovered = ui.rect_contains_pointer(resp.rect);
+        if hovered != was_hovered {
+            ui.data_mut(|d| d.insert_temp(hover_id, hovered));
+            ui.ctx().request_repaint();
+        }
+        kit::row_tip(&resp, resp.rect, &tip);
+    }
+    if !s.processes.is_empty() {
+        let label = if app.monitor.by_process {
+            "Group by App"
+        } else {
+            "Show Each Process"
+        };
+        ui.push_id(("proc-mode", by_cpu), |ui| {
+            if kit::ghost(ui, &t, label, None).clicked() {
+                toggle = true;
+            }
+        });
+    }
+    ProcAction { toggle, quit }
 }

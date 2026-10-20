@@ -21,6 +21,7 @@ pub mod permissions;
 pub mod plan;
 pub mod plans;
 pub mod policy;
+pub mod proc_names;
 pub mod route;
 pub mod settings;
 pub mod space;
