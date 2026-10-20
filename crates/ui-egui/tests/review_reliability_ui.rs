@@ -334,8 +334,20 @@ fn history_undo_after_trash_emptied_says_why() {
         }
     }
     click(&mut h, "History");
-    click_nth(&mut h, "Undo", 0);
-    assert!(has_text(&h, "Trash emptied"));
+    // Said before any click (ux4 r4, usability U7): no Undo that can only fail, and each
+    // row says why.
+    assert!(
+        h.query_by_label("Undo").is_none(),
+        "Undo offered for emptied items"
+    );
+    assert!(h.query_by_label("Undo All").is_none());
+    assert!(has(&h, "Emptied"));
+    let tip = "It left the Trash or quarantine (emptied), so it cannot be put back.";
+    h.get_all_by_label("Emptied").next().unwrap().hover();
+    for _ in 0..40 {
+        h.step();
+    }
+    assert!(has_text(&h, tip), "the tag explains it");
 }
 
 #[test]

@@ -48,7 +48,7 @@ fn run_two_tasks_with_exact_commands_results_and_free_space() {
     assert!(has_text(&h, "Never run by CleanCraft"));
     click(&mut h, "Flush DNS cache");
     click(&mut h, "Free up purgeable space");
-    assert!(has(&h, "2 selected"));
+    assert!(has(&h, "2 tasks selected"));
     click(&mut h, "Run Selected");
     // The confirmation shows the exact commands.
     assert!(has(&h, "Run 2 tasks?"));
