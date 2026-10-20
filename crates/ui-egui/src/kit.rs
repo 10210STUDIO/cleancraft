@@ -168,6 +168,37 @@ pub fn list_more<R>(
     }
 }
 
+/// An empty list, one style everywhere (REVIEW-C C30): a soft round glyph, a short headline
+/// without a full stop, and one dim line that says what to do. Centred in the space given.
+pub fn empty_state(ui: &mut Ui, t: &Tokens, icon: Icon, headline: &str, line: &str) {
+    ui.vertical_centered(|ui| {
+        ui.add_space(space::XL);
+        let (r, _) = ui.allocate_exact_size(Vec2::splat(52.0), Sense::hover());
+        let p = ui.painter();
+        p.circle_filled(r.center(), 26.0, t.sec_a.gamma_multiply(0.14));
+        icons::paint(
+            p,
+            Rect::from_center_size(r.center(), Vec2::splat(24.0)),
+            icon,
+            icons::lerp(t.sec_a, Color32::WHITE, 0.3),
+        );
+        ui.add_space(space::M);
+        ui.label(
+            RichText::new(headline)
+                .font(font(size::TITLE3, Weight::SemiBold))
+                .color(t.text),
+        );
+        if !line.is_empty() {
+            ui.add_space(space::XS);
+            ui.label(
+                RichText::new(line)
+                    .font(font(size::CALLOUT, Weight::Regular))
+                    .color(t.text_dim),
+            );
+        }
+    });
+}
+
 /// The Done screen's summary: "3 items moved." and, only when some did not move, "2
 /// skipped." (REVIEW-C C31: no "0 skipped").
 pub fn moved_summary(moved: usize, skipped: usize) -> String {
@@ -238,21 +269,31 @@ pub fn dialog_actions(ui: &mut Ui, t: &Tokens, action: &str, kind: Kind) -> (boo
     let go_w = pill_size(ui, action, kind, icon).x;
     let gap = ui.spacing().item_spacing.x;
     let mut out = (false, false);
-    ui.horizontal(|ui| {
-        ui.add_space((ui.available_width() - cancel_w - go_w - gap).max(0.0));
-        out.1 = secondary(ui, t, "Cancel");
-        out.0 = pill(ui, t, action, kind, icon.then_some(Icon::Trash)).clicked();
-    });
-    // Return presses the action, the dialog's default button (REVIEW-U U10), unless the
-    // keyboard is on another control (then Return presses that one).
     let top = ui.ctx().memory(|m| m.top_modal_layer()) == Some(ui.layer_id());
+    // Return presses the action, the dialog's default button (REVIEW-U U10), wherever the
+    // keyboard is in the dialog; Space presses the focused button; Esc cancels (Dialog).
     if top
         && ui.is_enabled()
-        && ui.ctx().memory(|m| m.focused()).is_none()
         && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter))
     {
         out.0 = true;
     }
+    // The dialog opens with the keyboard on Cancel, never on the destructive button
+    // (REVIEW-C C5).
+    let frame = ui.ctx().cumulative_frame_nr();
+    let key = egui::Id::new(("dialog-actions-seen", ui.layer_id()));
+    let last: Option<u64> = ui.data(|d| d.get_temp(key));
+    let just_opened = last.is_none_or(|l| l + 1 < frame);
+    ui.data_mut(|d| d.insert_temp(key, frame));
+    ui.horizontal(|ui| {
+        ui.add_space((ui.available_width() - cancel_w - go_w - gap).max(0.0));
+        let c = secondary_resp(ui, t, "Cancel");
+        if just_opened && top {
+            c.request_focus();
+        }
+        out.1 |= c.clicked();
+        out.0 |= pill(ui, t, action, kind, icon.then_some(Icon::Trash)).clicked();
+    });
     out
 }
 
@@ -573,7 +614,9 @@ pub fn segmented(
         let id = ui.id().with(("segment", *name));
         let resp = ui.interact(r, id, Sense::click());
         let on = i == selected;
-        resp.widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, true, on, *name));
+        // Announced as one of a group of radio buttons: one tool of the section is chosen
+        // (REVIEW-C C33).
+        resp.widget_info(|| WidgetInfo::selected(WidgetType::RadioButton, true, on, *name));
         let f = feel(ui, &resp);
         let hov = f.hov;
         let k = anim(ui.ctx(), id.with("on"), on, motion::HOVER * 1.5);

@@ -700,10 +700,13 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             .show(ui, |ui| {
                 ui.set_min_size(egui::vec2(ui.available_width(), list_h));
                 if rows.is_empty() {
-                    ui.add_space(space::XL);
-                    ui.vertical_centered(|ui| {
-                        ui.label(RichText::new("No items match.").color(t.text_dim));
-                    });
+                    kit::empty_state(
+                        ui,
+                        &t,
+                        Icon::Search,
+                        "No items match",
+                        "Try other words, or clear the search to see every item.",
+                    );
                     return;
                 }
                 let out = egui::ScrollArea::vertical()
@@ -1441,6 +1444,32 @@ pub fn item_name(f: FeatureId, it: &cleancraft_core::Item) -> String {
         .unwrap_or_default()
 }
 
+/// "You will be signed out of websites in Safari and Google Chrome." when the selection holds
+/// browser cookies (Privacy Traces).
+pub fn signed_out_note(plan: &Plan) -> Option<String> {
+    let mut browsers: Vec<String> = Vec::new();
+    for it in plan.selected() {
+        if !it.reason.to_lowercase().contains("cookie") {
+            continue;
+        }
+        let name = plan
+            .categories
+            .iter()
+            .find(|c| c.id == it.category)
+            .map(|c| c.title.clone())
+            .unwrap_or_default();
+        if !name.is_empty() && !browsers.contains(&name) {
+            browsers.push(name);
+        }
+    }
+    let list = match browsers.len() {
+        0 => return None,
+        1 => browsers[0].clone(),
+        n => format!("{} and {}", browsers[..n - 1].join(", "), browsers[n - 1]),
+    };
+    Some(format!("You will be signed out of websites in {list}."))
+}
+
 /// The confirmation line for items that need the administrator password, when there are any.
 pub fn admin_note(n: usize) -> Option<String> {
     match n {
@@ -1499,6 +1528,11 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         );
         ui.add_space(space::M);
         if let Some(note) = admin_note(features::admin_count(&plan)) {
+            kit::strip(ui, Icon::Warning, t.warning, &note);
+            ui.add_space(space::S);
+        }
+        // Said once, where the decision is made (REVIEW-U U20), not only in row tags.
+        if let Some(note) = signed_out_note(&plan) {
             kit::strip(ui, Icon::Warning, t.warning, &note);
             ui.add_space(space::S);
         }

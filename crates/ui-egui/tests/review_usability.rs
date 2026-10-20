@@ -780,7 +780,6 @@ fn u02_running_helper_is_named() {
 }
 
 #[test]
-#[ignore = "U3: Trash Bins says to tick items that are all locked"]
 fn u03_trash_bins_has_no_dead_selection_controls() {
     let mac = testkit_cleanup::trash_mac();
     base(&mac);
@@ -801,7 +800,6 @@ fn u03_trash_bins_has_no_dead_selection_controls() {
 }
 
 #[test]
-#[ignore = "U4: Done says space is freed when the Trash is emptied, with no way to do it"]
 fn u04_done_offers_to_empty_the_trash() {
     let mac = junk();
     let mut h = open_junk_results(&mac);
@@ -877,7 +875,6 @@ fn u07_history_hides_undo_for_items_no_longer_in_the_trash() {
 }
 
 #[test]
-#[ignore = "U8: Ignore acts at once with no feedback and no undo"]
 fn u08_ignore_can_be_undone_on_the_spot() {
     let mac = junk();
     let mut h = open_junk_results(&mac);
@@ -898,7 +895,6 @@ fn u08_ignore_can_be_undone_on_the_spot() {
 }
 
 #[test]
-#[ignore = "U9: skipped items have bare reasons and no retry"]
 fn u09_skipped_items_say_what_to_do_and_can_be_retried() {
     let mac = junk();
     let mut h = open_junk_results(&mac);
@@ -921,7 +917,6 @@ fn u09_skipped_items_say_what_to_do_and_can_be_retried() {
 }
 
 #[test]
-#[ignore = "U10: Return does not press the default button of a dialog"]
 fn u10_return_confirms_the_dialog() {
     let mac = junk();
     let mut h = open_junk_results(&mac);
@@ -937,7 +932,6 @@ fn u10_return_confirms_the_dialog() {
 }
 
 #[test]
-#[ignore = "U10: no standard shortcuts (Cmd+F, Cmd+,)"]
 fn u10_standard_shortcuts() {
     let mac = junk();
     let mut h = open_junk_results(&mac);
@@ -961,7 +955,6 @@ fn u10_standard_shortcuts() {
 }
 
 #[test]
-#[ignore = "U11: Duplicates: the kept copy is not marked and cannot be chosen in one click"]
 fn u11_duplicates_mark_and_choose_the_kept_copy() {
     let (mac, _) = files_mac();
     let mut h = harness(&mac);
@@ -1024,7 +1017,6 @@ fn u13_one_name_for_scanning_again() {
 }
 
 #[test]
-#[ignore = "U14: a notice follows the user to other pages"]
 fn u14_notice_clears_on_page_change() {
     let mac = junk();
     let mut h = open_junk_results(&mac);
@@ -1043,7 +1035,6 @@ fn u14_notice_clears_on_page_change() {
 }
 
 #[test]
-#[ignore = "U14: the Full Disk Access banner sits on every page and cannot be closed"]
 fn u14_fda_banner_only_where_needed_and_dismissable() {
     let mac = junk();
     let mut h = harness_fda(&mac, Access::Missing);
@@ -1059,7 +1050,6 @@ fn u14_fda_banner_only_where_needed_and_dismissable() {
 }
 
 #[test]
-#[ignore = "U16: the pointer does not change over buttons"]
 fn u16_pointing_hand_over_buttons() {
     let mac = junk();
     let mut h = harness(&mac);
@@ -1075,7 +1065,6 @@ fn u16_pointing_hand_over_buttons() {
 }
 
 #[test]
-#[ignore = "U18: Large & Old Files cannot be sorted by age"]
 fn u18_large_old_sorts_by_last_opened() {
     let (mac, _) = files_mac();
     let mut h = harness(&mac);
@@ -1124,7 +1113,6 @@ fn u19_login_item_error_is_in_plain_words() {
 }
 
 #[test]
-#[ignore = "U17: Quick Sweep tiles go stale after cleaning from a module page"]
 fn u17_quick_sweep_tiles_follow_a_module_cleanup() {
     let mac = sweep();
     let mut h = harness(&mac);

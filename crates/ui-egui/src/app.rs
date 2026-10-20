@@ -105,6 +105,8 @@ pub struct CleanApp {
     /// CleanCraft's action log as last seen: moves and Undos from any page (App Remover,
     /// Disk Map, History, Startup) reach the plan pages and Quick Sweep through it.
     journal: pages::history::JournalWatch,
+    /// "Not Now" on the Full Disk Access banner (for this session).
+    pub fda_dismissed: bool,
 }
 
 /// Sidebar entry height.
@@ -140,6 +142,7 @@ impl CleanApp {
             disk_epoch: 0,
             last_moved: Vec::new(),
             journal: Default::default(),
+            fda_dismissed: false,
         }
     }
 
@@ -169,6 +172,8 @@ impl CleanApp {
 
     /// Go to a page by name: a feature id ("system_junk"), "history" or "settings".
     pub fn navigate(&mut self, name: &str) {
+        // A notice belongs to the page it was about (REVIEW-U U14).
+        self.notice = None;
         self.page = match name {
             "history" => Page::History,
             "settings" => Page::Settings,
@@ -480,6 +485,7 @@ impl CleanApp {
                     if self.nav_row(ui, group_icon(i), name, current == Some(i)) {
                         self.act();
                         let f = self.section_tool.get(&i).copied().unwrap_or(feats[0]);
+                        self.notice = None;
                         self.page = Page::Feature(f);
                     }
                 }
@@ -571,9 +577,25 @@ impl CleanApp {
         resp.clicked()
     }
 
+    /// Pages whose results depend on Full Disk Access (Mail, Safari and Trash data).
+    fn needs_fda(&self) -> bool {
+        matches!(
+            self.page,
+            Page::Feature(
+                FeatureId::SmartCare
+                    | FeatureId::SystemJunk
+                    | FeatureId::MailAttachments
+                    | FeatureId::TrashBins
+                    | FeatureId::Privacy
+                    | FeatureId::Malware
+            )
+        )
+    }
+
     fn banners(&mut self, ui: &mut Ui) {
         let t = self.t;
-        if self.fda == Access::Missing {
+        // Only where it matters, and it can be put away (REVIEW-U U14).
+        if self.fda == Access::Missing && !self.fda_dismissed && self.needs_fda() {
             egui::Frame::new()
                 .fill(Color32::from_rgba_unmultiplied(0x3A, 0x2C, 0x12, 200))
                 .stroke(Stroke::new(1.0, t.warning.gamma_multiply(0.45)))
@@ -605,6 +627,10 @@ impl CleanApp {
                             } else {
                                 self.warn("Full Disk Access is still off.");
                             }
+                        }
+                        if kit::ghost(ui, &t, "Not Now", None).clicked() {
+                            self.act();
+                            self.fda_dismissed = true;
                         }
                     });
                 });

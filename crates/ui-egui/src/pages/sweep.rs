@@ -362,6 +362,7 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile, w: f32, tile_h: 
     let t = app.t;
     let skipped = app.settings.sweep_skip.contains(&tile.id);
     let mut review = false;
+    let mut retry = false;
     let mut include = !skipped;
     let (icon, color) = kit::feature_look(&t, tile.id);
     let (rect, _) = ui.allocate_exact_size(vec2(w, tile_h), Sense::hover());
@@ -491,8 +492,27 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile, w: f32, tile_h: 
                 ui.add_space(4.0);
                 kit::check_text(ui, &t, &mut include, "Include");
             }
+            // A module that could not scan offers to scan again (REVIEW-U U23).
+            if matches!(tile.data, TileData::Failed(_)) {
+                let r = kit::secondary_resp(ui, &t, "Try Again");
+                r.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Button,
+                        true,
+                        format!("Scan {} again", tile.id.title()),
+                    )
+                });
+                if r.clicked() {
+                    retry = true;
+                }
+            }
         },
     );
+    if retry {
+        app.act();
+        start_scan(app);
+        return;
+    }
     if review {
         app.act();
         if let TileData::Plan(p) = &tile.data {

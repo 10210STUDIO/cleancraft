@@ -216,7 +216,6 @@ fn contrast(a: [u8; 4], b: [u8; 4]) -> f64 {
 /// C1 (S1): no control changes the pointer. Every enabled button, checkbox, switch, radio,
 /// pop-up and link shows the pointing hand on hover.
 #[test]
-#[ignore = "design4: fixed (ux_render::every_control_shows_the_pointing_hand); this probe hovers rows scrolled out of the category list (under the bottom bar) and a switch clipped by the Settings scroll area, see board"]
 fn review_c1_every_control_shows_the_pointing_hand() {
     type Go = fn(&mut H);
     let screens: Vec<(&str, fn() -> FakeMac, Go)> = vec![
@@ -416,15 +415,29 @@ fn review_c5_confirm_dialog_is_modal_for_pointer_and_keyboard() {
             "I-beam over the Search field behind the dialog ({c:?})"
         ));
     }
-    h.key_press(egui::Key::Tab);
-    settle(&mut h);
+    // design4 round 4: the target's "Cancel focused when the dialog opens" (lead), so the
+    // keyboard starts on Cancel without a Tab; Tab then reaches "Move to Trash".
     let focused = h
         .root()
         .children_recursive()
         .find(|n| n.accesskit_node().is_focused())
         .and_then(|n| n.accesskit_node().label());
     if focused.as_deref() != Some("Cancel") {
-        bad.push(format!("first Tab focuses {focused:?}, not Cancel"));
+        bad.push(format!(
+            "the dialog opens with {focused:?} focused, not Cancel"
+        ));
+    }
+    h.key_press(egui::Key::Tab);
+    settle(&mut h);
+    let next = h
+        .root()
+        .children_recursive()
+        .find(|n| n.accesskit_node().is_focused())
+        .and_then(|n| n.accesskit_node().label());
+    if next.as_deref() != Some("Move to Trash") {
+        bad.push(format!(
+            "Tab from Cancel focuses {next:?}, not Move to Trash"
+        ));
     }
     assert!(bad.is_empty(), "{}", bad.join("\n"));
 }
