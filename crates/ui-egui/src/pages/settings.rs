@@ -637,15 +637,21 @@ fn toggle_menu_bar(app: &mut CleanApp) {
             let id = ch.record.id.clone();
             let msg = match (&ch.note, on) {
                 (Some(n), _) => format!("CleanCraft is set to show in the menu bar. {n}"),
-                (None, false) => "CleanCraft is in the menu bar now and starts there at login.".to_string(),
-                (None, true) => "CleanCraft left the menu bar. Its login item is in the Trash.".to_string(),
+                (None, false) => {
+                    "CleanCraft is in the menu bar now and starts there at login.".to_string()
+                }
+                (None, true) => {
+                    "CleanCraft left the menu bar. Its login item is in the Trash.".to_string()
+                }
             };
-            app.tell_undo(msg, "Menu Bar Change", move |app| {
-                match cleancraft_core::executor::undo(&app.env, &id) {
+            app.tell_undo(
+                msg,
+                "Menu Bar Change",
+                move |app| match cleancraft_core::executor::undo(&app.env, &id) {
                     Ok(_) => app.tell("The menu bar change was undone."),
                     Err(e) => app.warn(format!("Could not undo: {e}")),
-                }
-            });
+                },
+            );
         }
         Err(e) => app.warn(e),
     }

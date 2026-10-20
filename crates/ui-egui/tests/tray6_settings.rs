@@ -18,7 +18,7 @@ use cleancraft_ui_egui::pages::settings::{
 };
 use common::*;
 use egui::accesskit::Role;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 
 fn mac() -> FakeMac {
     let m = FakeMac::new();
@@ -54,7 +54,10 @@ fn the_menu_bar_switch_adds_and_removes_the_login_item_with_undo() {
     let mut h = settings_page(&m);
     assert!(!login_agent::is_on(&m.env), "off by default");
     assert!(has(&h, MENU_BAR_SWITCH));
-    assert!(has_text(&h, "Off: nothing of CleanCraft runs while the app is closed."));
+    assert!(has_text(
+        &h,
+        "Off: nothing of CleanCraft runs while the app is closed."
+    ));
 
     reach(&mut h, MENU_BAR_SWITCH);
     let plist = login_agent::plist_path(&m.env);
@@ -64,16 +67,26 @@ fn the_menu_bar_switch_adds_and_removes_the_login_item_with_undo() {
     assert!(xml.contains("<string>agent</string>"));
     let uid = cleancraft_core::features::trash::uid(&m.env);
     assert!(
-        fake.calls()
-            .contains(&format!("/bin/launchctl bootstrap gui/{uid} {}", plist.display())),
+        fake.calls().contains(&format!(
+            "/bin/launchctl bootstrap gui/{uid} {}",
+            plist.display()
+        )),
         "{:?}",
         fake.calls()
     );
-    assert!(has_text(&h, "CleanCraft is in the menu bar now and starts there at login."));
-    assert!(has_text(&h, "It only looks: it scans, warns and opens CleanCraft"));
+    assert!(has_text(
+        &h,
+        "CleanCraft is in the menu bar now and starts there at login."
+    ));
+    assert!(has_text(
+        &h,
+        "It only looks: it scans, warns and opens CleanCraft"
+    ));
     let hist = executor::history(&m.env);
     assert_eq!(hist.len(), 1);
-    assert!(matches!(&hist[0].kind, ActionKind::Toggled { what, .. } if what.starts_with(login_agent::ON_TEXT)));
+    assert!(
+        matches!(&hist[0].kind, ActionKind::Toggled { what, .. } if what.starts_with(login_agent::ON_TEXT))
+    );
 
     // Off: booted out, the plist goes to the Trash.
     reach(&mut h, MENU_BAR_SWITCH);
@@ -117,9 +130,13 @@ fn schedule_disk_alert_and_pause_are_saved_and_need_the_menu_bar() {
     assert_eq!(s.scan_every, ScanEvery::Daily);
     assert_eq!(s.scan_hour, 10);
     assert!(has_text(&h, "Next scan: "));
-    assert!(has_text(&h, "A scheduled scan only looks: nothing moves until you review it in Quick Sweep and confirm."));
+    assert!(has_text(
+        &h,
+        "A scheduled scan only looks: nothing moves until you review it in Quick Sweep and confirm."
+    ));
     // The time: a click on the slider moves it; saved.
-    h.get_by_role_and_label(Role::Slider, "Scan time").scroll_to_me();
+    h.get_by_role_and_label(Role::Slider, "Scan time")
+        .scroll_to_me();
     steps(&mut h);
     h.get_by_role_and_label(Role::Slider, "Scan time").click();
     steps(&mut h);
@@ -188,7 +205,10 @@ fn a_launchctl_failure_and_an_unwritable_log_are_shown() {
         .inject_fault(&executor::journal_path(&m.env), Fault::DiskFull);
     let mut h = settings_page(&m);
     reach(&mut h, MENU_BAR_SWITCH);
-    assert!(has_text(&h, "Could not write the action log, nothing changed"));
+    assert!(has_text(
+        &h,
+        "Could not write the action log, nothing changed"
+    ));
     assert!(!login_agent::is_on(&m.env));
     assert!(m.env.fake_sys().expect("fake").calls().is_empty());
 }

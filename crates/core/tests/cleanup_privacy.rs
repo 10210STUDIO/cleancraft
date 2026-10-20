@@ -43,6 +43,7 @@ fn browsers_are_listed_with_safe_defaults() {
         assert_eq!(it.selected, selected, "{rel}");
         assert!(it.locked.is_none(), "{rel}");
     };
+    // Cookies are never preselected: removing them signs the user out of websites.
     // Safari.
     check("Library/Safari/History.db", "safari", "History", true);
     check(
@@ -62,7 +63,7 @@ fn browsers_are_listed_with_safe_defaults() {
         "Library/Containers/com.apple.Safari/Data/Library/Cookies/Cookies.binarycookies",
         "safari",
         "Cookies",
-        true,
+        false,
     );
     check("Library/Caches/com.apple.Safari", "safari", "Cache", true);
     assert!(!has(&p, &h(&m, "Library/Safari/Bookmarks.plist")));
@@ -78,7 +79,7 @@ fn browsers_are_listed_with_safe_defaults() {
         &format!("{CHROME}/Default/Cookies"),
         "chrome",
         "Cookies",
-        true,
+        false,
     );
     check(
         &format!("{CHROME}/Default/Current Session"),
@@ -139,7 +140,7 @@ fn browsers_are_listed_with_safe_defaults() {
         item(&p, &h(&m, &format!("{FF}/places.sqlite"))).risk,
         Risk::High
     );
-    check(&format!("{FF}/cookies.sqlite"), "firefox", "Cookies", true);
+    check(&format!("{FF}/cookies.sqlite"), "firefox", "Cookies", false);
     check(
         &format!("{FF}/formhistory.sqlite"),
         "firefox",
@@ -296,9 +297,13 @@ fn running_browser_is_locked_and_blocks_cleaning() {
 fn clean_moves_selected_traces_and_reports_errors() {
     let m = privacy_mac();
     let s = Settings::default();
-    let p = scan(&m);
+    let mut p = scan(&m);
     let hist = h(&m, &format!("{CHROME}/Default/History"));
     let cookies = h(&m, &format!("{CHROME}/Default/Cookies"));
+    // Cookies are not preselected: the user ticks Chrome's to clean them too.
+    let cid = item(&p, &cookies).id;
+    assert!(!p.items[cid].selected);
+    p.set_selected(cid, true);
     let safari = h(&m, "Library/Safari/History.db");
     m.env.inject_fault(&hist, Fault::PermissionDenied);
     m.env.fake_sys().unwrap().set_open(&cookies);
@@ -327,6 +332,9 @@ fn clean_moves_selected_traces_and_reports_errors() {
         format!("{CHROME}/Default/Web Data"),
         format!("{FF}/places.sqlite"),
         format!("{FF}/logins.json"),
+        format!("{FF}/cookies.sqlite"),
+        "Library/Containers/com.apple.Safari/Data/Library/Cookies/Cookies.binarycookies"
+            .to_string(),
         "Library/Safari/Bookmarks.plist".to_string(),
     ] {
         assert!(h(&m, &keep).exists(), "{keep}");
@@ -412,4 +420,71 @@ fn unreadable_safari_folder_is_noted() {
             .any(|n| n.contains("Library/Safari could not be read"))
     );
     assert!(!p.items.iter().any(|i| i.category == "safari"));
+}
+
+/// Cookies (signing out of websites) are never preselected; history and caches still are.
+/// Ticking one browser's cookies moves exactly those, and only they count as signing out.
+#[test]
+fn cookies_are_not_preselected_and_move_only_when_ticked() {
+    let m = privacy_mac();
+    let s = Settings::default();
+    let mut p = scan(&m);
+    let cookies: Vec<&Item> = p
+        .items
+        .iter()
+        .filter(|i| i.group.as_deref() == Some("Cookies"))
+        .collect();
+    assert!(cookies.len() >= 3, "Safari, Chrome and Firefox cookies");
+    assert!(
+        cookies.iter().all(|i| !i.selected),
+        "a cookie is preselected"
+    );
+    assert!(cookies.iter().all(|i| privacy::signs_out(i)));
+    assert!(
+        p.items
+            .iter()
+            .filter(|i| i.group.as_deref() != Some("Cookies"))
+            .all(|i| !privacy::signs_out(i)),
+        "only cookies sign the user out"
+    );
+    // Nothing selected by default signs the user out.
+    assert!(!p.selected().any(privacy::signs_out));
+    // History and caches keep their defaults.
+    for rel in [
+        "Library/Safari/History.db".to_string(),
+        format!("{CHROME}/Default/History"),
+        "Library/Caches/com.apple.Safari".to_string(),
+        "Library/Caches/Google/Chrome/Default".to_string(),
+    ] {
+        assert!(item(&p, &h(&m, &rel)).selected, "{rel}");
+    }
+    // The default cleanup leaves every cookie file in place.
+    let defaults = p.clone();
+    let rep =
+        features::run_plan(&m.env, &s, &defaults, &defaults.digest(), &mut |_, _| {}).unwrap();
+    assert_eq!(rep.moved.len(), defaults.selected_count());
+    let cookie_paths: Vec<PathBuf> = cookies.iter().map(|i| i.path.clone()).collect();
+    for c in &cookie_paths {
+        assert!(c.exists(), "{} moved without a tick", c.display());
+    }
+
+    // A fresh scan; the user ticks only Chrome's cookies and unticks everything else.
+    let m = privacy_mac();
+    p = scan(&m);
+    let chrome_cookies = h(&m, &format!("{CHROME}/Default/Cookies"));
+    for i in 0..p.items.len() {
+        p.set_selected(i, p.items[i].path == chrome_cookies);
+    }
+    assert_eq!(p.selected_count(), 1);
+    assert!(p.selected().all(privacy::signs_out));
+    let rep = features::run_plan(&m.env, &s, &p, &p.digest(), &mut |_, _| {}).unwrap();
+    assert_eq!(rep.moved.len(), 1);
+    assert!(!chrome_cookies.exists());
+    for i in p
+        .items
+        .iter()
+        .filter(|i| i.path != chrome_cookies && i.size > 0)
+    {
+        assert!(i.path.exists(), "{} moved without a tick", i.path.display());
+    }
 }

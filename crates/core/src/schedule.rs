@@ -77,7 +77,12 @@ fn at_hour(d: NaiveDate, hour: u8) -> NaiveDateTime {
 }
 
 /// The latest scheduled moment at or before `now`; `None` when scans are off.
-pub fn last_slot(every: ScanEvery, hour: u8, weekday: u8, now: NaiveDateTime) -> Option<NaiveDateTime> {
+pub fn last_slot(
+    every: ScanEvery,
+    hour: u8,
+    weekday: u8,
+    now: NaiveDateTime,
+) -> Option<NaiveDateTime> {
     let today = at_hour(now.date(), hour);
     match every {
         ScanEvery::Off => None,
@@ -101,7 +106,12 @@ pub fn last_slot(every: ScanEvery, hour: u8, weekday: u8, now: NaiveDateTime) ->
 }
 
 /// The next scheduled moment after `now`; `None` when scans are off.
-pub fn next_slot(every: ScanEvery, hour: u8, weekday: u8, now: NaiveDateTime) -> Option<NaiveDateTime> {
+pub fn next_slot(
+    every: ScanEvery,
+    hour: u8,
+    weekday: u8,
+    now: NaiveDateTime,
+) -> Option<NaiveDateTime> {
     let last = last_slot(every, hour, weekday, now)?;
     Some(match every {
         ScanEvery::Weekly => last + Duration::days(7),

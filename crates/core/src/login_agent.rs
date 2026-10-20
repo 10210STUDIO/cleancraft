@@ -18,7 +18,8 @@ pub const LAUNCHCTL: &str = "/bin/launchctl";
 /// The helper app inside CleanCraft.app that runs the agent (scripts/install-app.sh builds it:
 /// its own bundle id and `LSUIElement`, so it has no Dock icon and `open -b` of the main app
 /// never lands on it).
-pub const HELPER_REL: &str = "Contents/Library/LoginItems/CleanCraftAgent.app/Contents/MacOS/CleanCraftAgent";
+pub const HELPER_REL: &str =
+    "Contents/Library/LoginItems/CleanCraftAgent.app/Contents/MacOS/CleanCraftAgent";
 /// "What" of the journal lines.
 pub const ON_TEXT: &str = "Turned on CleanCraft in the menu bar";
 pub const OFF_TEXT: &str = "Turned off CleanCraft in the menu bar";
@@ -94,9 +95,8 @@ fn domain(env: &Env) -> String {
 
 /// Turn on: write the plist (when it is not there yet) and load it now.
 pub fn turn_on(env: &Env, program: &Path) -> Result<Change, String> {
-    crate::tasks::journal_writable(env).map_err(|e| {
-        format!("Could not write the action log, nothing changed: {e}")
-    })?;
+    crate::tasks::journal_writable(env)
+        .map_err(|e| format!("Could not write the action log, nothing changed: {e}"))?;
     let plist = plist_path(env);
     if !plist.is_file() {
         let dir = plist.parent().map(Path::to_path_buf).unwrap_or_default();
@@ -136,9 +136,8 @@ pub fn turn_on(env: &Env, program: &Path) -> Result<Change, String> {
 
 /// Turn off: stop the agent and move the plist to the Trash.
 pub fn turn_off(env: &Env) -> Result<Change, String> {
-    crate::tasks::journal_writable(env).map_err(|e| {
-        format!("Could not write the action log, nothing changed: {e}")
-    })?;
+    crate::tasks::journal_writable(env)
+        .map_err(|e| format!("Could not write the action log, nothing changed: {e}"))?;
     let plist = plist_path(env);
     if !plist.is_file() {
         return Err("CleanCraft was not set to start in the menu bar.".into());
@@ -162,10 +161,7 @@ pub fn turn_off(env: &Env) -> Result<Change, String> {
     );
     let record = log(
         env,
-        format!(
-            "{OFF_TEXT} ({} moved to the Trash)",
-            env.display(&plist)
-        ),
+        format!("{OFF_TEXT} ({} moved to the Trash)", env.display(&plist)),
         undo,
     )?;
     Ok(Change { record, note: None })

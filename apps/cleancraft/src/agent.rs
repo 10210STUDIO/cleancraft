@@ -75,10 +75,6 @@ impl Worker {
         };
         (quit, self.agent.menu(self.snap.as_ref(), &settings))
     }
-
-    pub fn agent(&self) -> &Agent {
-        &self.agent
-    }
 }
 
 fn log_report(rep: &CheckReport) {
@@ -102,7 +98,11 @@ pub fn run(env: &Env) -> anyhow::Result<()> {
     let (actions, from_ui) = mpsc::channel::<MenuAction>();
     let worker_env = env.clone();
     std::thread::spawn(move || {
-        worker_loop(Worker::new(worker_env, Sources::registered()), &to_ui, &from_ui)
+        worker_loop(
+            Worker::new(worker_env, Sources::registered()),
+            &to_ui,
+            &from_ui,
+        )
     });
     crate::tray::run(models, actions)
 }
@@ -155,7 +155,11 @@ mod tests {
         assert!(model.title.starts_with("CPU 17% RAM "), "{}", model.title);
         assert!(!model.disk_low);
         assert_eq!(model.info[0], "CPU: 17%");
-        assert!(model.info[2].starts_with("Free space: "), "{:?}", model.info);
+        assert!(
+            model.info[2].starts_with("Free space: "),
+            "{:?}",
+            model.info
+        );
         assert!(model.info[3].starts_with("Trash: "), "{:?}", model.info);
         assert_eq!(rep.scanned, None, "scans are off by default");
         assert!(cleancraft_core::executor::history(&m.env).is_empty());
@@ -171,10 +175,15 @@ mod tests {
         w.round(Instant::now(), at("2026-10-20 09:00"));
         let (quit, _) = w.act(MenuAction::QuickSweep);
         assert!(!quit);
-        assert!(fake.calls().contains(&"/usr/bin/open -b com.cristianizzo.cleancraft".to_string()));
+        assert!(
+            fake.calls()
+                .contains(&"/usr/bin/open -b com.cristianizzo.cleancraft".to_string())
+        );
         let mut inbox = notify::OpenInbox::default();
         assert_eq!(
-            inbox.poll(&m.env, chrono::Utc::now().timestamp()).as_deref(),
+            inbox
+                .poll(&m.env, chrono::Utc::now().timestamp())
+                .as_deref(),
             Some("quick_sweep"),
             "{QUICK_SWEEP} opens Quick Sweep"
         );

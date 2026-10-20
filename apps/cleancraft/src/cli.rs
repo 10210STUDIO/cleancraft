@@ -271,13 +271,18 @@ mod tests {
     #[test]
     fn open_routes_from_names_and_links() {
         assert_eq!(open_route(None).ok().as_deref(), Some(""));
-        assert_eq!(open_route(Some("quick-sweep")).ok().as_deref(), Some("quick-sweep"));
+        assert_eq!(
+            open_route(Some("quick-sweep")).ok().as_deref(),
+            Some("quick-sweep")
+        );
         assert_eq!(
             open_route(Some("scan:quick_sweep")).ok().as_deref(),
             Some("scan:quick_sweep")
         );
         assert_eq!(
-            open_route(Some("cleancraft://open/history")).ok().as_deref(),
+            open_route(Some("cleancraft://open/history"))
+                .ok()
+                .as_deref(),
             Some("history")
         );
         assert!(open_route(Some("https://example.com/x")).is_err());
@@ -289,9 +294,13 @@ mod tests {
         let m = FakeMac::new();
         let fake = m.env.fake_sys().expect("fake");
         fake.answer("open", "");
-        let cli = Cli::try_parse_from(["cleancraft", "open", "--page", "quick-sweep"]).expect("args");
+        let cli =
+            Cli::try_parse_from(["cleancraft", "open", "--page", "quick-sweep"]).expect("args");
         run_cmd(&m.env, cli.cmd).expect("open");
-        assert_eq!(fake.calls(), vec!["/usr/bin/open -b com.cristianizzo.cleancraft".to_string()]);
+        assert_eq!(
+            fake.calls(),
+            vec!["/usr/bin/open -b com.cristianizzo.cleancraft".to_string()]
+        );
         let mut inbox = cleancraft_core::notify::OpenInbox::default();
         assert_eq!(
             inbox.poll(&m.env, chrono_now()).as_deref(),
@@ -299,7 +308,10 @@ mod tests {
         );
         // The agent subcommand refuses while the menu bar is off.
         let cli = Cli::try_parse_from(["cleancraft", "agent"]).expect("args");
-        let e = run_cmd(&m.env, cli.cmd).err().map(|e| e.to_string()).unwrap_or_default();
+        let e = run_cmd(&m.env, cli.cmd)
+            .err()
+            .map(|e| e.to_string())
+            .unwrap_or_default();
         assert!(e.starts_with("The menu bar is off."), "{e}");
     }
 

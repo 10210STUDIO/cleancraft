@@ -1646,12 +1646,15 @@ pub fn item_name(f: FeatureId, it: &cleancraft_core::Item) -> String {
         .unwrap_or_default()
 }
 
-/// "You will be signed out of websites in Safari and Google Chrome." when the selection holds
-/// browser cookies (Privacy Traces).
+/// "You will be signed out of websites in Safari and Google Chrome." only when the user ticked
+/// items whose removal signs them out (browser cookies in Privacy Traces, never preselected).
 pub fn signed_out_note(plan: &Plan) -> Option<String> {
+    if plan.feature != Some(FeatureId::Privacy) {
+        return None;
+    }
     let mut browsers: Vec<String> = Vec::new();
     for it in plan.selected() {
-        if !it.reason.to_lowercase().contains("cookie") {
+        if !features::privacy::signs_out(it) {
             continue;
         }
         let name = plan
