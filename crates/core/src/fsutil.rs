@@ -4,6 +4,7 @@
 
 use std::collections::HashSet;
 use std::fs::{self, Metadata};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -242,9 +243,113 @@ fn units(bytes: u64, base: f64) -> String {
     }
 }
 
+/// Rename `from` to `to` without ever replacing what is at `to`: `ErrorKind::AlreadyExists`
+/// when something is there, also something another app put there a moment ago. On macOS this
+/// is `renamex_np(RENAME_EXCL)`, on Linux `renameat2(RENAME_NOREPLACE)`; a volume that cannot
+/// do it falls back to a check right before a plain rename.
+pub fn rename_no_replace(from: &Path, to: &Path) -> io::Result<()> {
+    #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
+    {
+        use rustix::fs::{CWD, RenameFlags, renameat_with};
+        use rustix::io::Errno;
+        match renameat_with(CWD, from, CWD, to, RenameFlags::NOREPLACE) {
+            Ok(()) => return Ok(()),
+            // The volume or the kernel does not know the flag: fall back below.
+            Err(e) if e == Errno::INVAL || e == Errno::NOSYS || e == Errno::OPNOTSUPP => {}
+            Err(e) => return Err(e.into()),
+        }
+    }
+    if fs::symlink_metadata(to).is_ok() {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!("{} already exists", to.display()),
+        ));
+    }
+    fs::rename(from, to)
+}
+
+/// How many fresh names [`move_unique`] tries before it gives up.
+pub const UNIQUE_TRIES: u32 = 64;
+
+/// Move `from` to a free name, never replacing anything: `pick(attempt)` proposes a name
+/// (it should look at the folder again each time); when that name is taken by the time of the
+/// move (another app wrote there in between), the move fails without harm and `pick` is asked
+/// again. Returns where the item went.
+pub fn move_unique(from: &Path, pick: &mut dyn FnMut(u32) -> PathBuf) -> io::Result<PathBuf> {
+    for attempt in 0..UNIQUE_TRIES {
+        let to = pick(attempt);
+        match rename_no_replace(from, &to) {
+            Ok(()) => return Ok(to),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "no free name was found for the item",
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rename_never_replaces() {
+        let d = tempfile::tempdir().unwrap();
+        let a = d.path().join("a.txt");
+        let b = d.path().join("b.txt");
+        fs::write(&a, b"mine").unwrap();
+        fs::write(&b, b"someone else's").unwrap();
+        let e = rename_no_replace(&a, &b).unwrap_err();
+        assert_eq!(e.kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(fs::read(&a).unwrap(), b"mine");
+        assert_eq!(fs::read(&b).unwrap(), b"someone else's");
+        // A folder onto an empty folder is refused too (a plain rename would replace it).
+        let da = d.path().join("dir_a");
+        let db = d.path().join("dir_b");
+        fs::create_dir_all(da.join("x")).unwrap();
+        fs::create_dir_all(&db).unwrap();
+        assert_eq!(
+            rename_no_replace(&da, &db).unwrap_err().kind(),
+            io::ErrorKind::AlreadyExists
+        );
+        assert!(da.join("x").exists());
+        let c = d.path().join("c.txt");
+        rename_no_replace(&a, &c).unwrap();
+        assert_eq!(fs::read(&c).unwrap(), b"mine");
+    }
+
+    /// CHK7-6: the name chosen is taken between the choice and the move (another app writes
+    /// into the Trash at that moment). Nothing is replaced; the item goes to a fresh name.
+    #[test]
+    fn move_unique_retries_when_the_name_is_taken_in_between() {
+        let d = tempfile::tempdir().unwrap();
+        let item = d.path().join("report.pdf");
+        fs::write(&item, b"to the trash").unwrap();
+        let trash = d.path().join("Trash");
+        fs::create_dir_all(&trash).unwrap();
+        let intruder = trash.join("report.pdf");
+        let mut calls = 0;
+        let got = move_unique(&item, &mut |n| {
+            calls += 1;
+            if n == 0 {
+                // The free name is chosen, then another app writes a file with that name.
+                let free = trash.join("report.pdf");
+                assert!(!free.exists());
+                fs::write(&free, b"another app's file").unwrap();
+                free
+            } else {
+                trash.join(format!("report {}.pdf", n + 1))
+            }
+        })
+        .unwrap();
+        assert_eq!(calls, 2);
+        assert_eq!(got, trash.join("report 2.pdf"));
+        assert_eq!(fs::read(&intruder).unwrap(), b"another app's file");
+        assert_eq!(fs::read(&got).unwrap(), b"to the trash");
+        assert!(!item.exists());
+    }
 
     #[test]
     fn human() {

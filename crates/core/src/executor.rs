@@ -275,8 +275,8 @@ pub fn execute_with(
             Ok((stored, used_method)) => {
                 let rec = moved_record(plan, item, size, stored.clone(), used_method, &mut used);
                 if let Err(e) = append_journal(env, &rec) {
-                    // No log line, no removal: put it back.
-                    let _ = fs::rename(&stored, p);
+                    // No log line, no removal: put it back (never over something new).
+                    let _ = crate::fsutil::rename_no_replace(&stored, p);
                     report.skipped.push((
                         p.clone(),
                         SkipReason::Other(format!("could not log the action: {e}")),
@@ -632,9 +632,9 @@ fn move_one(env: &Env, p: &Path, plan_id: &str, method: Method) -> io::Result<(P
         }
         fs::create_dir_all(&dir)?;
         let is_dir = fs::symlink_metadata(p).map(|m| m.is_dir()).unwrap_or(false);
-        let dest = free_name(&dir, &name, is_dir);
-        fs::rename(p, &dest)?;
-        Ok(dest)
+        // The free name is chosen and taken in one step: a name another app takes in between
+        // is never replaced, a fresh one is chosen (CHK7-6).
+        crate::fsutil::move_unique(p, &mut |_| free_name(&dir, &name, is_dir))
     };
     // Moving as the user is never an administrator move.
     let method = match method {
@@ -859,7 +859,14 @@ pub fn undo(env: &Env, action_id: &str) -> Result<ActionRecord, UndoError> {
             if let Some(parent) = original.parent() {
                 fs::create_dir_all(parent).map_err(|e| UndoError::Io(e.to_string()))?;
             }
-            fs::rename(&stored, &original).map_err(|e| UndoError::Io(e.to_string()))?;
+            // Never over something that appeared at the original place after the check.
+            crate::fsutil::rename_no_replace(&stored, &original).map_err(|e| {
+                if e.kind() == io::ErrorKind::AlreadyExists {
+                    UndoError::OriginalTaken(original.clone())
+                } else {
+                    UndoError::Io(e.to_string())
+                }
+            })?;
             relink(&mut recs, i, &stored, &original);
         }
         ActionKind::Toggled {
@@ -1093,6 +1100,38 @@ pub fn move_quarantine_to_trash(
     env: &Env,
     progress: &mut dyn FnMut(usize, usize),
 ) -> Result<Report, ExecError> {
+    move_quarantine_list(env, None, progress)
+}
+
+/// What the quarantine holds, each item with its size: the list the "Move Quarantine to
+/// Trash" confirmation shows (CHK7-5).
+pub fn quarantine_list(env: &Env) -> Vec<(PathBuf, u64)> {
+    let mut counted = HashSet::new();
+    quarantine_items(env)
+        .into_iter()
+        .map(|p| {
+            let size = tree_size_once(&p, &mut counted).0;
+            (p, size)
+        })
+        .collect()
+}
+
+/// [`move_quarantine_to_trash`] for exactly the items the person confirmed (from
+/// [`quarantine_list`]): an item that came into the quarantine after the list was shown stays
+/// there, one that is gone is reported as missing.
+pub fn move_quarantine_items_to_trash(
+    env: &Env,
+    confirmed: &[PathBuf],
+    progress: &mut dyn FnMut(usize, usize),
+) -> Result<Report, ExecError> {
+    move_quarantine_list(env, Some(confirmed), progress)
+}
+
+fn move_quarantine_list(
+    env: &Env,
+    only: Option<&[PathBuf]>,
+    progress: &mut dyn FnMut(usize, usize),
+) -> Result<Report, ExecError> {
     ensure_journal(env).map_err(ExecError::Journal)?;
     let plan_id = format!(
         "{QUARANTINE_TO_TRASH}-{}",
@@ -1102,7 +1141,13 @@ pub fn move_quarantine_to_trash(
         plan_id: plan_id.clone(),
         ..Default::default()
     };
-    let items = quarantine_items(env);
+    let mut items = quarantine_items(env);
+    if let Some(only) = only {
+        items.retain(|q| only.contains(q));
+        for gone in only.iter().filter(|c| !items.contains(c)) {
+            report.skipped.push((gone.clone(), SkipReason::Missing));
+        }
+    }
     if items.is_empty() {
         return Ok(report);
     }
@@ -1142,17 +1187,18 @@ pub fn move_quarantine_to_trash(
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "item".into());
         let is_dir = fs::symlink_metadata(q).is_ok_and(|m| m.is_dir());
-        let dest = match fs::create_dir_all(&trash) {
-            Ok(()) => free_name(&trash, &name, is_dir),
+        if let Err(e) = fs::create_dir_all(&trash) {
+            report.skipped.push((q.clone(), skip_for(&e)));
+            continue;
+        }
+        // Chosen and taken in one step, never replacing what is in the Trash (CHK7-6).
+        let dest = match crate::fsutil::move_unique(q, &mut |_| free_name(&trash, &name, is_dir)) {
+            Ok(d) => d,
             Err(e) => {
                 report.skipped.push((q.clone(), skip_for(&e)));
                 continue;
             }
         };
-        if let Err(e) = fs::rename(q, &dest) {
-            report.skipped.push((q.clone(), skip_for(&e)));
-            continue;
-        }
         let rec = ActionRecord {
             id: fresh_id(format!("{plan_id}#{n}"), &mut used),
             plan_id: plan_id.clone(),
@@ -1169,7 +1215,7 @@ pub fn move_quarantine_to_trash(
         };
         if let Err(e) = append_journal(env, &rec) {
             // No log line, no move: put it back.
-            let _ = fs::rename(&dest, q);
+            let _ = crate::fsutil::rename_no_replace(&dest, q);
             report.skipped.push((
                 q.clone(),
                 SkipReason::Other(format!("could not log the action: {e}")),
@@ -1205,7 +1251,7 @@ pub fn move_quarantine_to_trash(
         let now = chrono::Utc::now().timestamp();
         let mut recs = history(env);
         for (q, dest) in &moved {
-            let _ = fs::rename(dest, q);
+            let _ = crate::fsutil::rename_no_replace(dest, q);
             report.skipped.push((
                 q.clone(),
                 SkipReason::Other(format!("could not log the action: {e}")),

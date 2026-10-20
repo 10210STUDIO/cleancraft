@@ -188,13 +188,29 @@ pub const MOVE_QUARANTINE: &str = "Move Quarantine to Trash...";
 /// The AI assistants switch, also its accessible name.
 pub const AGENTS_SWITCH: &str = "Let AI assistants clean after you confirm";
 
-/// The confirmation, then the move, with Undo in the notice and in History.
-fn confirm_quarantine(app: &mut CleanApp, ui: &mut Ui, bytes: u64, items: usize) {
+/// The confirmation, then the move, with Undo in the notice and in History. The dialog lists
+/// every item that moves, with its size, as it was when the dialog opened; exactly those move
+/// (CHK7-5).
+fn confirm_quarantine(app: &mut CleanApp, ui: &mut Ui, _bytes: u64, _items: usize) {
     let t = app.t;
+    let list_id = egui::Id::new("confirm-quarantine-list");
+    let list: Vec<(std::path::PathBuf, u64)> = match ui
+        .ctx()
+        .data_mut(|d| d.get_temp::<Vec<(std::path::PathBuf, u64)>>(list_id))
+    {
+        Some(l) => l,
+        None => {
+            let l = executor::quarantine_list(&app.env);
+            ui.ctx().data_mut(|d| d.insert_temp(list_id, l.clone()));
+            l
+        }
+    };
+    let bytes: u64 = list.iter().map(|(_, s)| s).sum();
+    let items = list.len();
     let mut go = false;
     let mut cancel = false;
     let dlg = kit::modal(egui::Id::new("confirm-quarantine-trash"), &t).show(ui.ctx(), |ui| {
-        ui.set_width(520.0);
+        ui.set_width(560.0);
         kit::dialog_head(
             ui,
             &t,
@@ -205,8 +221,20 @@ fn confirm_quarantine(app: &mut CleanApp, ui: &mut Ui, bytes: u64, items: usize)
                 human_size(bytes),
                 cleancraft_core::fsutil::items(items)
             ),
-            "Every item in the CleanCraft quarantine moves to the Trash. Nothing is deleted: you can put them back from History until the Trash is emptied.",
+            "These items move from the CleanCraft quarantine to the Trash. Nothing is deleted: you can put them back from History until the Trash is emptied.",
         );
+        ui.add_space(12.0);
+        let rows: Vec<(String, String, u64)> = list
+            .iter()
+            .map(|(p, size)| {
+                let name = p
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                (name, String::new(), *size)
+            })
+            .collect();
+        crate::pages::extras_cleanup::erase_list(ui, &t, &rows);
         ui.add_space(16.0);
         let (ok, no) = kit::dialog_actions(ui, &t, "Move to Trash", kit::Kind::Danger);
         go |= ok;
@@ -215,13 +243,18 @@ fn confirm_quarantine(app: &mut CleanApp, ui: &mut Ui, bytes: u64, items: usize)
     if dlg.should_close() {
         cancel = true;
     }
+    if cancel || go {
+        ui.ctx()
+            .data_mut(|d| d.remove::<Vec<(std::path::PathBuf, u64)>>(list_id));
+    }
     if cancel {
         app.act();
         app.settings_page.confirm_quarantine = false;
     } else if go {
         app.act();
         app.settings_page.confirm_quarantine = false;
-        match executor::move_quarantine_to_trash(&app.env, &mut |_, _| {}) {
+        let confirmed: Vec<std::path::PathBuf> = list.into_iter().map(|(p, _)| p).collect();
+        match executor::move_quarantine_items_to_trash(&app.env, &confirmed, &mut |_, _| {}) {
             Ok(rep) => {
                 app.settings_page.quarantine = None;
                 let moved: Vec<std::path::PathBuf> = CleanApp::moved_paths(&rep);

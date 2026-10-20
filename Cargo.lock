@@ -743,6 +743,7 @@ dependencies = [
  "image",
  "notify",
  "plist",
+ "rustix 1.1.5",
  "schemars",
  "serde",
  "serde_json",

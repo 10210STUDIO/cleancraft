@@ -22,8 +22,13 @@ fn check_symlinked_allow_root_is_never_followed() {
     std::os::unix::fs::symlink(m.env.home_path("Documents"), &caches).unwrap();
 
     let plan = features::scan(&m.env, &Settings::default(), FeatureId::SystemJunk).unwrap();
+    // sfix7 (CHK7-1): the link itself is listed as one locked row saying why nothing in it
+    // is offered; nothing through it is proposed.
     assert!(
-        !plan.items.iter().any(|i| i.path.starts_with(&caches)),
+        !plan
+            .items
+            .iter()
+            .any(|i| i.path.starts_with(&caches) && !(i.path == caches && i.locked.is_some())),
         "items proposed through the link: {:?}",
         plan.items.iter().map(|i| &i.path).collect::<Vec<_>>()
     );

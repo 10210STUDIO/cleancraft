@@ -39,21 +39,86 @@ pub const OPEN_MAIL_BUTTON: &str = "Open Mail";
 pub const FDA_BUTTON: &str = "Open Full Disk Access";
 /// Seconds after Erase in Mail before the list is measured again (Mail's own confirmation).
 pub const RECHECK_SECS: f64 = 8.0;
+/// Under the list in the Empty Trash and Erase in Mail confirmations (CHK7-3).
+pub const ERASE_NOTE: &str = "Mail and Finder erase these for good; CleanCraft cannot undo it.";
+/// Shown when the Trash changed between the list and the click: nothing was erased.
+pub const CHANGED_NOTE: &str =
+    "The Trash changed since this list was made. Look at the new list, then confirm again.";
+/// Height of one row of the confirmation lists.
+const ROW_H: f64 = 22.0;
 
-/// The Erase in Mail confirmation: account for the menu, messages, bytes.
+/// The Erase in Mail confirmation: account for the menu, messages, bytes, and each mailbox
+/// Mail erases (name, messages, bytes).
 #[derive(Clone, Debug, Default)]
 struct EraseAsk {
     account: Option<String>,
     messages: usize,
     bytes: u64,
+    mailboxes: Vec<(String, usize, u64)>,
+}
+
+/// One entry Finder will erase: its name, which Trash it is in, its size.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TrashEntry {
+    pub path: std::path::PathBuf,
+    pub name: String,
+    pub trash: String,
+    pub size: u64,
+}
+
+/// Everything Finder's Empty Trash erases now: each entry of every Finder Trash (the startup
+/// disk's and other disks'), with its size; Mail's trash is not part of it.
+pub fn finder_trash_entries(env: &cleancraft_core::Env) -> Vec<TrashEntry> {
+    let mut v = Vec::new();
+    for t in trash::trashes(env).into_iter().filter(|t| !t.mail) {
+        for p in cleancraft_core::fsutil::children(&t.path) {
+            let name = p
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            v.push(TrashEntry {
+                size: cleancraft_core::fsutil::tree_size(&p).0,
+                path: p,
+                name,
+                trash: t.label.clone(),
+            });
+        }
+    }
+    v
+}
+
+/// A scrollable list for a confirmation: (name, detail, size) rows.
+pub fn erase_list(ui: &mut Ui, t: &crate::theme::Tokens, rows: &[(String, String, u64)]) {
+    kit::well(t).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        egui::ScrollArea::vertical()
+            .max_height(240.0)
+            .auto_shrink([false, true])
+            .show_rows(ui, ROW_H as f32, rows.len(), |ui, range| {
+                for (name, detail, size) in &rows[range] {
+                    ui.horizontal(|ui| {
+                        ui.set_min_height(ROW_H as f32);
+                        ui.label(egui::RichText::new(name).color(t.text));
+                        if !detail.is_empty() {
+                            ui.label(egui::RichText::new(detail).color(t.text_dim));
+                        }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(egui::RichText::new(human_size(*size)).color(t.text_dim));
+                        });
+                    });
+                }
+            });
+    });
 }
 
 type Shared<T> = Arc<Mutex<Option<T>>>;
 
 #[derive(Clone, Default)]
 struct State {
-    /// The confirmation is open; the bytes Finder's Trashes held when it opened.
-    confirm_empty: Option<u64>,
+    /// The confirmation is open: what Finder's Trashes held when it opened (CHK7-3).
+    confirm_empty: Option<Vec<TrashEntry>>,
+    /// The Trash changed between the list and the click: the list was made again.
+    empty_changed: bool,
     /// Finder is emptying the Trash on a worker thread.
     empty_job: Option<Shared<trash::EmptyOutcome>>,
     /// The Reset Permissions dialog: (service, client, label, checked).
@@ -214,15 +279,49 @@ pub fn erase_button(app: &mut CleanApp, ui: &mut Ui, group: &str) {
             .as_ref()
             .and_then(|p| trash::mail_group(&env, p, group));
         if let Some((account, messages, bytes)) = ask {
+            let mailboxes = app
+                .plan_state(FeatureId::TrashBins)
+                .plan
+                .as_ref()
+                .map(|p| mailboxes_of(&env, p, group))
+                .unwrap_or_default();
             let mut st = load(ui);
             st.erase = Some(EraseAsk {
                 account,
                 messages,
                 bytes,
+                mailboxes,
             });
             store(ui, st);
         }
     }
+}
+
+/// Each mailbox of one Mail account's trash group: (mailbox, messages, bytes), what Erase in
+/// Mail erases.
+fn mailboxes_of(
+    env: &cleancraft_core::Env,
+    plan: &cleancraft_core::Plan,
+    group: &str,
+) -> Vec<(String, usize, u64)> {
+    let infos = trash::trashes(env);
+    plan.items
+        .iter()
+        .filter(|i| i.category == "mail_trash" && i.group.as_deref() == Some(group))
+        .map(|i| {
+            let info = infos.iter().find(|t| t.path == i.path);
+            let name = info
+                .map(|t| {
+                    if t.mailbox.is_empty() {
+                        t.label.clone()
+                    } else {
+                        t.mailbox.clone()
+                    }
+                })
+                .unwrap_or_else(|| env.display(&i.path));
+            (name, info.map(|t| t.entries).unwrap_or(0), i.size)
+        })
+        .collect()
 }
 
 /// Trash Bins toolbar: the help buttons after Erase in Mail could not use Mail's menu.
@@ -312,7 +411,22 @@ pub fn trash_frame(app: &mut CleanApp, ui: &mut Ui) {
                     "Mail permanently erases the deleted messages {whose} with its own command ({menu}); on a mail server account they are erased on the server too. CleanCraft cannot undo this, and the messages cannot be put back. CleanCraft opens Mail and chooses the command for you, which needs the Accessibility permission; Mail may ask you to confirm."
                 ),
             );
-            ui.add_space(16.0);
+            ui.add_space(12.0);
+            let rows: Vec<(String, String, u64)> = ask
+                .mailboxes
+                .iter()
+                .map(|(mailbox, n, bytes)| {
+                    (
+                        format!("{mailbox} of {name}"),
+                        cleancraft_core::fsutil::count(*n, "message", "messages"),
+                        *bytes,
+                    )
+                })
+                .collect();
+            erase_list(ui, &t, &rows);
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new(ERASE_NOTE).color(t.danger));
+            ui.add_space(12.0);
             let (ok, no) = kit::dialog_actions(ui, &t, ERASE_CONFIRM, kit::Kind::Danger);
             go |= ok;
             cancel |= no;
@@ -376,22 +490,39 @@ pub fn empty_trash(app: &mut CleanApp, ui: &mut Ui, label: &str) {
         .clicked()
     {
         app.act();
-        st.confirm_empty = Some(trash::finder_trash_size(&app.env));
+        st.confirm_empty = Some(finder_trash_entries(&app.env));
+        st.empty_changed = false;
     }
-    if let Some(size) = st.confirm_empty {
+    if let Some(list) = st.confirm_empty.clone() {
         let mut go = false;
         let mut cancel = false;
+        let size: u64 = list.iter().map(|e| e.size).sum();
+        let changed = st.empty_changed;
         let dlg = kit::modal(Id::new("confirm-empty-trash"), &t).show(ui.ctx(), |ui| {
-            ui.set_width(520.0);
+            ui.set_width(560.0);
             kit::dialog_head(
                 ui,
                 &t,
                 crate::icons::Icon::Trash,
                 t.danger,
                 &format!("Empty the Trash ({})?", human_size(size)),
-                "Finder will remove everything in the Trash of every disk for good. This cannot be undone, and CleanCraft cannot put these items back. Mail's deleted messages are not affected.",
+                &format!(
+                    "Finder will remove these {} from the Trash of every disk for good. Mail's deleted messages are not affected.",
+                    cleancraft_core::fsutil::items(list.len())
+                ),
             );
-            ui.add_space(16.0);
+            ui.add_space(12.0);
+            let rows: Vec<(String, String, u64)> = list
+                .iter()
+                .map(|e| (e.name.clone(), e.trash.clone(), e.size))
+                .collect();
+            erase_list(ui, &t, &rows);
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new(ERASE_NOTE).color(t.danger));
+            if changed {
+                ui.label(egui::RichText::new(CHANGED_NOTE).color(t.warning));
+            }
+            ui.add_space(12.0);
             let (ok, no) = kit::dialog_actions(ui, &t, EMPTY_CONFIRM, kit::Kind::Danger);
             go |= ok;
             cancel |= no;
@@ -402,6 +533,12 @@ pub fn empty_trash(app: &mut CleanApp, ui: &mut Ui, label: &str) {
         if cancel {
             app.act();
             st.confirm_empty = None;
+        } else if go && finder_trash_entries(&app.env) != list {
+            // Something came into (or left) the Trash after the list was shown: Finder would
+            // erase more than the person saw. Show the new list instead.
+            app.act();
+            st.confirm_empty = Some(finder_trash_entries(&app.env));
+            st.empty_changed = true;
         } else if go {
             app.act();
             st.confirm_empty = None;
