@@ -34,7 +34,7 @@ fn every_trash_is_measured_and_locked() {
     assert_eq!(by(&usb).reason, "Trash of USB: 1 item");
     assert_eq!(by(&usb).group.as_deref(), Some("Trash of USB"));
     assert_eq!(by(&mail).size, tree_size(&mail).0);
-    assert!(by(&mail).reason.ends_with("2 messages"));
+    assert!(by(&mail).reason.contains("2 messages"), "{}", by(&mail).reason);
     assert_eq!(by(&user).locked.as_deref(), Some(trash::LOCK_IN_TRASH));
     assert_eq!(by(&usb).locked.as_deref(), Some(trash::LOCK_IN_TRASH));
     assert_eq!(by(&mail).locked.as_deref(), Some(trash::LOCK_MAIL_TRASH));
@@ -144,6 +144,8 @@ fn unreadable_trash_is_noted() {
             .iter()
             .any(|n| n.contains("/Users/tester/.Trash could not be read"))
     );
-    assert!(!p.items.iter().any(|i| i.path == m.env.user_trash()));
-    assert_eq!(p.items.len(), 2);
+    // Still a row, saying so (files6, user report: a page of locked rows needs a next step).
+    let it = p.items.iter().find(|i| i.path == m.env.user_trash()).unwrap();
+    assert_eq!(it.locked.as_deref(), Some(trash::LOCK_NEEDS_ACCESS));
+    assert_eq!(p.items.len(), 3);
 }

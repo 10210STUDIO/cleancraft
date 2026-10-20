@@ -6,7 +6,9 @@
 
 use cleancraft_core::FeatureId;
 use cleancraft_core::features::duplicates::{KeepRule, apply_keep_rule};
-use cleancraft_core::features::large_old::{Location, ScanOptions, parse_folder};
+use cleancraft_core::features::large_old::{
+    self, GroupBy, Location, ScanOptions, grouped_by, is_by_source, parse_folder, regroup,
+};
 use cleancraft_core::fsutil::human_size;
 use egui::{Id, RichText, Ui};
 
@@ -194,6 +196,10 @@ fn location_picker(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
 }
 
 pub fn results_toolbar(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
+    if f == FeatureId::LargeOldFiles {
+        group_menu(app, ui);
+        return;
+    }
     if !matches!(f, FeatureId::Duplicates | FeatureId::SimilarPhotos) {
         return;
     }
@@ -225,4 +231,55 @@ pub fn results_toolbar(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             apply_keep_rule(&env, p, rule);
         }
     }
+}
+
+/// Large & Old Files: "Group by: Kind / Size / Age". Only the groups on the left change; the
+/// list, the sizes and what is ticked stay (each group's checkbox selects all or none of it).
+/// Downloads by source app keeps its groups by app, so the menu is not shown there.
+fn group_menu(app: &mut CleanApp, ui: &mut Ui) {
+    let f = FeatureId::LargeOldFiles;
+    let Some(current) = app
+        .plan_state(f)
+        .plan
+        .as_ref()
+        .filter(|p| !is_by_source(p))
+        .map(grouped_by)
+    else {
+        return;
+    };
+    let mut chosen = None;
+    let r = kit::menu_pill(ui, &app.t, &format!("Group by: {}", current.label()), |ui| {
+        ui.set_min_width(160.0);
+        for by in GroupBy::ALL {
+            if kit::menu_choice(ui, by.label(), by == current) {
+                chosen = Some(by);
+                ui.close();
+            }
+        }
+    });
+    if r.response.clicked() {
+        app.act();
+    }
+    if let Some(by) = chosen {
+        app.act();
+        set_grouping(app, by);
+    }
+}
+
+/// Group the Large & Old list by `by` now, and remember it for the next scans.
+pub fn set_grouping(app: &mut CleanApp, by: GroupBy) {
+    let f = FeatureId::LargeOldFiles;
+    let mut o = ScanOptions::load(&app.env);
+    if o.large_old_group != by {
+        o.large_old_group = by;
+        if let Err(e) = o.save(&app.env) {
+            app.warn(format!("The grouping could not be saved: {e}"));
+        }
+    }
+    let st = app.plan_state(f);
+    if let Some(p) = st.plan.as_mut() {
+        regroup(p, by, large_old::now_secs());
+    }
+    // The groups changed: show them all.
+    st.category = None;
 }

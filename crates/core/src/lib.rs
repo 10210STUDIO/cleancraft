@@ -29,6 +29,7 @@ pub mod schedule;
 pub mod settings;
 pub mod space;
 pub mod space_history;
+pub mod space_snapshots;
 pub mod startup;
 pub mod sweep;
 pub mod sys;
@@ -42,6 +43,7 @@ pub mod testkit_icons;
 pub mod testkit_monitor;
 pub mod testkit_perf;
 pub mod testkit_quit;
+pub mod testkit_trash;
 pub mod updater;
 pub mod watch;
 

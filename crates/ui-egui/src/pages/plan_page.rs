@@ -527,6 +527,9 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     ui.scope_builder(egui::UiBuilder::new().max_rect(content), |ui| {
         results_body(app, ui, f, &plan);
     });
+    if f == FeatureId::TrashBins {
+        super::extras_cleanup::trash_frame(app, ui);
+    }
     ui.scope_builder(egui::UiBuilder::new().max_rect(bar), |ui| {
         ui.add_space(12.0);
         ui.set_clip_rect(ui.ctx().content_rect());
@@ -564,11 +567,7 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                         super::extras_cleanup::trash_bar(app, ui);
                         // The hint gets only the room left between the figure and the
                         // button, shortened at its end (never under the figure).
-                        kit::bar_hint(
-                            ui,
-                            &t,
-                            "Finder empties the Trash. CleanCraft cannot put those items back.",
-                        );
+                        kit::bar_hint(ui, &t, &super::extras_cleanup::trash_hint(&plan));
                     }
                 });
             });
@@ -1045,7 +1044,9 @@ pub fn rows(st: &PlanState) -> Vec<Row> {
     let mut out = Vec::new();
     for g in order {
         let ids = sets.remove(&g).unwrap_or_default();
-        if copies || ids.len() > 1 {
+        // A Mail account's trash always gets its header: it carries "Erase in Mail...".
+        let mail = ids.iter().any(|i| plan.items[*i].category == "mail_trash");
+        if copies || mail || ids.len() > 1 {
             out.push(Row::Group(g.clone()));
         }
         out.extend(ids.into_iter().map(Row::Item));
@@ -1134,12 +1135,19 @@ fn group_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, g: &str) {
                 human_size(freed)
             )
         }
+        // Locked rows: no "0 KB selected" (user report); what the group holds, and its
+        // next step beside it.
+        FeatureId::TrashBins => {
+            let total: u64 = members.iter().map(|i| i.size).sum();
+            format!("{g}: {}", human_size(total))
+        }
         _ => format!(
             "{g}: {}, {} selected",
             cleancraft_core::fsutil::items(n),
             human_size(freed)
         ),
     };
+    let mail_group = f == FeatureId::TrashBins && members.iter().any(|i| i.category == "mail_trash");
     let w = ui.available_width();
     let (r, _) = ui.allocate_exact_size(vec2(w, ROW_H), Sense::hover());
     let line = Rect::from_min_max(
@@ -1153,13 +1161,33 @@ fn group_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, g: &str) {
         egui::Vec2::splat(isz::INLINE),
     );
     icons::paint(ui.painter(), ir, Icon::Duplicates, t.sec_a);
+    let mut text_right = r.right() - 8.0;
+    if mail_group {
+        // The group's next step, always visible (never only on hover).
+        let bw = kit::pill_size(ui, super::extras_cleanup::ERASE_BUTTON, kit::Kind::Secondary, false).x;
+        let br = Rect::from_min_max(
+            pos2(r.right() - 8.0 - bw, r.top() + 2.0),
+            pos2(r.right() - 8.0, r.bottom() - 12.0),
+        );
+        text_right = br.left() - 8.0;
+        let g = g.to_string();
+        kit::place_with(ui, br, Layout::right_to_left(Align::Center), |ui| {
+            super::extras_cleanup::erase_button(app, ui, &g);
+        });
+    }
+    let shown = kit::truncate_end(
+        ui.ctx(),
+        &text,
+        &font(size::CALLOUT, Weight::SemiBold),
+        (text_right - r.left() - 38.0).max(40.0),
+    );
     kit::text_at(
         ui,
         Rect::from_min_max(
             pos2(r.left() + 38.0, r.top() + 8.0),
-            pos2(r.right() - 8.0, r.bottom() - 10.0),
+            pos2(text_right, r.bottom() - 10.0),
         ),
-        &text,
+        &shown,
         &text,
         font(size::CALLOUT, Weight::SemiBold),
         t.text_dim,
@@ -1301,11 +1329,26 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
         name_font,
         if locked { t.text_dim } else { t.text },
     );
-    let shown = app.env.display(&it.path);
+    // Trash rows are named after their disk or mailbox; the folder macOS keeps them in
+    // ("/Volumes/USB/.Trashes/501", "/.../Deleted Messages.mbox") says nothing more, so it
+    // is only in the tooltip (user report: a useless "/...x").
+    let trash_row = f == FeatureId::TrashBins;
+    let shown = if trash_row {
+        String::new()
+    } else {
+        app.env.display(&it.path)
+    };
     let path_x = x0 + name_w + 12.0;
     // While the row is hovered its actions cover the end of line 1: the path is shortened
     // again to end before them (a middle ellipsis, never a word cut by the buttons).
-    let actions_w = if keeps_a_copy(f) { 262.0 } else { 150.0 };
+    // Trash rows have no row actions (nothing to ignore or reveal): no space is taken.
+    let actions_w = if keeps_a_copy(f) {
+        262.0
+    } else if trash_row {
+        0.0
+    } else {
+        150.0
+    };
     let actions_left = size_r.left() - 12.0 - actions_w;
     let path_end = if row_hovered || hov > 0.0 || cb.has_focus() {
         (x0 + text_w).min(actions_left - 20.0)
@@ -1324,7 +1367,7 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
         t.text_faint,
         Align::Min,
     );
-    kit::row_tip(&path_resp, r, &shown);
+    kit::row_tip(&path_resp, r, &app.env.display(&it.path));
     // The reason as a tag. A reason that repeats the row's name ("Trash of USB: 1 item" on
     // the row "Trash of USB") shows only the rest.
     let why_full = match &it.locked {
@@ -1352,7 +1395,7 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
     let actions_focus_id = egui::Id::new(("row-actions-focus", f.as_str(), id));
     let actions_focused: bool = ui.data(|d| d.get_temp(actions_focus_id)).unwrap_or(false);
     let keyboard_here = cb.has_focus() || actions_focused;
-    let covered = row_hovered || hov > 0.0 || keyboard_here;
+    let covered = !trash_row && (row_hovered || hov > 0.0 || keyboard_here);
     let tag_room = if covered {
         (actions_left - 10.0 - 8.0 - x0).max(40.0)
     } else {
@@ -1435,11 +1478,15 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
     );
     // Shown while the row is hovered, and while the keyboard is on the row (its checkbox
     // or one of the actions), so a Tab never lands on an invisible button.
-    let show = hov.max(if row_hovered || keyboard_here {
-        1.0
-    } else {
+    let show = if trash_row {
         0.0
-    });
+    } else {
+        hov.max(if row_hovered || keyboard_here {
+            1.0
+        } else {
+            0.0
+        })
+    };
     if show > 0.0 {
         // A soft solid under the buttons so the text beneath does not show through.
         let under = actions
@@ -1569,6 +1616,14 @@ pub fn fit_tag(ctx: &egui::Context, text: &str, fid: &egui::FontId, max_w: f32) 
 /// The name a row shows. A Trash is named after its disk ("Trash of USB"), not after the
 /// numeric user-id folder macOS keeps it in (`/Volumes/USB/.Trashes/501`).
 pub fn item_name(f: FeatureId, it: &cleancraft_core::Item) -> String {
+    if f == FeatureId::TrashBins && it.category == "mail_trash" {
+        // The mailbox ("Deleted Messages", "Trash"); the account is the group header.
+        return it
+            .path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+    }
     if f == FeatureId::TrashBins
         && let Some(g) = &it.group
     {
