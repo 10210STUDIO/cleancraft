@@ -635,7 +635,7 @@ impl Feature for DevClutter {
             (ctx.progress)(&ctx.env.display(root));
             // A code folder inside a protected place (Documents, Desktop): its projects are
             // listed, locked with the reason.
-            let protected = policy::protected_reason(ctx.env, root);
+            let protected = root_lock(ctx.env, root);
             s.walk(root, 0, protected.as_deref());
         }
         s.git_pass();
@@ -645,6 +645,37 @@ impl Feature for DevClutter {
         }
         Ok(s.plan)
     }
+}
+
+/// Why nothing in the code folder `root` can be offered, in words with the next step: it lies
+/// in a protected place (Documents, Desktop), or the way to it goes through a link (DV1: a
+/// folder reached through a link into Documents says so, never "not inside one of your code
+/// folders").
+pub fn root_lock(env: &Env, root: &Path) -> Option<String> {
+    if let Some(why) = policy::protected_reason(env, root) {
+        return Some(format!(
+            "Protected place ({why}): CleanCraft never moves anything from there. {PROTECTED_STEPS}"
+        ));
+    }
+    let l = policy::link_at_or_above(env, root)?;
+    let link = env.display(&l.link);
+    let shown = env.display(root);
+    Some(match (&l.protected, &l.real) {
+        (Some(why), Some(real)) => format!(
+            "Your code folder {shown} is reached through the link {link}, which leads into {why} ({}). CleanCraft never moves anything from there. {PROTECTED_STEPS}",
+            env.display(real)
+        ),
+        (Some(why), None) => format!(
+            "Your code folder {shown} is reached through the link {link}, which leads into {why}. CleanCraft never moves anything from there. {PROTECTED_STEPS}"
+        ),
+        (None, Some(real)) => format!(
+            "Your code folder {shown} is reached through the link {link}, and CleanCraft never cleans through a link. Add the real folder {} under Developer Clutter in Settings instead, then scan again",
+            env.display(real)
+        ),
+        (None, None) => format!(
+            "Your code folder {shown} is reached through the link {link}, and CleanCraft never cleans through a link. Add the real folder under Developer Clutter in Settings instead, then scan again"
+        ),
+    })
 }
 
 struct Scanner<'a, 'b> {
@@ -757,12 +788,7 @@ impl Scanner<'_, '_> {
             .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
             .map(|d| d.as_secs() as i64);
         if let Some(why) = protected {
-            self.plan.lock(
-                id,
-                format!(
-                    "Protected place ({why}): CleanCraft never moves anything from there. {PROTECTED_STEPS}"
-                ),
-            );
+            self.plan.lock(id, why);
         } else if std::fs::symlink_metadata(p.join(".git")).is_ok() {
             self.plan.lock(id, LOCK_OWN_GIT);
         } else if !self.ctx.allowed(&self.allow, p) {
