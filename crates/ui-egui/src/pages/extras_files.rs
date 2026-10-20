@@ -248,15 +248,20 @@ fn group_menu(app: &mut CleanApp, ui: &mut Ui) {
         return;
     };
     let mut chosen = None;
-    let r = kit::menu_pill(ui, &app.t, &format!("Group by: {}", current.label()), |ui| {
-        ui.set_min_width(160.0);
-        for by in GroupBy::ALL {
-            if kit::menu_choice(ui, by.label(), by == current) {
-                chosen = Some(by);
-                ui.close();
+    let r = kit::menu_pill(
+        ui,
+        &app.t,
+        &format!("Group by: {}", current.label()),
+        |ui| {
+            ui.set_min_width(160.0);
+            for by in GroupBy::ALL {
+                if kit::menu_choice(ui, by.label(), by == current) {
+                    chosen = Some(by);
+                    ui.close();
+                }
             }
-        }
-    });
+        },
+    );
     if r.response.clicked() {
         app.act();
     }

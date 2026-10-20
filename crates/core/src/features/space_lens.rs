@@ -1,6 +1,7 @@
 //! Disk Map removal: the items the user ticked in the map, as a plan for the executor.
-//! Allow-list: the home folder, plus the mounted external volumes (`df`, see
-//! [`crate::space::external_volumes`]). Protected places, Library, hidden items, apps, macOS's
+//! Allow-list: the home folder, plus the top user folders of the mounted external volumes
+//! (`df`, see [`crate::space::external_volumes`] and [`crate::space::volume_user_folders`];
+//! never `/`, `/Volumes` or a volume itself). Protected places, Library, hidden items, apps, macOS's
 //! own folders, everything outside the home folder and the volumes' system folders
 //! (`.Spotlight-V100`, `.Trashes`, `.fseventsd`, `Backups.backupdb`, other hidden items) are
 //! locked ([`crate::space::lock_reason_deep`]: also folders holding a Photos library or another
@@ -51,7 +52,10 @@ impl Feature for SpaceLens {
 
     fn allow_roots(&self, env: &Env) -> Vec<PathBuf> {
         let mut v = vec![env.home().to_path_buf()];
-        v.extend(space::external_volumes(env).into_iter().map(|v| v.mount));
+        // On external disks: their top user folders only, never the disk itself.
+        for vol in space::external_volumes(env) {
+            v.extend(space::volume_user_folders(&vol.mount));
+        }
         v
     }
 

@@ -116,6 +116,10 @@ pub fn blurb(f: FeatureId) -> &'static str {
             "Startup programs and apps that are unsigned, tampered with or known to be unwanted."
         }
         FeatureId::Privacy => "Browser history, cookies and recent-item lists.",
+        // dev6's module, named by its id so this builds before it is merged.
+        _ if f.as_str() == "dev_clutter" => {
+            "Build folders, packages and environments of projects you have not touched for a while."
+        }
         _ => "",
     }
 }
@@ -131,7 +135,7 @@ pub fn can_stop(f: FeatureId) -> bool {
             | FeatureId::SimilarPhotos
             | FeatureId::Privacy
             | FeatureId::Malware
-    )
+    ) || f.as_str() == "dev_clutter"
 }
 
 pub fn start_scan(app: &mut CleanApp, f: FeatureId) {
@@ -1147,7 +1151,8 @@ fn group_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, g: &str) {
             human_size(freed)
         ),
     };
-    let mail_group = f == FeatureId::TrashBins && members.iter().any(|i| i.category == "mail_trash");
+    let mail_group =
+        f == FeatureId::TrashBins && members.iter().any(|i| i.category == "mail_trash");
     let w = ui.available_width();
     let (r, _) = ui.allocate_exact_size(vec2(w, ROW_H), Sense::hover());
     let line = Rect::from_min_max(
@@ -1164,7 +1169,13 @@ fn group_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, g: &str) {
     let mut text_right = r.right() - 8.0;
     if mail_group {
         // The group's next step, always visible (never only on hover).
-        let bw = kit::pill_size(ui, super::extras_cleanup::ERASE_BUTTON, kit::Kind::Secondary, false).x;
+        let bw = kit::pill_size(
+            ui,
+            super::extras_cleanup::ERASE_BUTTON,
+            kit::Kind::Secondary,
+            false,
+        )
+        .x;
         let br = Rect::from_min_max(
             pos2(r.right() - 8.0 - bw, r.top() + 2.0),
             pos2(r.right() - 8.0, r.bottom() - 12.0),

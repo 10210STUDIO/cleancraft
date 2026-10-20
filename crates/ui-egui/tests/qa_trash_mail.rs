@@ -95,8 +95,11 @@ fn erase_confirm_cancel_then_erase() {
     // Mail erased them (in the fake: the store emptied, as Mail would): the list is measured
     // again and the group is gone.
     std::fs::remove_dir_all(&a).unwrap();
-    std::fs::remove_dir_all(m.env.home_path(&format!("Library/Mail/V10/{UUID}/Trash.mbox")))
-        .unwrap();
+    std::fs::remove_dir_all(
+        m.env
+            .home_path(&format!("Library/Mail/V10/{UUID}/Trash.mbox")),
+    )
+    .unwrap();
     click(&mut h, "Scan Again");
     assert!(!plan(&h).items.iter().any(|i| i.category == "mail_trash"));
     assert!(!has(&h, &format!("{ERASE_BUTTON} {GROUP}")));
@@ -105,7 +108,10 @@ fn erase_confirm_cancel_then_erase() {
 #[test]
 fn scan_runs_again_after_erase() {
     let (m, _, _) = mac();
-    m.env.fake_sys().unwrap().answer(&erase_call(Some("iCloud")), "");
+    m.env
+        .fake_sys()
+        .unwrap()
+        .answer(&erase_call(Some("iCloud")), "");
     let mut h = open(&m);
     let before = plan(&h).id;
     click(&mut h, &format!("{ERASE_BUTTON} {GROUP}"));
@@ -122,8 +128,9 @@ fn accessibility_missing_shows_next_steps() {
         CmdOut {
             status: 1,
             stdout: String::new(),
-            stderr: "System Events got an error: osascript is not allowed assistive access. (-1719)"
-                .into(),
+            stderr:
+                "System Events got an error: osascript is not allowed assistive access. (-1719)"
+                    .into(),
         },
     );
     f.answer("/usr/bin/open -a Mail", "");
@@ -151,7 +158,10 @@ fn mail_running_or_not() {
         if running {
             set_running(&m.env, "Mail", "/System/Applications/Mail.app");
         }
-        m.env.fake_sys().unwrap().answer(&erase_call(Some("iCloud")), "");
+        m.env
+            .fake_sys()
+            .unwrap()
+            .answer(&erase_call(Some("iCloud")), "");
         let mut h = open(&m);
         click(&mut h, &format!("{ERASE_BUTTON} {GROUP}"));
         click(&mut h, ERASE_CONFIRM);

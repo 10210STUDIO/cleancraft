@@ -165,9 +165,8 @@ fn start_map(app: &mut CleanApp, root: PathBuf, fresh: bool) {
     crate::sound::play(&app.env, crate::sound::Cue::ScanStart);
     let env = app.env.clone();
     let job = Job::start(app.sync, move |status| {
-        let tree = space::build_location(&env, &loc, &cancel, &|n, _| {
-            status(&format!("{n} files"))
-        });
+        let tree =
+            space::build_location(&env, &loc, &cancel, &|n, _| status(&format!("{n} files")));
         // Kept for Mac Health's "what grew" (a stopped measure is not kept).
         let _ = space_snapshots::record(&env, &loc, &tree);
         tree
@@ -383,7 +382,8 @@ fn start_undo(app: &mut CleanApp, rep: Report) {
     app.disk_map.phase = Phase::Working(job);
 }
 
-const SUBTITLE: &str = "See what takes space on your Mac. Tick what you do not need and move it to the Trash.";
+const SUBTITLE: &str =
+    "See what takes space on your Mac. Tick what you do not need and move it to the Trash.";
 
 pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: cleancraft_core::FeatureId) {
     let t = app.t;

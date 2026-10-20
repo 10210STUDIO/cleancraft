@@ -18,9 +18,12 @@ use cleancraft_core::testkit::{FakeMac, age};
 use cleancraft_core::{Fault, FeatureId, Plan, Settings};
 use cleancraft_ui_egui::app::Page;
 use common::*;
+use egui_kittest::kittest::Queryable;
 
 fn blob(seed: u8, n: usize) -> Vec<u8> {
-    (0..n).map(|i| (i as u8).wrapping_mul(7).wrapping_add(seed)).collect()
+    (0..n)
+        .map(|i| (i as u8).wrapping_mul(7).wrapping_add(seed))
+        .collect()
 }
 
 fn put(m: &FakeMac, rel: &str, b: &[u8]) -> PathBuf {
@@ -38,7 +41,10 @@ fn dl_mac() -> (FakeMac, Vec<PathBuf>) {
         put(&m, "Downloads/photo (2).jpg", &a),
     ];
     let b = blob(9, 300_000);
-    for p in [put(&m, "Downloads/old.zip", &b), put(&m, "Downloads/old 2.zip", &b)] {
+    for p in [
+        put(&m, "Downloads/old.zip", &b),
+        put(&m, "Downloads/old 2.zip", &b),
+    ] {
         age(&p, 150);
     }
     (m, v)
@@ -50,6 +56,8 @@ fn sweep_with_downloads(m: &FakeMac) -> H {
         plans: vec![Arc::new(DownloadDuplicates)],
         counts: vec![],
     });
+    // The start screen lays out again with one module before the click.
+    steps(&mut h);
     click(&mut h, "Scan");
     h
 }
@@ -77,11 +85,17 @@ fn duplicate_downloads_tile_review_run_undo() {
     let extra = tree_size(&copies[1]).0 + tree_size(&copies[2]).0;
     assert_eq!(p.selected_size(), extra);
     assert!(has(&h, &human_size(extra)));
-    assert!(has(&h, "2 of 2 extra copies selected. One of each set stays."));
+    assert!(has(
+        &h,
+        "2 of 2 extra copies selected. One of each set stays."
+    ));
     // Review opens Duplicates on that plan.
     click(&mut h, "Review");
     assert_eq!(h.state().page, Page::Feature(FeatureId::Duplicates));
-    let shown = h.state().plans[&FeatureId::Duplicates].plan.clone().unwrap();
+    let shown = h.state().plans[&FeatureId::Duplicates]
+        .plan
+        .clone()
+        .unwrap();
     assert_eq!(shown.id, p.id);
     assert!(has(&h, "photo (1).jpg"));
     assert!(!has(&h, "old.zip"));
@@ -95,7 +109,10 @@ fn duplicate_downloads_tile_review_run_undo() {
     click(&mut h, "Move to Trash");
     assert!(copies[0].exists());
     assert!(!copies[1].exists() && !copies[2].exists());
-    assert!(has_text(&h, &format!("{} moved to the Trash", human_size(extra))));
+    assert!(has_text(
+        &h,
+        &format!("{} moved to the Trash", human_size(extra))
+    ));
     click(&mut h, "Undo");
     assert!(copies.iter().all(|c| c.exists()));
 }
@@ -139,7 +156,10 @@ fn lo_mac() -> (FakeMac, PathBuf, PathBuf, PathBuf) {
 }
 
 fn lo_plan(h: &H) -> Plan {
-    h.state().plans[&FeatureId::LargeOldFiles].plan.clone().unwrap()
+    h.state().plans[&FeatureId::LargeOldFiles]
+        .plan
+        .clone()
+        .unwrap()
 }
 
 #[test]
@@ -166,11 +186,29 @@ fn large_old_group_by_size_and_age() {
     // Age.
     click(&mut h, "Group by: Size");
     click(&mut h, "Age");
-    assert!(has(&h, &format!("Not opened for over a year  {}", human_size(tree_size(&old).0))));
-    assert!(has(&h, &format!("Not opened in 3 to 6 months  {}", human_size(tree_size(&mid).0))));
-    assert!(has(&h, &format!("Opened in the last 3 months  {}", human_size(b))));
+    assert!(has(
+        &h,
+        &format!(
+            "Not opened for over a year  {}",
+            human_size(tree_size(&old).0)
+        )
+    ));
+    assert!(has(
+        &h,
+        &format!(
+            "Not opened in 3 to 6 months  {}",
+            human_size(tree_size(&mid).0)
+        )
+    ));
+    assert!(has(
+        &h,
+        &format!("Opened in the last 3 months  {}", human_size(b))
+    ));
     click(&mut h, "Select Not opened for over a year");
-    assert!(has(&h, &format!("1 selected, {}", human_size(tree_size(&old).0))));
+    assert!(has(
+        &h,
+        &format!("1 selected, {}", human_size(tree_size(&old).0))
+    ));
     // The grouping stays for the next scan; the move works from a group.
     click(&mut h, "Review and Clean");
     click(&mut h, "Move to Trash");
@@ -242,7 +280,10 @@ fn location_picker_lists_disks_from_df_and_diskutil() {
         human_size(600_000 * 1024)
     );
     assert!(has(&h, &label), "external volume with its capacity");
-    assert!(!has_text(&h, "Installer"), "not an external disk per diskutil");
+    assert!(
+        !has_text(&h, "Installer"),
+        "not an external disk per diskutil"
+    );
     click(&mut h, &label);
     assert!(has(&h, "Map My Backup"));
     assert!(has(
@@ -263,17 +304,22 @@ fn external_volume_folder_removed_and_put_back() {
     let movie = vol.join("Movies/old.mov");
     let mut h = open_map(&m);
     click(&mut h, "Home folder");
-    click(&mut h, &format!(
-        "My Backup ({}, {} free)",
-        human_size(1_000_000 * 1024),
-        human_size(600_000 * 1024)
-    ));
+    click(
+        &mut h,
+        &format!(
+            "My Backup ({}, {} free)",
+            human_size(1_000_000 * 1024),
+            human_size(600_000 * 1024)
+        ),
+    );
     click(&mut h, "Map My Backup");
-    assert!(has(&h, &human_size(tree_size(&vol).0)), "volume total");
-    // The volume's system folder is locked with its reason.
-    click(&mut h, "Select .Spotlight-V100");
+    let walked = tree_size(&vol).0 - tree_size(&vol.join(".Spotlight-V100")).0;
+    assert!(has(&h, &human_size(walked)), "volume total");
+    // The disk's index is not walked; a top folder is locked with its reason.
+    assert!(!has(&h, ".Spotlight-V100"));
+    click(&mut h, "Select Movies");
     assert!(h.state().disk_map.selected.is_empty());
-    assert!(has_text(&h, "system data of this disk"));
+    assert!(has_text(&h, "a top folder of this disk"));
     click(&mut h, "Movies");
     click(&mut h, "Select old.mov");
     click(&mut h, "Review and Remove");
@@ -283,14 +329,16 @@ fn external_volume_folder_removed_and_put_back() {
     click(&mut h, "Undo");
     assert!(movie.exists());
     let t = h.state().disk_map.tree().unwrap().clone();
-    assert_eq!(t.find(&vol).unwrap().size, tree_size(&vol).0);
+    let movies = vol.join("Movies");
+    assert_eq!(t.find(&movies).unwrap().size, tree_size(&movies).0);
 }
 
 #[test]
 fn startup_disk_locks_and_unreadable_folders() {
     let m = map_mac();
-    let secret = m.env.home_path("Private");
-    m.home_file("Private/a.bin", 300_000);
+    let secret = m.env.home_path("Work/Private");
+    m.home_file("Work/Private/a.bin", 300_000);
+    m.home_file("Work/notes.txt", 2_000);
     m.env.inject_fault(&secret, Fault::PermissionDenied);
     let mut h = open_map(&m);
     click(&mut h, "Home folder");
@@ -298,23 +346,40 @@ fn startup_disk_locks_and_unreadable_folders() {
     click(&mut h, "Map Startup Disk");
     let root = m.env.sys_path("/");
     let t = h.state().disk_map.tree().unwrap().clone();
-    assert!(t.find(&m.env.sys_path("/Volumes")).is_none(), "other disks left out");
+    assert!(
+        t.find(&m.env.sys_path("/Volumes")).is_none(),
+        "other disks left out"
+    );
     assert_eq!(t.unreadable, 1);
     assert!(has_text(&h, "Could not be read: 1 folder"));
-    assert!(has_text(&h, "Not measured:"), "used space not walked is totalled");
+    assert!(
+        has_text(&h, "Not measured:"),
+        "used space not walked is totalled"
+    );
     // Outside the home folder: locked with the reason.
     click(&mut h, "Select Library");
     assert!(h.state().disk_map.selected.is_empty());
     assert!(has_text(&h, "part of macOS"));
     click(&mut h, "Users");
     click(&mut h, "tester");
-    assert!(has(&h, "Unknown"), "the unreadable folder's size is not shown as 0");
-    assert!(has_text(&h, "Could not be read. Full Disk Access may help."));
+    click(&mut h, "Work");
+    assert!(
+        has(&h, "Unknown"),
+        "the unreadable folder's size is not shown as 0"
+    );
+    assert!(has_text(
+        &h,
+        "Could not be read. Full Disk Access may help."
+    ));
     let _ = root;
     // A file in the home folder is selectable and moves; in use is skipped.
+    click(&mut h, "Back");
     click(&mut h, "Movies");
     let film = m.env.home_path("Movies/film.mov");
-    m.env.fake_sys().unwrap().set_open_by(&film, "QuickTime Player");
+    m.env
+        .fake_sys()
+        .unwrap()
+        .set_open_by(&film, "QuickTime Player");
     click(&mut h, "Select film.mov");
     click(&mut h, "Review and Remove");
     click(&mut h, "Move to Trash");

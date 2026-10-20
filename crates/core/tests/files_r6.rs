@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 
 use cleancraft_core::executor;
-use cleancraft_core::features::duplicates::DownloadDuplicates;
+use cleancraft_core::features::duplicates::{self, DownloadDuplicates};
 use cleancraft_core::features::large_old::{self, GroupBy, ScanOptions};
 use cleancraft_core::features::space_lens::{self, SpaceLens};
 use cleancraft_core::features::{self, Feature, ScanCtx};
@@ -26,7 +26,9 @@ fn same_file(m: &FakeMac, rel: &str, bytes: &[u8]) -> PathBuf {
 }
 
 fn blob(seed: u8, n: usize) -> Vec<u8> {
-    (0..n).map(|i| (i as u8).wrapping_mul(7).wrapping_add(seed)).collect()
+    (0..n)
+        .map(|i| (i as u8).wrapping_mul(7).wrapping_add(seed))
+        .collect()
 }
 
 fn ctx_scan(m: &FakeMac, f: &dyn Feature) -> Plan {
@@ -60,6 +62,9 @@ pub fn downloads_mac() -> (FakeMac, Vec<PathBuf>, Vec<PathBuf>) {
         age(p, 200);
     }
     same_file(&m, "Movies/report.pdf", &a);
+    // Downloads in progress are never candidates.
+    same_file(&m, "Downloads/report.pdf.crdownload", &a);
+    same_file(&m, "Downloads/report 2.pdf.download/report 2.pdf", &a);
     (m, recent, old)
 }
 
@@ -75,7 +80,13 @@ fn duplicate_downloads_recent_only_one_kept() {
     for o in &old {
         assert!(!paths.contains(&o), "older than 3 months: {}", o.display());
     }
-    assert!(!paths.iter().any(|p| p.starts_with(m.env.home_path("Movies"))));
+    assert!(
+        !paths
+            .iter()
+            .any(|p| p.starts_with(m.env.home_path("Movies")))
+    );
+    assert!(!paths.iter().any(|p| duplicates::in_progress(p)));
+    assert_eq!(p.items.len(), 3);
     // One copy of the set kept: the shortest path.
     assert_eq!(p.selected_count(), 2);
     let kept = p.items.iter().find(|i| !i.selected).unwrap();
@@ -112,7 +123,9 @@ fn duplicate_downloads_tile_runs_keeps_one_and_undoes() {
         it.selected = true;
     }
     let d = all.digest();
-    assert!(features::run_plan_with(&DownloadDuplicates, &m.env, &s, &all, &d, &mut |_, _| {}).is_err());
+    assert!(
+        features::run_plan_with(&DownloadDuplicates, &m.env, &s, &all, &d, &mut |_, _| {}).is_err()
+    );
     assert!(recent.iter().all(|p| p.exists()));
 }
 
@@ -270,7 +283,10 @@ pub fn volumes_mac() -> FakeMac {
     f.answer("/bin/df -Pk", DF);
     f.answer(
         "/usr/sbin/diskutil list -plist external",
-        &diskutil(&["disk4", "disk5", "disk5s1"], &[("/Volumes/My Backup", "My Backup")]),
+        &diskutil(
+            &["disk4", "disk5", "disk5s1"],
+            &[("/Volumes/My Backup", "My Backup")],
+        ),
     );
     m
 }
@@ -301,7 +317,10 @@ fn location_picker_lists_external_volumes_only() {
     m.env.fake_sys().unwrap().with(|s| {
         s.answers.remove("/usr/sbin/diskutil list -plist external");
     });
-    let names: Vec<String> = space::external_volumes(&m.env).into_iter().map(|v| v.name).collect();
+    let names: Vec<String> = space::external_volumes(&m.env)
+        .into_iter()
+        .map(|v| v.name)
+        .collect();
     assert_eq!(names, ["Installer", "My Backup"]);
     // No df: no volumes (never a guess).
     let m = FakeMac::new();
@@ -326,17 +345,27 @@ fn startup_disk_counts_each_file_once() {
     let clip = m.env.home_path("Movies/clip.mov");
     std::fs::create_dir_all(m.env.sys_path("/opt")).unwrap();
     std::fs::hard_link(&clip, m.env.sys_path("/opt/clip-link.mov")).unwrap();
-    let t = space::build_location(&m.env, &MapLocation::Startup, &AtomicBool::new(false), &|_, _| {});
+    let t = space::build_location(
+        &m.env,
+        &MapLocation::Startup,
+        &AtomicBool::new(false),
+        &|_, _| {},
+    );
     let root = t.root.as_ref().unwrap();
     assert!(t.find(&m.env.sys_path("/System/Volumes/Data")).is_none());
     assert!(t.find(&m.env.sys_path("/Volumes")).is_none());
-    assert!(t.find(&m.env.sys_path("/System/Volumes")).is_some());
+    assert!(t.find(&m.env.sys_path("/System/Volumes")).is_none());
+    assert!(t.find(&m.env.sys_path("/System")).is_some());
     let files = |p: &str| tree_size(&m.env.sys_path(p)).0;
-    let want = tree_size(m.env.root()).0 - files("/System/Volumes/Data") - files("/Volumes");
+    let want = tree_size(m.env.root()).0 - files("/System/Volumes") - files("/Volumes");
     assert_eq!(root.size, want, "every file once, skipped places left out");
     let link = t.find(&m.env.sys_path("/opt/clip-link.mov")).unwrap();
     let orig = t.find(&clip).unwrap();
-    assert_eq!(link.size + orig.size, tree_size(&clip).0, "hard link counted once");
+    assert_eq!(
+        link.size + orig.size,
+        tree_size(&clip).0,
+        "hard link counted once"
+    );
 }
 
 #[test]
@@ -347,7 +376,12 @@ fn unreadable_folders_are_reported_never_zero() {
     m.env.inject_fault(&secret, Fault::PermissionDenied);
     let lib = m.env.sys_path("/Library/Caches");
     m.env.inject_fault(&lib, Fault::PermissionDenied);
-    let t = space::build_location(&m.env, &MapLocation::Startup, &AtomicBool::new(false), &|_, _| {});
+    let t = space::build_location(
+        &m.env,
+        &MapLocation::Startup,
+        &AtomicBool::new(false),
+        &|_, _| {},
+    );
     assert_eq!(t.unreadable, 2);
     assert!(t.unreadable_paths.contains(&secret));
     assert!(t.unreadable_paths.contains(&lib));
@@ -370,21 +404,51 @@ fn lock_reasons_outside_the_allow_list() {
     let m = volumes_mac();
     let env = &m.env;
     let r = |p: PathBuf| space::lock_reason(env, &p);
-    assert_eq!(r(env.sys_path("/Library/Caches")).as_deref(), Some("part of macOS"));
+    assert_eq!(
+        r(env.sys_path("/Library/Caches")).as_deref(),
+        Some("part of macOS")
+    );
     assert_eq!(r(env.sys_path("/System")).as_deref(), Some("part of macOS"));
-    assert_eq!(r(env.sys_path("/private/var/log")).as_deref(), Some("part of macOS"));
-    assert_eq!(r(env.sys_path("/Applications/Tool.app")).as_deref(), Some("outside your home folder"));
-    assert_eq!(r(env.sys_path("/Users/other/file")).as_deref(), Some("outside your home folder"));
+    assert_eq!(
+        r(env.sys_path("/private/var/log")).as_deref(),
+        Some("part of macOS")
+    );
+    assert_eq!(
+        r(env.sys_path("/Applications/Tool.app")).as_deref(),
+        Some("outside your home folder")
+    );
+    assert_eq!(
+        r(env.sys_path("/Users/other/file")).as_deref(),
+        Some("outside your home folder")
+    );
     let vol = env.sys_path("/Volumes/My Backup");
     assert_eq!(r(vol.clone()).as_deref(), Some("the disk itself"));
     for (name, _) in space::VOLUME_SYSTEM {
-        assert!(r(vol.join(name)).is_some_and(|w| w.starts_with("system data")), "{name}");
+        assert!(
+            r(vol.join(name)).is_some_and(|w| w.starts_with("system data")),
+            "{name}"
+        );
         assert!(r(vol.join(name).join("x")).is_some(), "{name}/x");
     }
     assert!(r(vol.join(".hidden")).is_some());
     assert!(r(vol.join("Old.app")).is_some());
-    assert_eq!(r(vol.join("Movies")), None);
+    // Only what is inside the top user folders: the folders and top files stay.
+    std::fs::create_dir_all(vol.join("Movies")).unwrap();
+    m.sys_file("/Volumes/My Backup/top.bin", 1000);
+    assert!(r(vol.join("Movies")).is_some_and(|w| w.contains("top folder")));
+    assert!(r(vol.join("top.bin")).is_some());
     assert_eq!(r(vol.join("Movies/clip.mov")), None);
+    assert_eq!(
+        space::volume_user_folders(&vol),
+        vec![vol.join("Movies")],
+        "never the disk, its hidden or system folders"
+    );
+    assert!(
+        !SpaceLens
+            .allow_roots(env)
+            .iter()
+            .any(|a| *a == vol || a.ends_with("Volumes"))
+    );
     assert_eq!(r(env.home_path("Movies")), None);
 }
 
@@ -400,7 +464,14 @@ fn edited_plan_cannot_remove_outside_the_allow_list() {
     let mut plan = Plan::new(FeatureId::SpaceLens);
     plan.add_category(space_lens::CATEGORY, "x", "x", Risk::High);
     for p in [&sys, &other, &spot, &tm] {
-        plan.push(p.clone(), 100_000, space_lens::CATEGORY, "x", Risk::High, true);
+        plan.push(
+            p.clone(),
+            100_000,
+            space_lens::CATEGORY,
+            "x",
+            Risk::High,
+            true,
+        );
     }
     let d = plan.digest();
     let s = Settings::default();
@@ -412,8 +483,22 @@ fn edited_plan_cannot_remove_outside_the_allow_list() {
     }
     // plan_for locks them as the map does.
     let p = space_lens::plan_for(&m.env, &[(sys.clone(), 1), (mine.clone(), 1)]);
-    assert!(p.items.iter().find(|i| i.path == sys).unwrap().locked.is_some());
-    assert!(p.items.iter().find(|i| i.path == mine).unwrap().locked.is_none());
+    assert!(
+        p.items
+            .iter()
+            .find(|i| i.path == sys)
+            .unwrap()
+            .locked
+            .is_some()
+    );
+    assert!(
+        p.items
+            .iter()
+            .find(|i| i.path == mine)
+            .unwrap()
+            .locked
+            .is_none()
+    );
 }
 
 #[test]
@@ -421,7 +506,8 @@ fn external_volume_user_folder_moves_to_its_trash_and_back() {
     let m = volumes_mac();
     let movie = m.sys_file("/Volumes/My Backup/Movies/old.mov", 500_000);
     let vol = m.env.sys_path("/Volumes/My Backup");
-    assert!(SpaceLens.allow_roots(&m.env).contains(&vol));
+    assert!(SpaceLens.allow_roots(&m.env).contains(&vol.join("Movies")));
+    assert!(!SpaceLens.allow_roots(&m.env).contains(&vol));
     let p = space_lens::plan_for(&m.env, &[(movie.clone(), tree_size(&movie).0)]);
     assert_eq!(p.selected_count(), 1, "{:?}", p.items);
     let s = Settings::default();
@@ -435,11 +521,13 @@ fn external_volume_user_folder_moves_to_its_trash_and_back() {
     assert_eq!((n, errs.len()), (1, 0));
     assert!(movie.exists());
     // The volume unplugged: no longer in the allow-list.
-    m.env.fake_sys().unwrap().answer("/bin/df -Pk", "Filesystem 1024-blocks Used Available Capacity Mounted on\n");
-    assert!(!SpaceLens.allow_roots(&m.env).contains(&vol));
+    m.env.fake_sys().unwrap().answer(
+        "/bin/df -Pk",
+        "Filesystem 1024-blocks Used Available Capacity Mounted on\n",
+    );
+    assert!(!SpaceLens.allow_roots(&m.env).contains(&vol.join("Movies")));
     let p = space_lens::plan_for(&m.env, &[(movie.clone(), 1)]);
-    let rep = features::run_plan(&m.env, &s, &p, &p.digest(), &mut |_, _| {})
-        .unwrap_or_default();
+    let rep = features::run_plan(&m.env, &s, &p, &p.digest(), &mut |_, _| {}).unwrap_or_default();
     assert!(rep.moved.is_empty() && movie.exists());
 }
 
@@ -464,7 +552,10 @@ fn snapshots_kept_two_per_location() {
     t5.stopped = true;
     assert!(!space_snapshots::record_at(&m.env, &st, &t5, 400).unwrap());
     let all = space_snapshots::saved(&m.env);
-    assert_eq!(all.iter().map(|s| s.taken).collect::<Vec<_>>(), [300, 250, 200]);
+    assert_eq!(
+        all.iter().map(|s| s.taken).collect::<Vec<_>>(),
+        [300, 250, 200]
+    );
     let (older, newer) = space_snapshots::latest_pair(&m.env, "home").unwrap();
     assert_eq!((older.taken, newer.taken), (200, 300));
     assert_eq!(newer.root, m.env.home());
@@ -475,10 +566,20 @@ fn snapshots_kept_two_per_location() {
     let newer_mov = m.env.home_path("Movies/newer.mov");
     assert!(g.iter().any(|x| x.path == newer_mov && x.before == 0));
     assert!(g.windows(2).all(|w| w[0].grew() >= w[1].grew()));
-    assert!(g.iter().any(|x| x.path == movies && x.grew() == tree_size(&newer_mov).0));
+    assert!(
+        g.iter()
+            .any(|x| x.path == movies && x.grew() == tree_size(&newer_mov).0)
+    );
     assert!(space_snapshots::latest_pair(&m.env, "startup").is_none());
     // Depth 2 only.
-    assert!(newer.entries.iter().all(|e| e.path.strip_prefix(m.env.home()).unwrap().components().count() <= 2));
+    assert!(newer.entries.iter().all(|e| {
+        e.path
+            .strip_prefix(m.env.home())
+            .unwrap()
+            .components()
+            .count()
+            <= 2
+    }));
 }
 
 #[test]
@@ -487,7 +588,12 @@ fn snapshot_entries_are_capped() {
     for i in 0..(space_snapshots::MAX_ENTRIES + 20) {
         m.home_file(&format!("Many/f{i}.bin"), 1000 + i);
     }
-    let t = space::build_location(&m.env, &MapLocation::Home, &AtomicBool::new(false), &|_, _| {});
+    let t = space::build_location(
+        &m.env,
+        &MapLocation::Home,
+        &AtomicBool::new(false),
+        &|_, _| {},
+    );
     let s = space_snapshots::snapshot_of(&m.env, &MapLocation::Home, &t, 1).unwrap();
     assert_eq!(s.entries.len(), space_snapshots::MAX_ENTRIES);
     assert!(s.entries.windows(2).all(|w| w[0].size >= w[1].size));

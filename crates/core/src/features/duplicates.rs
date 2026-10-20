@@ -47,6 +47,18 @@ pub const PARTIAL: usize = 64 * 1024;
 /// Quick Sweep's Duplicate Downloads tile: only files changed in this many days (3 months).
 pub const RECENT_DAYS: i64 = 90;
 
+/// Extensions of downloads still being written (Chrome, Safari, Firefox and others).
+pub const IN_PROGRESS_EXTS: &[&str] = &["crdownload", "download", "part", "partial", "opdownload"];
+
+/// A download in progress, or a file inside one: never a duplicate candidate.
+pub fn in_progress(p: &Path) -> bool {
+    p.components().any(|c| {
+        Path::new(c.as_os_str())
+            .extension()
+            .is_some_and(|e| IN_PROGRESS_EXTS.iter().any(|x| e.eq_ignore_ascii_case(x)))
+    })
+}
+
 /// Quick Sweep's tile: duplicates in Downloads among files of the last [`RECENT_DAYS`] days.
 /// The executor sees the Duplicates feature (same id, allow-list and checks).
 pub struct DownloadDuplicates;
@@ -503,6 +515,8 @@ pub fn scan_filtered(
             path: f.path,
         })
         .filter(|c| since.is_none_or(|s| c.modified.is_some_and(|m| m >= s)))
+        // Downloads still in progress (and what is inside Safari's .download bundles).
+        .filter(|c| !in_progress(&c.path))
         .collect();
     (ctx.progress)("file contents");
     let (sets, unreadable) = find_groups(files, &|| ctx.cancelled());

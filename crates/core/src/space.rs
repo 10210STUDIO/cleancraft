@@ -20,9 +20,12 @@
 //! on the Data volume, mounted at `/System/Volumes/Data` and joined into `/` by firmlinks
 //! (`/Users`, `/Applications`, `/Library`, `/private/var` and the others listed in
 //! `/usr/share/firmlinks`). A walk of `/` therefore crosses into the Data volume's device
-//! (allowed: [`BuildOpts::extra_devs`]) and skips `/System/Volumes/Data` itself, which would
-//! count every firmlinked folder a second time; `/Volumes` (other disks, and the link back to
-//! `/`) and `/dev` are skipped too ([`BuildOpts::skip`]). Every file is counted once: hard
+//! (allowed: [`BuildOpts::extra_devs`]; no other device) and skips `/System/Volumes` (the
+//! Data volume's own mount point, which would count every firmlinked folder a second time,
+//! and the container's other volumes); `/Volumes` (other disks, and the link back to `/`),
+//! `/dev`, the Spotlight index and the change log are skipped too ([`BuildOpts::skip`]). On an
+//! external disk the walk skips `.Spotlight-V100`, `.fseventsd`, `.Trashes` and Time
+//! Machine's `Backups.backupdb`. Skipped space shows in "Not measured". Every file is counted once: hard
 //! links by (device, inode) on their first path, symbolic links never followed.
 //!
 //! Folders that cannot be read (most often for want of Full Disk Access) are kept in the tree
@@ -31,7 +34,8 @@
 //! space was not measured ([`not_measured`]).
 //!
 //! What may be selected ([`lock_reason`]): the allow-list is the home folder (minus protected
-//! places, Library, hidden items and apps) plus, on an external volume, its user folders; the
+//! places, Library, hidden items and apps) plus, on an external volume, what is inside its top
+//! user folders ([`volume_user_folders`]; never the volume itself or a top item); the
 //! volume's own system folders (`.Spotlight-V100`, `.Trashes`, `.fseventsd`,
 //! `Backups.backupdb` and every other hidden item) never. Everything else is shown locked with
 //! its reason: "part of macOS" or "outside your home folder".
@@ -437,7 +441,15 @@ impl Tree {
         }
         let never = AtomicBool::new(false);
         let fresh = if std::fs::symlink_metadata(&target).is_ok() {
-            build_with(&target, &never, &|_, _| {}, &self.links, dev, &self.opts, None)
+            build_with(
+                &target,
+                &never,
+                &|_, _| {},
+                &self.links,
+                dev,
+                &self.opts,
+                None,
+            )
         } else {
             Tree::default()
         };
@@ -536,12 +548,12 @@ fn volume_lock_reason(env: &Env, vol: &Path, p: &Path) -> Option<String> {
         return Some("the disk itself".into());
     }
     let rel = p.strip_prefix(vol).ok()?;
+    let top = rel.components().count() == 1;
     if let Some(first) = rel.components().next() {
         let first = first.as_os_str().to_string_lossy();
-        if let Some((_, why)) = VOLUME_SYSTEM
-            .iter()
-            .find(|(n, _)| policy::same_name(std::ffi::OsStr::new(n), std::ffi::OsStr::new(&*first)))
-        {
+        if let Some((_, why)) = VOLUME_SYSTEM.iter().find(|(n, _)| {
+            policy::same_name(std::ffi::OsStr::new(n), std::ffi::OsStr::new(&*first))
+        }) {
             return Some(format!("system data of this disk: {why}"));
         }
     }
@@ -551,19 +563,49 @@ fn volume_lock_reason(env: &Env, vol: &Path, p: &Path) -> Option<String> {
     {
         return Some("hidden system data of this disk".into());
     }
-    if rel
-        .components()
-        .any(|c| Path::new(c.as_os_str()).extension().is_some_and(|e| e.eq_ignore_ascii_case("app")))
-    {
+    if rel.components().any(|c| {
+        Path::new(c.as_os_str())
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("app"))
+    }) {
         return Some("an app (use App Remover)".into());
     }
     if let Some(why) = policy::protected_reason(env, p) {
         return Some(format!("protected: {why}"));
     }
-    if let Err(r) = policy::check(env, &[vol.to_path_buf()], p) {
+    // The allow-list is the user folders at the top of the disk, never the disk itself: a top
+    // folder is opened, what is inside it can be removed; a file at the top stays.
+    if top {
+        return Some(if p.is_dir() {
+            "a top folder of this disk (open it to choose what is inside)".into()
+        } else {
+            "at the top of the disk (only items inside its folders can be removed)".into()
+        });
+    }
+    if let Err(r) = policy::check(env, &volume_user_folders(vol), p) {
         return Some(r.to_string());
     }
     None
+}
+
+/// The allow-list on an external volume: its top folders that hold the user's files (real
+/// folders, not hidden, not the disk's system folders, not apps). Never the volume itself.
+pub fn volume_user_folders(vol: &Path) -> Vec<PathBuf> {
+    crate::fsutil::children(vol)
+        .into_iter()
+        .filter(|c| {
+            let name = c
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            !name.starts_with('.')
+                && !VOLUME_SYSTEM
+                    .iter()
+                    .any(|(n, _)| n.eq_ignore_ascii_case(&name))
+                && !c.extension().is_some_and(|e| e.eq_ignore_ascii_case("app"))
+                && std::fs::symlink_metadata(c).is_ok_and(|m| m.is_dir())
+        })
+        .collect()
 }
 
 /// Why `p` cannot be selected in the Disk Map, if it cannot. The allow-list is the home folder
@@ -859,7 +901,9 @@ pub fn external_volumes(env: &Env) -> Vec<Volume> {
             || rest.contains('/')
             || rest.starts_with('.')
             || rest.starts_with("com.apple.")
-            || SYSTEM_VOLUME_NAMES.iter().any(|n| n.eq_ignore_ascii_case(rest))
+            || SYSTEM_VOLUME_NAMES
+                .iter()
+                .any(|n| n.eq_ignore_ascii_case(rest))
         {
             continue;
         }
@@ -946,9 +990,13 @@ impl MapLocation {
                 let data = env.sys_path("/System/Volumes/Data");
                 BuildOpts {
                     skip: vec![
-                        data.clone(),
+                        // The Data volume (seen through the firmlinks instead) and the other
+                        // APFS volumes of the container (Preboot, VM, Update...).
+                        env.sys_path("/System/Volumes"),
                         env.sys_path("/Volumes"),
                         env.sys_path("/dev"),
+                        env.sys_path("/.Spotlight-V100"),
+                        env.sys_path("/.fseventsd"),
                     ],
                     extra_devs: std::fs::symlink_metadata(&data)
                         .ok()
@@ -957,6 +1005,20 @@ impl MapLocation {
                         .collect(),
                 }
             }
+            // An external disk: its index, change log and Time Machine backups are not
+            // walked (huge, hard-linked, never removable): they count as not measured.
+            MapLocation::Volume(v) => BuildOpts {
+                skip: [
+                    ".Spotlight-V100",
+                    ".fseventsd",
+                    "Backups.backupdb",
+                    ".Trashes",
+                ]
+                .iter()
+                .map(|n| v.mount.join(n))
+                .collect(),
+                extra_devs: Vec::new(),
+            },
             _ => BuildOpts::default(),
         }
     }
