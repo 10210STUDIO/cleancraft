@@ -96,6 +96,12 @@ pub struct CleanApp {
     /// The tool each sidebar section showed last (by index in [`GROUPS`]), so a section
     /// opens where the person left it.
     pub section_tool: BTreeMap<usize, FeatureId>,
+    /// Grows by one each time files leave their place or come back (a cleanup, an uninstall,
+    /// a move from Disk Map, an Undo). Pages that keep their own lists compare it with the
+    /// value they last saw and reload or drop what moved.
+    pub disk_epoch: u64,
+    /// The original paths the last cleanup moved (empty after an Undo).
+    pub last_moved: Vec<std::path::PathBuf>,
 }
 
 /// Sidebar entry height.
@@ -128,6 +134,8 @@ impl CleanApp {
             shown_page: Page::Feature(FeatureId::SmartCare),
             page_since: f64::NEG_INFINITY,
             section_tool: BTreeMap::new(),
+            disk_epoch: 0,
+            last_moved: Vec::new(),
         }
     }
 
@@ -172,6 +180,63 @@ impl CleanApp {
 
     pub fn plan_state(&mut self, f: FeatureId) -> &mut PlanState {
         self.plans.entry(f).or_default()
+    }
+
+    /// Files left their place (moved to the Trash or quarantine): every list that still shows
+    /// them drops them at once, on every page. Plan pages and Quick Sweep's tiles lose the
+    /// moved items (and anything inside them); an item that contained a moved file is
+    /// measured again; a duplicate set left with one copy is no longer a set. Pages with their
+    /// own lists (App Remover, Disk Map, History) follow [`CleanApp::disk_epoch`].
+    pub fn files_moved(&mut self, moved: &[std::path::PathBuf]) {
+        if moved.is_empty() {
+            return;
+        }
+        for st in self.plans.values_mut() {
+            if st.is_busy() {
+                continue;
+            }
+            if let Some(plan) = st.plan.as_mut() {
+                pages::plan_page::drop_paths(plan, moved);
+            }
+        }
+        if let Some(res) = self.sweep.result.as_mut() {
+            for tile in &mut res.tiles {
+                if let cleancraft_core::sweep::TileData::Plan(plan) = &mut tile.data {
+                    pages::plan_page::drop_paths(plan, moved);
+                }
+            }
+        }
+        self.disk_epoch += 1;
+        self.last_moved = moved.to_vec();
+    }
+
+    /// The original paths a cleanup report moved.
+    pub fn moved_paths(rep: &cleancraft_core::executor::Report) -> Vec<std::path::PathBuf> {
+        rep.moved
+            .iter()
+            .filter_map(|r| match &r.kind {
+                cleancraft_core::executor::ActionKind::Moved { original, .. } => {
+                    Some(original.clone())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Files came back (an Undo): lists made before are out of date. Plan pages with results
+    /// and Quick Sweep's results scan again the next time they are shown.
+    pub fn files_back(&mut self, back: &[std::path::PathBuf]) {
+        let _ = back;
+        for st in self.plans.values_mut() {
+            if st.plan.is_some() && !st.is_busy() {
+                st.stale = true;
+            }
+        }
+        if self.sweep.result.is_some() {
+            self.sweep.stale = true;
+        }
+        self.disk_epoch += 1;
+        self.last_moved.clear();
     }
 
     pub fn save_settings(&mut self) {
@@ -388,7 +453,8 @@ impl CleanApp {
         resp.widget_info(|| {
             egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, label)
         });
-        let hov = kit::anim(ui.ctx(), resp.id.with("hov"), resp.hovered(), motion::HOVER);
+        let feel = kit::feel_ring(ui, &t, &resp, r, f32::from(theme::radius::M));
+        let hov = feel.hov;
         let on = kit::anim(ui.ctx(), resp.id.with("on"), active, motion::PAGE);
         let p = ui.painter();
         let round = CornerRadius::same(theme::radius::M);
@@ -409,8 +475,12 @@ impl CleanApp {
                 egui::StrokeKind::Inside,
             );
         }
-        if hov > 0.0 && !active {
-            p.rect_filled(r, round, Color32::from_white_alpha((9.0 * hov) as u8));
+        if (hov > 0.0 || feel.down > 0.0) && !active {
+            p.rect_filled(
+                r,
+                round,
+                Color32::from_white_alpha((9.0 * hov + 8.0 * feel.down) as u8),
+            );
         }
         let tile = egui::Rect::from_center_size(
             r.left_center() + vec2(8.0 + 14.0, 0.0),

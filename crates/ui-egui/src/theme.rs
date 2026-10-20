@@ -477,6 +477,8 @@ pub fn apply(ctx: &egui::Context, t: &Tokens) {
     visuals.handle_shape = egui::style::HandleShape::Circle;
     visuals.popup_shadow = card_shadow();
     visuals.override_text_color = Some(t.text);
+    // egui's own buttons (menu items, combo boxes) show the pointing hand like kit controls.
+    visuals.interact_cursor = Some(egui::CursorIcon::PointingHand);
     WidgetPalette {
         noninteractive: t.card,
         inactive: t.card_hover,
@@ -508,6 +510,8 @@ pub fn apply(ctx: &egui::Context, t: &Tokens) {
         style.spacing.icon_width_inner = 10.0;
         style.spacing.combo_height = 320.0;
         style.animation_time = motion::HOVER;
+        // Static text keeps the arrow, as in Mac apps (no I-beam over every label).
+        style.interaction.selectable_labels = false;
         style.text_styles = [
             (TextStyle::Small, font(size::FOOTNOTE, Weight::Regular)),
             (TextStyle::Body, font(size::BODY, Weight::Regular)),

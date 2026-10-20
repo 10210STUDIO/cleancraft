@@ -131,6 +131,9 @@ fn start_map(app: &mut CleanApp, root: PathBuf, fresh: bool) {
 pub fn poll(app: &mut CleanApp) -> bool {
     let st = &mut app.disk_map;
     let mut notice: Option<(String, bool)> = None;
+    // Tell the other pages (plan pages, Quick Sweep) what moved or came back.
+    let mut moved: Option<Vec<PathBuf>> = None;
+    let mut came_back = false;
     let busy = match &mut st.phase {
         Phase::Scanning(job) => {
             if let Some(tree) = job.poll() {
@@ -175,6 +178,7 @@ pub fn poll(app: &mut CleanApp) -> bool {
                 }
                 match (out.result, out.undo) {
                     (_, Some((n, errs))) => {
+                        came_back = true;
                         notice = Some(if errs.is_empty() {
                             (
                                 format!("{} put back.", cleancraft_core::fsutil::items(n)),
@@ -194,6 +198,7 @@ pub fn poll(app: &mut CleanApp) -> bool {
                         st.phase = Phase::Map;
                     }
                     (Ok(rep), None) => {
+                        moved = Some(CleanApp::moved_paths(&rep));
                         st.selected.clear();
                         st.phase = Phase::Done(rep);
                     }
@@ -213,6 +218,12 @@ pub fn poll(app: &mut CleanApp) -> bool {
         }
         _ => false,
     };
+    if let Some(m) = moved {
+        app.files_moved(&m);
+    }
+    if came_back {
+        app.files_back(&[]);
+    }
     if let Some((m, err)) = notice {
         if err {
             app.warn(m);
@@ -745,14 +756,13 @@ fn treemap(app: &mut CleanApp, ui: &mut Ui, node: &Node, area: egui::Rect) {
             .as_ref()
             .is_some_and(|(p, _)| app.disk_map.selected.contains(p));
         let id = ui.id().with(("block", &label));
-        let resp = ui
-            .interact(rect, id, Sense::click())
-            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        let resp = ui.interact(rect, id, Sense::click());
         let name = format!("Block {label}");
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
         let p = ui.painter();
-        let hov = kit::anim(ui.ctx(), id.with("hov"), resp.hovered(), motion::HOVER);
         let round = (rect.width().min(rect.height()) * 0.18).clamp(2.0, 8.0);
+        let feel = kit::feel_ring(ui, &t, &resp, rect, round);
+        let hov = (feel.hov - 0.4 * feel.down).max(0.0);
         let top = icons::lerp(color, Color32::WHITE, 0.10 + 0.12 * hov);
         let bottom = icons::lerp(color, Color32::BLACK, 0.28 - 0.1 * hov);
         icons::gradient_tile(p, rect, round, top, bottom);
@@ -951,9 +961,8 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                             vec2(name_w, 22.0),
                         );
                         if c.is_dir {
-                            let resp = ui
-                                .interact(name_rect, row.id.with("open"), Sense::click())
-                                .on_hover_cursor(egui::CursorIcon::PointingHand);
+                            let resp = ui.interact(name_rect, row.id.with("open"), Sense::click());
+                            kit::feel_ring(ui, &t, &resp, name_rect, 4.0);
                             // A folder name opens it: a link, for VoiceOver and tests.
                             resp.widget_info(|| {
                                 egui::WidgetInfo::labeled(egui::WidgetType::Link, true, &c.name)

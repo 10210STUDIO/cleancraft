@@ -119,7 +119,7 @@ fn danger_pill_label_reads_on_its_whole_gradient() {
 /// REVIEW-A 66: a results total counts up, but VoiceOver and tests hear the final figure at
 /// once, and after the count the screen shows exactly that figure.
 #[test]
-fn results_total_counts_up_to_the_exact_figure() {
+fn results_total_is_exact_from_the_first_frame() {
     let m = FakeMac::sample();
     base(&m);
     let mut h = harness(&m, 1280.0, 820.0);
@@ -145,15 +145,11 @@ fn results_total_counts_up_to_the_exact_figure() {
         .expect("plan")
         .total_size();
     let want = cleancraft_core::fsutil::human_size(total);
-    // Right after the results arrive: the accessible label is already the total, the painted
-    // number is still on its way.
+    // Right after the results arrive the painted total is already exact (round 4, REVIEW-C
+    // C10: no frame where the total disagrees with the category list and the bar).
     assert!(has(&h, &want), "accessible total");
     let first = display_texts(&h);
-    assert_eq!(first.len(), 1, "one display figure: {first:?}");
-    assert_ne!(
-        first[0], want,
-        "the total should still be counting on the first frame"
-    );
+    assert_eq!(first, vec![want.clone()], "exact total on the first frame");
     settle(&mut h);
     assert_eq!(
         display_texts(&h),

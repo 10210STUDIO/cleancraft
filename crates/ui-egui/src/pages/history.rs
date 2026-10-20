@@ -260,6 +260,7 @@ fn group_card(
                         if r.clicked() {
                             app.act();
                             let (n, errs) = executor::undo_plan(&app.env, &first.plan_id);
+                            app.files_back(&[]);
                             if errs.is_empty() {
                                 app.tell(format!(
                                     "{} put back.",
@@ -313,7 +314,10 @@ fn record_row(
                 if b.on_hover_text("Put this back where it was").clicked() {
                     app.act();
                     match executor::undo(&app.env, &r.id) {
-                        Ok(_) => app.tell("Put back."),
+                        Ok(_) => {
+                            app.tell("Put back.");
+                            app.files_back(&[]);
+                        }
                         Err(e) => app.warn(format!("Could not put it back: {e}")),
                     }
                     app.history.reload(&app.env);

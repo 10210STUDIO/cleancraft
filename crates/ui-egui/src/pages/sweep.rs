@@ -43,6 +43,8 @@ pub struct State {
     /// Index (in `Sources::ids`) of the module the running scan is in. Modules scan one
     /// after the other, so the ones before it are done.
     pub scan_at: usize,
+    /// Files came back since the results were made (an Undo): scan again when shown.
+    pub stale: bool,
 }
 
 fn sources(app: &CleanApp) -> Sources {
@@ -106,14 +108,13 @@ pub fn poll(app: &mut CleanApp) -> bool {
         }
         Phase::Running(job) => {
             if let Some(runs) = job.poll() {
-                // Module pages must not show lists that were just cleaned.
-                for r in &runs {
-                    let ps = app.plan_state(r.id);
-                    if !ps.is_busy() {
-                        ps.phase = plan_page::Phase::Idle;
-                        ps.plan = None;
-                    }
-                }
+                // Module pages (and every other list) drop what was just moved.
+                let moved: Vec<std::path::PathBuf> = runs
+                    .iter()
+                    .filter_map(|r| r.result.as_ref().ok())
+                    .flat_map(CleanApp::moved_paths)
+                    .collect();
+                app.files_moved(&moved);
                 let ok = runs.iter().any(|r| r.result.is_ok());
                 app.sweep.phase = Phase::Done(runs);
                 crate::sound::play(
@@ -140,6 +141,20 @@ pub fn poll(app: &mut CleanApp) -> bool {
 const SUBTITLE: &str = "One scan across junk, mail downloads, the Trash, threats and your apps.";
 
 pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
+    // Files came back since the results were made: they are out of date.
+    if app.sweep.stale {
+        match app.sweep.phase {
+            Phase::Results => {
+                app.sweep.stale = false;
+                start_scan(app);
+            }
+            Phase::Idle => {
+                app.sweep.stale = false;
+                app.sweep.result = None;
+            }
+            _ => {}
+        }
+    }
     let t = app.t;
     let (icon, _) = kit::feature_look(&t, f);
     if !matches!(app.sweep.phase, Phase::Idle) {
@@ -747,6 +762,7 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
     if let Some((id, plan_id)) = undo {
         app.act();
         let (n, errs) = executor::undo_plan(&app.env, &plan_id);
+        app.files_back(&[]);
         app.sweep.undone.push(id);
         if errs.is_empty() {
             app.tell(format!(

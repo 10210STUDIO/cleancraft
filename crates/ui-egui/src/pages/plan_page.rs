@@ -49,12 +49,50 @@ pub struct PlanState {
     pub error: Option<String>,
     /// Set to stop the running scan.
     pub cancel: Arc<AtomicBool>,
+    /// Files came back since this list was made (an Undo): scan again when shown.
+    pub stale: bool,
 }
 
 impl PlanState {
     pub fn is_busy(&self) -> bool {
         matches!(self.phase, Phase::Scanning(_) | Phase::Cleaning(_))
     }
+}
+
+/// Drop from `plan` every item at or inside a path in `gone`; an item that contained one is
+/// measured again. Item ids are renumbered (they are indexes). In a plan of sets
+/// (duplicates, look-alike pictures) a set left with one file is dropped too: one copy is not
+/// a duplicate. Returns true when anything changed.
+pub fn drop_paths(plan: &mut Plan, gone: &[std::path::PathBuf]) -> bool {
+    let before = plan.items.len();
+    let mut resized = false;
+    plan.items
+        .retain(|it| !gone.iter().any(|g| it.path.starts_with(g)));
+    for it in &mut plan.items {
+        if gone.iter().any(|g| g.starts_with(&it.path)) {
+            it.size = cleancraft_core::fsutil::tree_size(&it.path).0;
+            resized = true;
+        }
+    }
+    let sets = matches!(
+        plan.feature,
+        Some(FeatureId::Duplicates | FeatureId::SimilarPhotos)
+    );
+    if sets {
+        let mut count: std::collections::HashMap<String, usize> = Default::default();
+        for g in plan.items.iter().filter_map(|i| i.group.clone()) {
+            *count.entry(g).or_default() += 1;
+        }
+        plan.items.retain(|i| {
+            i.group
+                .as_ref()
+                .is_none_or(|g| count.get(g).copied().unwrap_or(0) > 1)
+        });
+    }
+    for (i, it) in plan.items.iter_mut().enumerate() {
+        it.id = i;
+    }
+    plan.items.len() != before || resized
 }
 
 /// Short text about each module, shown before the first scan.
@@ -138,6 +176,7 @@ fn start_clean(app: &mut CleanApp, f: FeatureId) {
 /// Finish jobs. Returns true while something is running.
 pub fn poll(app: &mut CleanApp, f: FeatureId) -> bool {
     let mut cue = None;
+    let mut moved = Vec::new();
     let st = app.plan_state(f);
     let busy = match &mut st.phase {
         Phase::Scanning(job) => {
@@ -175,6 +214,7 @@ pub fn poll(app: &mut CleanApp, f: FeatureId) -> bool {
                         } else {
                             crate::sound::Cue::CleanDone
                         });
+                        moved = CleanApp::moved_paths(&rep);
                         st.phase = Phase::Done(rep);
                     }
                     Err(e) => {
@@ -197,6 +237,8 @@ pub fn poll(app: &mut CleanApp, f: FeatureId) -> bool {
         }
         _ => false,
     };
+    // What moved leaves this list and every other list that showed it.
+    app.files_moved(&moved);
     if let Some(c) = cue {
         crate::sound::play(&app.env, c);
     }
@@ -212,6 +254,16 @@ pub fn stop_scan(app: &mut CleanApp, f: FeatureId) {
 }
 
 pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
+    // Files came back since this list was made: the list is out of date.
+    let st = app.plan_state(f);
+    if st.stale && !st.is_busy() {
+        st.stale = false;
+        match st.phase {
+            Phase::Results | Phase::Confirm => start_scan(app, f),
+            Phase::Idle => st.plan = None,
+            _ => {}
+        }
+    }
     let t = app.t;
     let (icon, _) = kit::feature_look(&t, f);
     let phase = match &app.plan_state(f).phase {
@@ -721,12 +773,8 @@ pub fn category_row(
     resp.widget_info(|| {
         egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, current, label)
     });
-    let hov = kit::anim(
-        ui.ctx(),
-        resp.id.with("hov"),
-        resp.hovered(),
-        crate::theme::motion::HOVER,
-    );
+    let feel = kit::feel_ring(ui, t, &resp, r, 12.0);
+    let hov = feel.hov;
     let p = ui.painter().clone();
     if current {
         p.rect_filled(r, 12.0, color.gamma_multiply(0.16));
@@ -736,8 +784,12 @@ pub fn category_row(
             egui::Stroke::new(1.0, color.gamma_multiply(0.45)),
             egui::StrokeKind::Inside,
         );
-    } else if hov > 0.0 {
-        p.rect_filled(r, 12.0, Color32::from_white_alpha((10.0 * hov) as u8));
+    } else if hov > 0.0 || feel.down > 0.0 {
+        p.rect_filled(
+            r,
+            12.0,
+            Color32::from_white_alpha((10.0 * hov + 8.0 * feel.down) as u8),
+        );
     }
     let mut x = r.left() + 10.0;
     let mut check_changed = None;
@@ -957,21 +1009,37 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
         .unwrap_or(false);
     let name = item_name(f, it);
     let w = ui.available_width();
-    let (r, resp) = ui.allocate_exact_size(vec2(w, ROW_H), Sense::hover());
+    let locked = it.locked.is_some();
+    // The whole row is a click target that toggles it (its checkbox, Reveal and Ignore sit on
+    // top and keep their own clicks). Not a Tab stop: the checkbox is the row's one stop.
+    let (r, row) = ui.allocate_exact_size(
+        vec2(w, ROW_H),
+        if locked { Sense::hover() } else { Sense::CLICK },
+    );
+    let feel = kit::feel(ui, &row);
+    // Over the row or anything on it (checkbox, Reveal, Ignore).
+    let row_hovered = ui.rect_contains_pointer(r);
     let hov = kit::anim(
         ui.ctx(),
         egui::Id::new(("row-hov", f.as_str(), id)),
-        resp.contains_pointer(),
+        row_hovered,
         crate::theme::motion::HOVER,
     );
     let p = ui.painter().clone();
     let card = r.shrink2(vec2(2.0, 2.0));
     if selected_now {
-        p.rect_filled(card, 12.0, t.sec_a.gamma_multiply(0.07 + 0.04 * hov));
-    } else if hov > 0.0 {
-        p.rect_filled(card, 12.0, Color32::from_white_alpha((9.0 * hov) as u8));
+        p.rect_filled(
+            card,
+            12.0,
+            t.sec_a.gamma_multiply(0.07 + 0.04 * hov + 0.04 * feel.down),
+        );
+    } else if hov > 0.0 || feel.down > 0.0 {
+        p.rect_filled(
+            card,
+            12.0,
+            Color32::from_white_alpha((9.0 * hov + 8.0 * feel.down) as u8),
+        );
     }
-    let locked = it.locked.is_some();
     // Checkbox, named after the file.
     let cb_rect = Rect::from_center_size(pos2(r.left() + 20.0, r.center().y), vec2(22.0, 22.0));
     let mut on = selected_now;
@@ -991,7 +1059,11 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
             t.text_faint,
         );
     }
-    if cb.changed() {
+    let row_click = row.clicked() && !locked;
+    if row_click {
+        on = !selected_now;
+    }
+    if cb.changed() || row_click {
         app.act();
         let every_copy = on
             && keeps_a_copy(f)
@@ -1060,7 +1132,16 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
     );
     let shown = app.env.display(&it.path);
     let path_x = x0 + name_w + 12.0;
-    let path_w = (x0 + text_w - path_x).max(24.0);
+    // While the row is hovered its actions cover the end of line 1: the path is shortened
+    // again to end before them (a middle ellipsis, never a word cut by the buttons).
+    let actions_w = 150.0;
+    let actions_left = size_r.left() - 12.0 - actions_w;
+    let path_end = if row_hovered || hov > 0.0 {
+        (x0 + text_w).min(actions_left - 20.0)
+    } else {
+        x0 + text_w
+    };
+    let path_w = (path_end - path_x).max(24.0);
     let pf = font(size::FOOTNOTE, Weight::Regular);
     let path_s = kit::truncate_middle(ui.ctx(), &shown, &pf, path_w);
     kit::text_at(
@@ -1121,12 +1202,11 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
         }
     }
     // Row actions, shown on hover.
-    let actions_w = 150.0;
     let actions = Rect::from_min_max(
-        pos2(size_r.left() - 12.0 - actions_w, r.top()),
+        pos2(actions_left, r.top()),
         pos2(size_r.left() - 12.0, r.bottom()),
     );
-    let show = hov.max(if resp.contains_pointer() { 1.0 } else { 0.0 });
+    let show = hov.max(if row_hovered { 1.0 } else { 0.0 });
     if show > 0.0 {
         // A soft solid under the buttons so the text beneath does not show through.
         let under = actions
@@ -1273,20 +1353,15 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                 });
         });
         ui.add_space(space::L);
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let label = match method {
-                executor::Method::Trash => "Move to Trash",
-                executor::Method::Quarantine | executor::Method::AdminQuarantine => {
-                    "Move to Quarantine"
-                }
-            };
-            if kit::danger(ui, &t, label) {
-                go = true;
+        let label = match method {
+            executor::Method::Trash => "Move to Trash",
+            executor::Method::Quarantine | executor::Method::AdminQuarantine => {
+                "Move to Quarantine"
             }
-            if kit::secondary(ui, &t, "Cancel") {
-                close = true;
-            }
-        });
+        };
+        let (ok, cancel) = kit::dialog_actions(ui, &t, label, kit::Kind::Danger);
+        go |= ok;
+        close |= cancel;
     });
     if dlg.should_close() {
         close = true;
@@ -1396,6 +1471,7 @@ fn done(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         {
             app.act();
             let (n, errs) = executor::undo_plan(&app.env, &rep.plan_id);
+            app.files_back(&CleanApp::moved_paths(&rep));
             if errs.is_empty() {
                 app.tell(format!("{} put back.", cleancraft_core::fsutil::items(n)));
             } else {
@@ -1422,9 +1498,15 @@ fn done(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         }
         if kit::primary(ui, &t, "Done") {
             app.act();
+            // Back to the list when something is left in it (what did not move, what was
+            // not selected); the start screen when the list is empty.
             let st = app.plan_state(f);
-            st.phase = Phase::Idle;
-            st.plan = None;
+            if st.plan.as_ref().is_some_and(|p| !p.items.is_empty()) {
+                st.phase = Phase::Results;
+            } else {
+                st.phase = Phase::Idle;
+                st.plan = None;
+            }
         }
     });
 }

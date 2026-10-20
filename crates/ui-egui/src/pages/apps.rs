@@ -28,7 +28,7 @@ use crate::app::CleanApp;
 use crate::icons::{self, Icon};
 use crate::jobs::Job;
 use crate::kit;
-use crate::theme::{Weight, font, motion, size, space};
+use crate::theme::{Weight, font, size, space};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Group {
@@ -445,6 +445,10 @@ pub fn poll(app: &mut CleanApp) -> bool {
                 app.apps.pending = None;
                 // What moved leaves the lists and counts now; the slow look below confirms.
                 forget_moved(&mut app.apps);
+                if let Phase::Done(rep, _) = &app.apps.phase {
+                    let m = CleanApp::moved_paths(rep);
+                    app.files_moved(&m);
+                }
             }
             Err(e) => {
                 app.apps.phase = Phase::Browse;
@@ -900,29 +904,20 @@ fn apps_list(app: &mut CleanApp, ui: &mut Ui, h: f32) {
             for a in &rows[range] {
                 let w = ui.available_width();
                 let (r, resp) = ui.allocate_exact_size(vec2(w, APP_ROW_H), Sense::click());
-                let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
                 resp.widget_info(|| {
                     egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &a.name)
                 });
                 if resp.clicked() {
                     open = Some(a.path.clone());
                 }
-                let hov = kit::anim(ui.ctx(), resp.id.with("hov"), resp.hovered(), motion::HOVER);
+                let feel = kit::feel_ring(ui, &t, &resp, r.shrink(2.0), 10.0);
+                let hov = feel.hov;
                 let p = ui.painter().clone();
-                if hov > 0.0 {
+                if hov > 0.0 || feel.down > 0.0 {
                     p.rect_filled(
                         r.shrink(2.0),
                         10.0,
-                        Color32::from_white_alpha((10.0 * hov) as u8),
-                    );
-                }
-                if resp.has_focus() {
-                    // Keyboard focus (Tab): a ring in the section colour; Enter opens.
-                    p.rect_stroke(
-                        r.shrink(2.0),
-                        10.0,
-                        egui::Stroke::new(2.0, t.sec_a),
-                        egui::StrokeKind::Inside,
+                        Color32::from_white_alpha((10.0 * hov + 8.0 * feel.down) as u8),
                     );
                 }
                 let tile = Rect::from_center_size(
@@ -1130,29 +1125,23 @@ fn file_row(
         Sense::hover()
     };
     let (r, row) = ui.allocate_exact_size(vec2(w, FILE_ROW_H), sense);
-    if toggle {
-        row.clone().on_hover_cursor(egui::CursorIcon::PointingHand);
-    }
     let shown = app.env.display(&it.path);
-    let hov = kit::anim(
-        ui.ctx(),
-        row.id.with("hov"),
-        row.hovered() && toggle,
-        motion::HOVER,
-    );
-    let p = ui.painter().clone();
     let card = r.shrink2(vec2(2.0, 2.0));
+    // Pointing hand, eased hover and press, keyboard focus ring (kit).
+    let feel = kit::feel_ring(ui, &t, &row, card, 10.0);
+    let hov = if toggle { feel.hov } else { 0.0 };
+    let p = ui.painter().clone();
     if it.selected && !is_app {
-        p.rect_filled(card, 10.0, t.sec_a.gamma_multiply(0.06 + 0.04 * hov));
-    } else if hov > 0.0 {
-        p.rect_filled(card, 10.0, Color32::from_white_alpha((9.0 * hov) as u8));
-    }
-    if row.has_focus() {
-        p.rect_stroke(
+        p.rect_filled(
             card,
             10.0,
-            egui::Stroke::new(2.0, t.sec_a),
-            egui::StrokeKind::Inside,
+            t.sec_a.gamma_multiply(0.06 + 0.04 * hov + 0.04 * feel.down),
+        );
+    } else if hov > 0.0 {
+        p.rect_filled(
+            card,
+            10.0,
+            Color32::from_white_alpha((9.0 * hov + 6.0 * feel.down) as u8),
         );
     }
     // Checkbox, named after the whole path (VoiceOver, tests); a padlock when locked.
@@ -1961,6 +1950,7 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
             {
                 app.act();
                 let (n, errs) = executor::undo_plan(&app.env, &rep.plan_id);
+                app.files_back(&CleanApp::moved_paths(&rep));
                 if errs.is_empty() {
                     app.tell(format!("{} put back.", cleancraft_core::fsutil::items(n)));
                 } else {
