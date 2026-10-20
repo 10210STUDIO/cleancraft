@@ -106,4 +106,4 @@ explains). Un-ignored: review_usability u01 u02 u06 u07 u12 u13 u19, review_desi
 Full `cargo test --workspace` run on 5bd0e3c+: three failures found and fixed after it
 (Settings sliders' pointing hand, the Disk Map folder row at 1280 in qa_every_control, the new
 partial-size test's fixture); those targets re-run green, workspace clippy -D warnings and fmt
-clean. A final full workspace run follows the last commit (see the board line).
+clean. Final full `cargo test --workspace` on 40bb670: all 80 test targets green.
