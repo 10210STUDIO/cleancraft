@@ -738,6 +738,107 @@ pub fn batch_results(
     out
 }
 
+/// Is this an uninstall, reset or Trash-leftovers plan (not the feature's own scan)?
+fn is_app_plan(plan: &Plan) -> bool {
+    plan.items
+        .iter()
+        .any(|i| [CAT_APP, CAT_HIGH, CAT_MEDIUM, CAT_SHARED].contains(&i.category.as_str()))
+}
+
+fn same_path(a: &Path, b: &Path) -> bool {
+    a == b
+        || match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+            (Ok(x), Ok(y)) => x == y,
+            _ => false,
+        }
+}
+
+/// Apps directly in the user's Trash (real folders, not links), for the leftovers plan of an
+/// app dragged there.
+fn trashed_apps(env: &Env) -> Vec<AppInfo> {
+    children(&env.user_trash())
+        .into_iter()
+        .filter(|p| {
+            p.extension().is_some_and(|e| e.eq_ignore_ascii_case("app"))
+                && std::fs::symlink_metadata(p).is_ok_and(|m| m.is_dir())
+        })
+        .filter_map(|p| {
+            let b = apps::read_bundle(&p)?;
+            if b.bundle_id.split('.').count() < 2 {
+                return None;
+            }
+            Some(AppInfo {
+                name: p.file_stem()?.to_string_lossy().into_owned(),
+                bundle_name: b.name.clone(),
+                bundle_id: b.bundle_id.clone(),
+                version: b.short_version.clone(),
+                build: b.version.clone(),
+                size: 0,
+                last_used: None,
+                last_active: None,
+                store: apps::Store::Other,
+                vendor: String::new(),
+                apple: false,
+                feed_url: None,
+                path: p,
+            })
+        })
+        .collect()
+}
+
+/// Right before anything moves, an uninstall plan may only move its own apps and what
+/// [`find_leftovers`] finds for them now, read again from disk: a saved plan is plain JSON,
+/// and an edited one must not take another app, its settings or any other file. In a plan of
+/// several apps each app item must be the app its group names; a plan of one app names one
+/// app; a plan without an app (an app already in the Trash) takes only the leftovers of the
+/// apps in the Trash. Anything else stops the whole run: nothing moves.
+fn own_files_only(env: &Env, plan: &Plan) -> anyhow::Result<()> {
+    if !is_app_plan(plan) {
+        return Ok(());
+    }
+    let refuse = |p: &Path, why: &str| -> anyhow::Result<()> {
+        bail!(
+            "{} {why}, so this list was not made by CleanCraft for these apps. Nothing was moved.",
+            env.display(p)
+        )
+    };
+    let all = apps::inventory(env, false, &|_| {});
+    let app_items: Vec<&Item> = plan
+        .items
+        .iter()
+        .filter(|i| i.category == CAT_APP)
+        .collect();
+    if !is_batch(plan) && app_items.len() > 1 {
+        return refuse(&app_items[1].path, "is a second app in a plan for one app");
+    }
+    let mut own: Vec<AppInfo> = Vec::new();
+    for it in &app_items {
+        if is_batch(plan) && group_app(it).is_none_or(|g| !same_path(&g, &it.path)) {
+            return refuse(&it.path, "is not the app its group names");
+        }
+        match all.iter().find(|a| same_path(&a.path, &it.path)) {
+            Some(a) => own.push(a.clone()),
+            None => return refuse(&it.path, "is not an app in the Applications folders"),
+        }
+    }
+    if own.is_empty() {
+        own = trashed_apps(env);
+    }
+    let allowed: Vec<PathBuf> = own
+        .iter()
+        .flat_map(|a| find_leftovers(env, a, &all).into_iter().map(|(p, _, _)| p))
+        .collect();
+    for it in plan.selected() {
+        if it.category == CAT_APP {
+            continue;
+        }
+        if !allowed.iter().any(|a| same_path(a, &it.path)) {
+            return refuse(&it.path, "is not a file of the apps in this plan");
+        }
+    }
+    Ok(())
+}
+
 impl Feature for Uninstaller {
     fn id(&self) -> FeatureId {
         FeatureId::Uninstaller
@@ -819,7 +920,7 @@ impl Feature for Uninstaller {
                 bail!("{why}: {}. Nothing was moved.", env.display(&it.path));
             }
         }
-        Ok(())
+        own_files_only(env, plan)
     }
 
     /// Right before anything moves: no app of the plan may be running, and no app that is

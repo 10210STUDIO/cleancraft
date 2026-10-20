@@ -243,8 +243,7 @@ fn an_app_opened_after_the_review_keeps_its_files_and_the_others_go() {
             .iter()
             .all(|(_, w)| matches!(w, SkipReason::Refused(s) if s == "Quit Editor first"))
     );
-    // An edited plan that drops the groups: the files named after the running app's id are
-    // still found to be its own.
+    // An edited plan that drops the groups is not one CleanCraft made: nothing moves.
     let m = mac();
     let env = &m.mac.env;
     let (mut plan, apps) = uninstaller::batch_plan(env, &set(), &three(&m)).unwrap();
@@ -252,12 +251,12 @@ fn an_app_opened_after_the_review_keeps_its_files_and_the_others_go() {
         it.group = None;
     }
     m.mac.run_app(&m.editor);
-    run(&m, &plan, &apps);
-    assert!(m.editor.exists());
-    for f in &m.sure[0].1 {
-        assert!(f.exists(), "{} moved", f.display());
+    let err = uninstaller::run_batch(env, &set(), &plan, &apps, &plan.digest(), &mut |_, _| {})
+        .unwrap_err();
+    assert!(err.to_string().contains("Nothing was moved"), "{err}");
+    for (a, f) in &m.sure {
+        assert!(a.exists() && f.iter().all(|p| p.exists()));
     }
-    assert!(!m.viewer.exists());
 }
 
 #[test]
@@ -397,4 +396,40 @@ fn cleancraft_itself_is_never_in_a_batch() {
     );
     assert!(uninstaller::is_cleancraft(&me));
     assert!(!uninstaller::is_cleancraft(&m.editor));
+}
+
+#[test]
+fn an_edited_plan_may_only_take_its_apps_own_files() {
+    let m = mac();
+    let env = &m.mac.env;
+    let pic = m.mac.home_file("Pictures/holiday.jpg", 2_000);
+    // A leftover of an app that stays, moved into Editor's group.
+    let (mut plan, apps) =
+        uninstaller::batch_plan(env, &set(), std::slice::from_ref(&m.editor)).unwrap();
+    let jot = m.sure[2].1[0].clone();
+    for x in [jot.clone(), pic.clone()] {
+        let id = plan.push(
+            x,
+            1,
+            uninstaller::CAT_HIGH,
+            "edited",
+            cleancraft_core::Risk::High,
+            true,
+        );
+        plan.items[id].group = Some(uninstaller::group_key(&m.editor));
+    }
+    let err = uninstaller::run_batch(env, &set(), &plan, &apps, &plan.digest(), &mut |_, _| {})
+        .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("is not a file of the apps in this plan"),
+        "{err}"
+    );
+    assert!(jot.exists() && pic.exists() && m.editor.exists());
+    assert!(executor::history(env).is_empty());
+    // The same plan without the additions runs.
+    let (plan, apps) =
+        uninstaller::batch_plan(env, &set(), std::slice::from_ref(&m.editor)).unwrap();
+    run(&m, &plan, &apps);
+    assert!(!m.editor.exists());
 }
