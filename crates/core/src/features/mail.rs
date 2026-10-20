@@ -5,7 +5,9 @@
 //!   accounts whose server keeps the original (IMAP, Exchange). POP and "On My Mac" mailboxes
 //!   are left out: their attachment may be the only copy. When the account type cannot be
 //!   told, the files are listed but locked.
-//! - Modified attachments (M3): a file changed after Mail saved it is never preselected.
+//! - Nothing is preselected: the user ticks the attachments to move.
+//! - Modified attachments (M3): a file changed after Mail saved it is never preselected, and
+//!   its reason says so.
 //!
 //! Mail must be quit: while it runs every item is locked, and the cleanup refuses to start.
 //!
@@ -447,7 +449,9 @@ fn add_file(
     } else {
         format!("{name}: attachment copy")
     };
-    let id = plan.push(f.to_path_buf(), size, cat, reason, risk, !changed);
+    // Attachments are never preselected (the user ticks what to move); a changed one also
+    // says why it should stay.
+    let id = plan.push(f.to_path_buf(), size, cat, reason, risk, false);
     plan.items[id].group = Some(group.to_string());
     plan.items[id].modified = std::fs::metadata(f)
         .ok()

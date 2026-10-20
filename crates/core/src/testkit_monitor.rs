@@ -156,8 +156,10 @@ pub fn break_tool(fake: &FakeSys, program: &str) {
 
 // Quick Sweep stand-ins.
 
-/// A stand-in Mail module for Quick Sweep tests (the real one is another builder's):
-/// proposes every entry of `~/Library/Mail Downloads`, the ones named `keep*` unselected.
+/// A stand-in plan module in Mail's tile slot for Quick Sweep's mechanics tests (partial
+/// selection, Include, Undo per module): proposes every entry of `~/Library/Mail Downloads`,
+/// the ones named `keep*` unselected. The real Mail Downloads preselects nothing; its Quick
+/// Sweep defaults are tested on the real registry (`qa_parity_flows`, `fix6_defaults`).
 pub struct TestMail;
 
 impl Feature for TestMail {

@@ -437,6 +437,17 @@ fn results(app: &mut CleanApp, ui: &mut Ui) {
     kit::scroll_fade_page(ui, &out, &t);
 }
 
+/// The line under a runnable tile's number: "2 of 3 items selected, 740 KB found" ("0 of 3
+/// items selected, 740 KB found" when nothing is preselected, as in Mail Downloads).
+pub fn sweep_tile_line(p: &Plan) -> String {
+    format!(
+        "{} of {} selected, {} found",
+        p.selected_count(),
+        cleancraft_core::fsutil::items(p.items.len()),
+        human_size(p.total_size())
+    )
+}
+
 const TILE_MIN_H: f32 = 184.0;
 const TILE_MAX_H: f32 = 260.0;
 
@@ -529,17 +540,11 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile, w: f32, tile_h: 
                 ),
                 t.text,
             ),
+            // The big number is what Run would move (the selection); what was found is said
+            // under it, so a module with nothing preselected (Mail Downloads) still shows it.
             TileData::Plan(p) => {
                 share = Some(p.selected_size() as f32 / p.total_size().max(1) as f32);
-                (
-                    human_size(p.selected_size()),
-                    format!(
-                        "{} of {} selected",
-                        p.selected_count(),
-                        cleancraft_core::fsutil::items(p.items.len())
-                    ),
-                    t.text,
-                )
+                (human_size(p.selected_size()), sweep_tile_line(p), t.text)
             }
             TileData::Count { count, noun } => (
                 cleancraft_core::fsutil::count(*count, noun.trim_end_matches('s'), noun),
