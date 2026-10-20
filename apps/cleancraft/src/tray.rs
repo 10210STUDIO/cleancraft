@@ -47,11 +47,23 @@ pub fn menu_rows(m: &MenuModel) -> Vec<Option<(String, String, bool)>> {
         }
         v.push(None);
     }
-    v.push(Some((ID_OPEN.into(), cleancraft_core::schedule::OPEN_APP.into(), true)));
-    v.push(Some((ID_SWEEP.into(), cleancraft_core::schedule::QUICK_SWEEP.into(), true)));
+    v.push(Some((
+        ID_OPEN.into(),
+        cleancraft_core::schedule::OPEN_APP.into(),
+        true,
+    )));
+    v.push(Some((
+        ID_SWEEP.into(),
+        cleancraft_core::schedule::QUICK_SWEEP.into(),
+        true,
+    )));
     v.push(Some((ID_PAUSE.into(), m.pause_label().into(), true)));
     v.push(None);
-    v.push(Some((ID_QUIT.into(), cleancraft_core::schedule::QUIT.into(), true)));
+    v.push(Some((
+        ID_QUIT.into(),
+        cleancraft_core::schedule::QUIT.into(),
+        true,
+    )));
     v
 }
 
@@ -93,7 +105,9 @@ mod mac {
         fn show(&mut self, m: &MenuModel) {
             let rows = super::menu_rows(m);
             let shape = |r: &[Option<(String, String, bool)>]| -> Vec<Option<String>> {
-                r.iter().map(|x| x.as_ref().map(|(id, _, _)| id.clone())).collect()
+                r.iter()
+                    .map(|x| x.as_ref().map(|(id, _, _)| id.clone()))
+                    .collect()
             };
             if let Some(icon) = &self.icon {
                 icon.set_title(Some(&m.title));
@@ -263,7 +277,10 @@ mod tests {
         assert_eq!(action_for(ID_SWEEP), Some(MenuAction::QuickSweep));
         assert_eq!(action_for(ID_PAUSE), Some(MenuAction::TogglePause));
         assert_eq!(action_for(ID_QUIT), Some(MenuAction::Quit));
-        assert_eq!(action_for("cleancraft.review.2"), Some(MenuAction::Review(2)));
+        assert_eq!(
+            action_for("cleancraft.review.2"),
+            Some(MenuAction::Review(2))
+        );
         assert_eq!(action_for("cleancraft.info.0"), None);
         assert_eq!(action_for("cleancraft.review.x"), None);
     }

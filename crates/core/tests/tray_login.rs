@@ -20,7 +20,10 @@ fn uid(m: &FakeMac) -> u32 {
 
 #[test]
 fn the_plist_starts_the_agent_at_login_and_is_not_kept_alive() {
-    let xml = login_agent::plist_xml(Path::new(PROGRAM), Path::new("/Users/me/Library/Logs/CleanCraft/agent.log"));
+    let xml = login_agent::plist_xml(
+        Path::new(PROGRAM),
+        Path::new("/Users/me/Library/Logs/CleanCraft/agent.log"),
+    );
     let v = plist::Value::from_reader_xml(xml.as_bytes()).expect("valid plist");
     let d = v.as_dictionary().expect("dict");
     assert_eq!(d.get("Label").and_then(|x| x.as_string()), Some(LABEL));
@@ -61,7 +64,9 @@ fn the_plist_starts_the_agent_at_login_and_is_not_kept_alive() {
 #[test]
 fn the_agent_program_is_the_helper_app_when_installed() {
     let m = FakeMac::new();
-    let exe = m.env.sys_path("/Applications/CleanCraft.app/Contents/MacOS/CleanCraft");
+    let exe = m
+        .env
+        .sys_path("/Applications/CleanCraft.app/Contents/MacOS/CleanCraft");
     // No helper: the app's own executable.
     assert_eq!(login_agent::agent_program(&exe), exe);
     let helper = m
@@ -109,7 +114,10 @@ fn turning_on_writes_the_plist_bootstraps_and_journals_with_undo() {
     };
     assert_eq!(
         what,
-        &format!("{} (/Users/tester/Library/LaunchAgents/{LABEL}.plist)", login_agent::ON_TEXT)
+        &format!(
+            "{} (/Users/tester/Library/LaunchAgents/{LABEL}.plist)",
+            login_agent::ON_TEXT
+        )
     );
     let trash = m.env.user_trash().join(format!("{LABEL}.plist"));
     assert_eq!(
@@ -127,7 +135,11 @@ fn turning_on_writes_the_plist_bootstraps_and_journals_with_undo() {
     // Undo from History runs exactly that command through the shell.
     fake.answer("sh", "");
     executor::undo(&m.env, &h[0].id).expect("undo");
-    assert!(fake.calls().last().is_some_and(|c| c.starts_with("/bin/sh -c /bin/launchctl bootout")));
+    assert!(
+        fake.calls()
+            .last()
+            .is_some_and(|c| c.starts_with("/bin/sh -c /bin/launchctl bootout"))
+    );
 }
 
 #[test]
@@ -144,7 +156,9 @@ fn a_bootstrap_failure_keeps_the_login_item_and_says_so() {
     let ch = login_agent::turn_on(&m.env, Path::new(PROGRAM)).expect("saved");
     assert_eq!(
         ch.note.as_deref(),
-        Some("It starts at your next login; launchctl did not start it now: Bootstrap failed: 5: Input/output error")
+        Some(
+            "It starts at your next login; launchctl did not start it now: Bootstrap failed: 5: Input/output error"
+        )
     );
     assert!(login_agent::is_on(&m.env));
     assert_eq!(history(&m.env).len(), 1);
@@ -164,7 +178,11 @@ fn turning_off_boots_out_and_moves_the_plist_to_the_trash() {
     assert!(!login_agent::is_on(&m.env));
     assert!(!plist.exists());
     let stored = m.env.user_trash().join(format!("{LABEL} 2.plist"));
-    assert_eq!(std::fs::read(&stored).expect("in the Trash"), body, "moved, not deleted");
+    assert_eq!(
+        std::fs::read(&stored).expect("in the Trash"),
+        body,
+        "moved, not deleted"
+    );
     let u = uid(&m);
     assert_eq!(
         fake.calls().last().map(String::as_str),
@@ -203,7 +221,10 @@ fn nothing_changes_when_the_action_log_cannot_be_written() {
     m.env
         .inject_fault(&executor::journal_path(&m.env), Fault::DiskFull);
     let e = login_agent::turn_on(&m.env, Path::new(PROGRAM)).expect_err("refused");
-    assert!(e.starts_with("Could not write the action log, nothing changed"), "{e}");
+    assert!(
+        e.starts_with("Could not write the action log, nothing changed"),
+        "{e}"
+    );
     assert!(!login_agent::is_on(&m.env));
     assert!(fake.calls().is_empty());
 }
@@ -219,11 +240,17 @@ fn open_requests_run_open_by_bundle_id_and_are_read_once_while_fresh() {
         vec!["/usr/bin/open -b com.cristianizzo.cleancraft".to_string()]
     );
     let mut inbox = OpenInbox::default();
-    assert_eq!(inbox.poll(&m.env, req.time).as_deref(), Some("scan:quick_sweep"));
+    assert_eq!(
+        inbox.poll(&m.env, req.time).as_deref(),
+        Some("scan:quick_sweep")
+    );
     assert_eq!(inbox.poll(&m.env, req.time + 1), None, "handled once");
     // A request older than two minutes is ignored by an app started later.
     let mut late = OpenInbox::default();
-    assert_eq!(late.poll(&m.env, req.time + notify::REQUEST_MAX_AGE + 1), None);
+    assert_eq!(
+        late.poll(&m.env, req.time + notify::REQUEST_MAX_AGE + 1),
+        None
+    );
     // A damaged file is ignored.
     std::fs::write(notify::request_path(&m.env), b"{not json").expect("write");
     assert_eq!(OpenInbox::default().poll(&m.env, req.time), None);
@@ -240,7 +267,8 @@ fn an_app_that_cannot_be_opened_is_reported() {
         CmdOut {
             status: 1,
             stdout: String::new(),
-            stderr: "Unable to find application with bundle identifier com.cristianizzo.cleancraft".into(),
+            stderr: "Unable to find application with bundle identifier com.cristianizzo.cleancraft"
+                .into(),
         },
     );
     let e = notify::request_open(&m.env, "settings").expect_err("not installed");
@@ -269,7 +297,9 @@ fn one_agent_at_a_time() {
     );
     assert!(notify::claim_agent(&m.env, 200).is_ok());
     assert_eq!(
-        std::fs::read_to_string(notify::agent_pid_path(&m.env)).ok().as_deref(),
+        std::fs::read_to_string(notify::agent_pid_path(&m.env))
+            .ok()
+            .as_deref(),
         Some("200")
     );
 }

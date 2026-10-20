@@ -21,26 +21,62 @@ fn at(s: &str) -> NaiveDateTime {
 #[test]
 fn daily_slots() {
     let d = ScanEvery::Daily;
-    assert_eq!(last_slot(d, 10, 1, at("2026-10-20 09:59")), Some(at("2026-10-19 10:00")));
-    assert_eq!(last_slot(d, 10, 1, at("2026-10-20 10:00")), Some(at("2026-10-20 10:00")));
-    assert_eq!(next_slot(d, 10, 1, at("2026-10-20 10:00")), Some(at("2026-10-21 10:00")));
-    assert_eq!(next_slot(d, 10, 1, at("2026-10-20 09:00")), Some(at("2026-10-20 10:00")));
-    assert_eq!(last_slot(ScanEvery::Off, 10, 1, at("2026-10-20 10:00")), None);
-    assert_eq!(next_slot(ScanEvery::Off, 10, 1, at("2026-10-20 10:00")), None);
+    assert_eq!(
+        last_slot(d, 10, 1, at("2026-10-20 09:59")),
+        Some(at("2026-10-19 10:00"))
+    );
+    assert_eq!(
+        last_slot(d, 10, 1, at("2026-10-20 10:00")),
+        Some(at("2026-10-20 10:00"))
+    );
+    assert_eq!(
+        next_slot(d, 10, 1, at("2026-10-20 10:00")),
+        Some(at("2026-10-21 10:00"))
+    );
+    assert_eq!(
+        next_slot(d, 10, 1, at("2026-10-20 09:00")),
+        Some(at("2026-10-20 10:00"))
+    );
+    assert_eq!(
+        last_slot(ScanEvery::Off, 10, 1, at("2026-10-20 10:00")),
+        None
+    );
+    assert_eq!(
+        next_slot(ScanEvery::Off, 10, 1, at("2026-10-20 10:00")),
+        None
+    );
 }
 
 #[test]
 fn weekly_slots() {
     let w = ScanEvery::Weekly;
     // Tuesday 09:00, scans on Tuesdays at 10: the last one was a week ago.
-    assert_eq!(last_slot(w, 10, 2, at("2026-10-20 09:00")), Some(at("2026-10-13 10:00")));
-    assert_eq!(last_slot(w, 10, 2, at("2026-10-20 11:00")), Some(at("2026-10-20 10:00")));
+    assert_eq!(
+        last_slot(w, 10, 2, at("2026-10-20 09:00")),
+        Some(at("2026-10-13 10:00"))
+    );
+    assert_eq!(
+        last_slot(w, 10, 2, at("2026-10-20 11:00")),
+        Some(at("2026-10-20 10:00"))
+    );
     // Mondays: yesterday. Sundays: two days ago.
-    assert_eq!(last_slot(w, 10, 1, at("2026-10-20 09:00")), Some(at("2026-10-19 10:00")));
-    assert_eq!(last_slot(w, 10, 7, at("2026-10-20 09:00")), Some(at("2026-10-18 10:00")));
+    assert_eq!(
+        last_slot(w, 10, 1, at("2026-10-20 09:00")),
+        Some(at("2026-10-19 10:00"))
+    );
+    assert_eq!(
+        last_slot(w, 10, 7, at("2026-10-20 09:00")),
+        Some(at("2026-10-18 10:00"))
+    );
     // Wednesday: last week's.
-    assert_eq!(last_slot(w, 10, 3, at("2026-10-20 09:00")), Some(at("2026-10-14 10:00")));
-    assert_eq!(next_slot(w, 10, 3, at("2026-10-20 09:00")), Some(at("2026-10-21 10:00")));
+    assert_eq!(
+        last_slot(w, 10, 3, at("2026-10-20 09:00")),
+        Some(at("2026-10-14 10:00"))
+    );
+    assert_eq!(
+        next_slot(w, 10, 3, at("2026-10-20 09:00")),
+        Some(at("2026-10-21 10:00"))
+    );
 }
 
 #[test]
@@ -63,7 +99,14 @@ fn due_after_the_slot_once_and_missed_runs_after_sleep_run_once() {
     // Never armed: never due (the agent arms a schedule when it first sees it).
     assert!(!due(d, 10, 1, woke, None, None));
     // A schedule set at 15:00 does not scan for the 10:00 slot of the same day.
-    assert!(!due(d, 10, 1, at("2026-10-20 15:01"), None, Some(at("2026-10-20 15:00"))));
+    assert!(!due(
+        d,
+        10,
+        1,
+        at("2026-10-20 15:01"),
+        None,
+        Some(at("2026-10-20 15:00"))
+    ));
 }
 
 #[test]
@@ -91,7 +134,10 @@ fn next_scan_text() {
         next_text(&daily, at("2026-10-20 19:00")).as_deref(),
         Some("Next scan: tomorrow at 18:00")
     );
-    assert_eq!(next_text(&Settings::default(), at("2026-10-20 12:00")), None);
+    assert_eq!(
+        next_text(&Settings::default(), at("2026-10-20 12:00")),
+        None
+    );
 }
 
 fn daily(hour: u8) -> Settings {
@@ -110,7 +156,10 @@ fn line(title: &str, body: &str, sub: Option<&str>) -> String {
         body: body.into(),
         route: None,
     };
-    format!("/usr/bin/osascript {}", notify::osascript_args(&n).join(" "))
+    format!(
+        "/usr/bin/osascript {}",
+        notify::osascript_args(&n).join(" ")
+    )
 }
 
 fn osascripts(env: &Env) -> Vec<String> {
@@ -247,7 +296,11 @@ fn a_notification_that_fails_is_reported() {
     let r = a.check(&m.env, &daily(10), None, at("2026-10-20 10:00"));
     assert!(r.shown.is_empty());
     assert_eq!(r.failed.len(), 1);
-    assert!(r.failed[0].contains("Notifications are off"), "{:?}", r.failed);
+    assert!(
+        r.failed[0].contains("Notifications are off"),
+        "{:?}",
+        r.failed
+    );
 }
 
 fn snapshot(m: &FakeMac, free_percent: f64) -> Snapshot {
@@ -332,7 +385,10 @@ fn menu_lines_and_unknown_values() {
     assert!(menu.info[1].starts_with("Memory: ") && menu.info[1].ends_with(" used"));
     assert_eq!(
         menu.info[2],
-        format!("Free space: {}", cleancraft_core::fsutil::human_size(250_000_000_000))
+        format!(
+            "Free space: {}",
+            cleancraft_core::fsutil::human_size(250_000_000_000)
+        )
     );
 }
 
@@ -361,13 +417,21 @@ fn watcher_notices_are_shown_and_open_their_page_from_the_menu() {
     );
     let mut settings = Settings::default();
     assert_eq!(a.menu(None, &settings).reviews.len(), 1);
-    assert_eq!(a.act(&m.env, &mut settings, MenuAction::Review(0)), Ok(false));
+    assert_eq!(
+        a.act(&m.env, &mut settings, MenuAction::Review(0)),
+        Ok(false)
+    );
     let mut inbox = notify::OpenInbox::default();
     assert_eq!(
-        inbox.poll(&m.env, chrono::Utc::now().timestamp()).as_deref(),
+        inbox
+            .poll(&m.env, chrono::Utc::now().timestamp())
+            .as_deref(),
         Some("uninstall:/Users/tester/.Trash/Editor.app")
     );
-    assert!(a.menu(None, &settings).reviews.is_empty(), "opened, so gone");
+    assert!(
+        a.menu(None, &settings).reviews.is_empty(),
+        "opened, so gone"
+    );
     assert!(a.act(&m.env, &mut settings, MenuAction::Review(0)).is_err());
     assert!(history(&m.env).is_empty());
 }

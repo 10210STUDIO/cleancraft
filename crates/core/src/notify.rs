@@ -283,7 +283,10 @@ mod tests {
             ("cleancraft://open/quick_sweep", Some("quick_sweep")),
             ("cleancraft://quick-sweep", Some("quick-sweep")),
             ("cleancraft:settings", Some("settings")),
-            ("CLEANCRAFT://open/scan:quick_sweep/", Some("scan:quick_sweep")),
+            (
+                "CLEANCRAFT://open/scan:quick_sweep/",
+                Some("scan:quick_sweep"),
+            ),
             ("cleancraft://open?page=history", Some("history")),
             (
                 "cleancraft://open/uninstall:/Applications/My%20App.app",
