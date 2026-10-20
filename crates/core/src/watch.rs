@@ -50,47 +50,12 @@ use crate::startup::{self, Domain};
 // ---------------------------------------------------------------------------------------------
 // What the agent gets
 
-/// A place in the app a notification opens. The agent passes it to the app as
-/// `AppRoute::encode()` and the app reads it back with [`AppRoute::decode`].
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case", tag = "page")]
-pub enum AppRoute {
-    /// The main window as it is.
-    Home,
-    QuickSweep,
-    Health,
-    Settings,
-    /// A module page, by feature (`malware` is Threat Check, `uninstaller` App Remover).
-    Feature {
-        feature: FeatureId,
-    },
-    /// App Remover on the leftovers of an app that is in the Trash: the page builds the plan
-    /// with [`trashed_app_plan`] and shows it for review; nothing is selected beyond what App
-    /// Remover selects for any uninstall.
-    AppRemoverLeftovers {
-        app_name: String,
-        bundle_id: String,
-        /// The app bundle in the Trash (env path).
-        trashed: PathBuf,
-    },
-    /// Threat Check: scan, then select this finding ([`preselect_threat`]) for review.
-    ThreatReview {
-        path: PathBuf,
-    },
-    /// Where CleanCraft explains Full Disk Access and opens System Settings.
-    FullDiskAccess,
-}
-
-impl AppRoute {
-    /// One line of text (JSON) for a command-line argument or a URL query.
-    pub fn encode(&self) -> String {
-        serde_json::to_string(self).unwrap_or_else(|_| "{\"page\":\"home\"}".into())
-    }
-
-    pub fn decode(s: &str) -> Option<AppRoute> {
-        serde_json::from_str(s.trim()).ok()
-    }
-}
+/// Where a notification opens the app: [`crate::route::AppRoute`] (string form with
+/// `to_arg`/`parse` for the agent). Single findings: the trashed app opens
+/// `UninstallApp(<~/.Trash/X.app>)`, which the app builds with [`trashed_app_plan`]; a startup
+/// item or app opens `Scan(Malware)`, and the app ticks the finding with [`preselect_threat`]
+/// using `WatchEvent::paths`; missing Full Disk Access opens `Settings`.
+pub use crate::route::AppRoute;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -106,7 +71,7 @@ pub enum WatchKind {
 }
 
 /// One notification for the agent to show.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WatchEvent {
     /// Stable per item (or per coalesced group): the agent may use it as the notification id.
     pub id: String,
@@ -748,7 +713,7 @@ impl Engine {
             kind: WatchKind::NeedsFullDiskAccess,
             title: "Trash watch needs Full Disk Access".into(),
             body: "macOS keeps the Trash private. Give CleanCraft Full Disk Access in System Settings to get an offer when you drag an app to the Trash.".into(),
-            open: AppRoute::FullDiskAccess,
+            open: AppRoute::Settings,
             time: now,
             paths: vec![self.env.user_trash()],
         })
@@ -1003,11 +968,7 @@ impl Engine {
                 items(count),
                 human_size(bytes)
             ),
-            open: AppRoute::AppRemoverLeftovers {
-                app_name: app.name.clone(),
-                bundle_id: app.bundle_id.clone(),
-                trashed: p.to_path_buf(),
-            },
+            open: AppRoute::UninstallApp(p.to_path_buf()),
             name: app.name,
             count,
             bytes,
@@ -1043,9 +1004,7 @@ impl Engine {
                 reasons.join("; ")
             ),
             title,
-            open: AppRoute::ThreatReview {
-                path: p.to_path_buf(),
-            },
+            open: AppRoute::Scan(FeatureId::Malware),
             name: it.label,
             count: 1,
             bytes: 0,
@@ -1073,9 +1032,7 @@ impl Engine {
             path: p.to_path_buf(),
             title,
             body: format!("{}. Review it in Threat Check.", reasons.join("; ")),
-            open: AppRoute::ThreatReview {
-                path: p.to_path_buf(),
-            },
+            open: AppRoute::Scan(FeatureId::Malware),
             name,
             count: 1,
             bytes: 0,
@@ -1138,24 +1095,18 @@ fn merge(mut v: Vec<Finding>, now: i64) -> Option<WatchEvent> {
                     items(count),
                     human_size(bytes)
                 ),
-                AppRoute::Feature {
-                    feature: FeatureId::Uninstaller,
-                },
+                AppRoute::Scan(FeatureId::Uninstaller),
             )
         }
         WatchKind::StartupItem => (
             format!("{n} new startup items need a look"),
             format!("{}. Review them in Threat Check.", names_list(&names)),
-            AppRoute::Feature {
-                feature: FeatureId::Malware,
-            },
+            AppRoute::Scan(FeatureId::Malware),
         ),
         WatchKind::NewApp => (
             format!("{n} new apps need a look"),
             format!("{}. Review them in Threat Check.", names_list(&names)),
-            AppRoute::Feature {
-                feature: FeatureId::Malware,
-            },
+            AppRoute::Scan(FeatureId::Malware),
         ),
         WatchKind::NeedsFullDiskAccess => return None,
     };
@@ -1191,28 +1142,6 @@ mod tests {
         };
         assert!(day.is_quiet_at(9) && !day.is_quiet_at(17) && !day.is_quiet_at(8));
         assert!(!WatchSettings::default().is_quiet_at(3));
-    }
-
-    #[test]
-    fn routes_round_trip() {
-        for r in [
-            AppRoute::Home,
-            AppRoute::Feature {
-                feature: FeatureId::Malware,
-            },
-            AppRoute::AppRemoverLeftovers {
-                app_name: "Editor".into(),
-                bundle_id: "com.example.Editor".into(),
-                trashed: PathBuf::from("/Users/a/.Trash/Editor.app"),
-            },
-            AppRoute::ThreatReview {
-                path: PathBuf::from("/Library/LaunchAgents/x.plist"),
-            },
-            AppRoute::FullDiskAccess,
-        ] {
-            assert_eq!(AppRoute::decode(&r.encode()), Some(r));
-        }
-        assert_eq!(AppRoute::decode("nonsense"), None);
     }
 
     #[test]
