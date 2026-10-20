@@ -671,7 +671,11 @@ fn c19_c20_app_remover_bar_and_headline() {
     let mac = remover_mac();
     let mut h = harness(&mac);
     go(&mut h, "uninstaller");
-    assert!(has_text(&h, "in 2 apps"), "App Remover list headline");
+    // Safari is part of macOS: hidden from the list by default and said so (lists7).
+    assert!(
+        has_text(&h, "in 1 app (apps only), 1 from macOS hidden"),
+        "App Remover list headline"
+    );
     click(&mut h, "Editor");
     let n = h.state().apps.detail.as_ref().unwrap().selected_count();
     // Shown "4 items selected" after the 24 pt figure; announced with the size.

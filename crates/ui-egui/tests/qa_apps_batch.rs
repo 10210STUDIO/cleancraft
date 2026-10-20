@@ -247,6 +247,9 @@ fn apps_of_macos_cannot_be_selected() {
     let m = mac();
     let mut h = harness(&m.mac);
     go(&mut h);
+    // Apps of macOS are hidden until asked for (lists7); shown, they stay locked.
+    assert!(!has(&h, "Select Safari"));
+    click(&mut h, "Show apps that are part of macOS");
     let cb = h.get_by_label("Select Safari");
     assert!(cb.accesskit_node().is_disabled(), "padlock, not a checkbox");
     cb.click();
@@ -316,7 +319,7 @@ fn keyboard_and_pointer_selection() {
     settle(&mut h);
     assert!(picked(&h).is_empty());
     // Cmd-click toggles; Shift-click ticks the range from it (sorted by size: Viewer,
-    // Editor, Jotter, Safari).
+    // Editor, Jotter).
     let viewer = h.get_by_label("Viewer").rect();
     let jotter = h.get_by_label("Jotter").rect();
     click_at(&mut h, viewer.center(), egui::Modifiers::COMMAND);
@@ -338,7 +341,8 @@ fn keyboard_and_pointer_selection() {
         egui::CursorIcon::PointingHand
     );
     // Sort by size: biggest first, sizes of the whole bundle.
-    let rows: Vec<String> = ["Viewer", "Editor", "Jotter", "Safari"]
+    // (Safari, part of macOS, is hidden from the list by default.)
+    let rows: Vec<String> = ["Viewer", "Editor", "Jotter"]
         .iter()
         .map(|n| n.to_string())
         .collect();

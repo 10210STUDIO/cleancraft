@@ -18,6 +18,7 @@ use crate::app::{CleanApp, Page};
 use crate::icons::Icon;
 use crate::jobs::Job;
 use crate::kit;
+use crate::kit_list;
 use crate::theme::{Weight, font, size, space};
 
 pub struct State {
@@ -606,9 +607,55 @@ fn sentence_case(s: &str) -> String {
 struct ProcAction {
     toggle: bool,
     quit: bool,
+    /// A top list's new sort order: (list name, preferences).
+    sort: Option<(&'static str, cleancraft_core::settings::ListPrefs)>,
+}
+
+const BY_CPU: kit_list::SortKey = kit_list::SortKey {
+    key: "cpu",
+    label: "Sort by CPU",
+    first: "Highest first",
+    second: "Lowest first",
+    descending: true,
+};
+const BY_MEMORY: kit_list::SortKey = kit_list::SortKey {
+    key: "memory",
+    label: "Sort by memory",
+    first: "Highest first",
+    second: "Lowest first",
+    descending: true,
+};
+/// The CPU card's list orders (its own measure first) and its name in the settings.
+pub const CPU_SORTS: [kit_list::SortKey; 3] = [BY_CPU, BY_MEMORY, kit_list::BY_NAME];
+pub const CPU_LIST: &str = "monitor.cpu";
+/// The Memory card's.
+pub const MEMORY_SORTS: [kit_list::SortKey; 3] = [BY_MEMORY, BY_CPU, kit_list::BY_NAME];
+pub const MEMORY_LIST: &str = "monitor.memory";
+
+/// Order a card's top list (which processes are in it stays the card's own measure).
+fn order_groups(
+    groups: &mut [proc_names::Group],
+    sorts: &[kit_list::SortKey],
+    p: &cleancraft_core::settings::ListPrefs,
+) {
+    let (key, rev) = kit_list::sort_of(p, sorts);
+    groups.sort_by(|a, b| {
+        let o = match key.key {
+            "cpu" => b.cpu.total_cmp(&a.cpu),
+            "memory" => b.memory.cmp(&a.memory),
+            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+        };
+        if rev { o.reverse() } else { o }
+    });
 }
 
 fn apply(app: &mut CleanApp, a: ProcAction) {
+    if let Some((list, p)) = a.sort {
+        app.act();
+        if kit_list::store(&mut app.settings, list, p) {
+            app.save_settings();
+        }
+    }
     if a.toggle {
         app.act();
         app.monitor.by_process = !app.monitor.by_process;
@@ -629,7 +676,7 @@ fn proc_rows(
     top: &[AppUse],
 ) -> ProcAction {
     let t = app.t;
-    let groups: Vec<proc_names::Group> = if s.processes.is_empty() || app.monitor.by_process {
+    let mut groups: Vec<proc_names::Group> = if s.processes.is_empty() || app.monitor.by_process {
         let list: Vec<AppUse> = if s.processes.is_empty() {
             top.to_vec()
         } else if by_cpu {
@@ -655,8 +702,29 @@ fn proc_rows(
     } else {
         proc_names::top_groups_by_memory(&s.processes, monitor::TOP_APPS)
     };
+    let (list, sorts) = if by_cpu {
+        (CPU_LIST, &CPU_SORTS)
+    } else {
+        (MEMORY_LIST, &MEMORY_SORTS)
+    };
+    let mut prefs = kit_list::prefs(&app.settings, list);
+    order_groups(&mut groups, sorts, &prefs);
+    let mut sort = None;
     let mut quit = false;
     let mut toggle = false;
+    // The order of the top list, at its top right (its own row: cards are narrow).
+    if groups.len() > 1 {
+        ui.allocate_ui_with_layout(
+            vec2(ui.available_width(), crate::theme::hit::FIELD),
+            egui::Layout::right_to_left(egui::Align::Center),
+            |ui| {
+                if kit_list::sort_menu(ui, list, sorts, &mut prefs) {
+                    sort = Some((list, prefs.clone()));
+                }
+            },
+        );
+        ui.add_space(2.0);
+    }
     for (i, g) in groups.iter().enumerate() {
         let value = if by_cpu {
             pct(g.cpu)
@@ -741,5 +809,5 @@ fn proc_rows(
             }
         });
     }
-    ProcAction { toggle, quit }
+    ProcAction { toggle, quit, sort }
 }

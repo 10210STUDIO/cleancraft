@@ -599,6 +599,8 @@ fn app_remover_shows_real_developers_and_part_of_macos_only_for_system_apps() {
     // The tool sits in the "Apps" section of the sidebar.
     click(&mut h, "Apps");
     click(&mut h, "App Remover");
+    // Apps of macOS are hidden until asked for (lists7).
+    click(&mut h, "Show apps that are part of macOS");
     let row = |name: &str| h.get_by_label(name).rect();
     let info_in_row = |name: &str, dev: &str| {
         let r = row(name);

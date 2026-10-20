@@ -88,6 +88,9 @@ fn list_groups_and_numbers_match_the_disk() {
     // The tool sits in the "Apps" section of the sidebar.
     click(&mut h, "Apps");
     click(&mut h, "App Remover");
+    // Apps of macOS are hidden until asked for (lists7).
+    assert!(!has(&h, "Safari"));
+    click(&mut h, "Show apps that are part of macOS");
     for n in ["Editor", "Viewer", "Safari"] {
         assert!(has(&h, n), "{n} missing");
     }
@@ -258,7 +261,8 @@ fn running_app_is_refused() {
 fn apple_app_is_locked() {
     let m = mac();
     let mut h = harness(&m.mac);
-    click(m_h(&mut h), "Safari");
+    click(m_h(&mut h), "Show apps that are part of macOS");
+    click(&mut h, "Safari");
     assert!(has_text(
         &h,
         "Safari is part of macOS and cannot be removed"

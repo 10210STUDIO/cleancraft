@@ -35,7 +35,9 @@ use crate::app::CleanApp;
 use crate::icons::{self, Icon};
 use crate::jobs::Job;
 use crate::kit;
+use crate::kit_list::{self, Filter};
 use crate::theme::{Weight, font, size, space};
+use cleancraft_core::settings::ListPrefs;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Group {
@@ -107,22 +109,53 @@ impl Group {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum SortBy {
-    #[default]
-    Size,
-    Name,
-    LastOpened,
-}
+/// The app list's name in the settings (its filters and sort order).
+pub const LIST: &str = "apps";
+/// The file groups' list (Leftovers, Installers, Extensions).
+pub const FILES_LIST: &str = "apps.files";
+/// Kept with the app list's filters: apps that are part of macOS are listed too (they are
+/// hidden by default: they cannot be removed).
+pub const SHOW_MACOS: &str = "show_macos";
+/// "Large": an app of at least this size.
+pub const LARGE_APP: u64 = 1_000_000_000;
 
-impl SortBy {
-    fn label(self) -> &'static str {
-        match self {
-            SortBy::Size => "Sort by size",
-            SortBy::Name => "Sort by name",
-            SortBy::LastOpened => "Sort by last opened",
-        }
-    }
+/// The app list's sort orders.
+pub const APP_SORTS: [kit_list::SortKey; 5] = [
+    kit_list::BY_SIZE,
+    kit_list::BY_NAME,
+    kit_list::SortKey {
+        key: "opened",
+        label: "Sort by last opened",
+        first: "Longest unused first",
+        second: "Recently opened first",
+        descending: false,
+    },
+    kit_list::SortKey {
+        key: "developer",
+        label: "Sort by developer",
+        first: "A to Z",
+        second: "Z to A",
+        descending: false,
+    },
+    kit_list::SortKey {
+        key: "installed",
+        label: "Sort by install date",
+        first: "Newest first",
+        second: "Oldest first",
+        descending: true,
+    },
+];
+
+/// What the list knows about each app besides its `AppInfo`, for the filters and sorts:
+/// which run, which have files of their own in the Library, and when each was installed.
+#[derive(Clone, Debug, Default)]
+pub struct Facts {
+    pub running: BTreeSet<PathBuf>,
+    pub leftovers: BTreeSet<PathBuf>,
+    /// Seconds since the epoch: when the bundle was created on this Mac (else last changed).
+    pub installed: BTreeMap<PathBuf, i64>,
+    /// When `running` was last asked.
+    pub running_at: Option<std::time::Instant>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -154,7 +187,13 @@ pub struct State {
     load: Option<Job<Loaded>>,
     pub group: Group,
     pub search: String,
-    pub sort: SortBy,
+    /// The app list's filters and sort (a copy of `Settings::lists["apps"]`, read each frame).
+    pub prefs: ListPrefs,
+    /// The same for the file groups.
+    pub files_prefs: ListPrefs,
+    /// Running, has files, install date: filled in the background after the list loads.
+    pub facts: Facts,
+    facts_job: Option<Job<Facts>>,
     /// The app whose detail is open.
     pub selected: Option<PathBuf>,
     /// Its uninstall plan (checkboxes).
@@ -166,6 +205,8 @@ pub struct State {
     pub updates: Option<UpdatesReport>,
     upd_job: Option<Job<UpdatesReport>>,
     pub notes_open: BTreeSet<PathBuf>,
+    /// App Updates' search.
+    pub upd_search: String,
     /// The open app is running (its files are locked until it quits).
     pub running: bool,
     /// What of it runs: the app, its helpers, agents and services (apps4's app_quit).
@@ -254,6 +295,80 @@ impl State {
 
 fn now() -> i64 {
     chrono::Utc::now().timestamp()
+}
+
+/// The apps of `list` that run now (one look at the running processes).
+fn running_set(env: &cleancraft_core::Env, list: &[AppInfo]) -> BTreeSet<PathBuf> {
+    let running: Vec<PathBuf> = env
+        .sys
+        .running_apps()
+        .into_iter()
+        .filter_map(|r| r.path)
+        .map(|ap| {
+            if env.is_fake() {
+                env.sys_path(&ap.to_string_lossy())
+            } else {
+                ap
+            }
+        })
+        .collect();
+    list.iter()
+        .filter(|a| running.iter().any(|r| r.starts_with(&a.path)))
+        .map(|a| a.path.clone())
+        .collect()
+}
+
+/// What the filters and sorts need beyond the list (slow part: each app's Library files).
+pub fn facts(env: &cleancraft_core::Env, list: &[AppInfo]) -> Facts {
+    let installed = list
+        .iter()
+        .filter_map(|a| {
+            let m = std::fs::metadata(&a.path).ok()?;
+            let t = m.created().or_else(|_| m.modified()).ok()?;
+            let secs = t.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs() as i64;
+            Some((a.path.clone(), secs))
+        })
+        .collect();
+    let leftovers = list
+        .iter()
+        .filter(|a| !a.apple)
+        .filter(|a| {
+            uninstaller::find_leftovers(env, a, list)
+                .iter()
+                .any(|(_, _, c)| *c != uninstaller::Confidence::Shared)
+        })
+        .map(|a| a.path.clone())
+        .collect();
+    Facts {
+        running: running_set(env, list),
+        leftovers,
+        installed,
+        running_at: Some(std::time::Instant::now()),
+    }
+}
+
+fn start_facts(app: &mut CleanApp) {
+    let Some(list) = app.apps.list.clone() else {
+        return;
+    };
+    let env = app.env.clone();
+    app.apps.facts_job = Some(Job::start(app.sync, move |_| facts(&env, &list)));
+}
+
+/// Look again at which apps run, at most every few seconds while the list shows.
+fn refresh_running(app: &mut CleanApp) {
+    let due = app
+        .apps
+        .facts
+        .running_at
+        .is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(5));
+    if !due || app.apps.facts_job.is_some() {
+        return;
+    }
+    if let Some(list) = &app.apps.list {
+        app.apps.facts.running = running_set(&app.env, list);
+        app.apps.facts.running_at = Some(std::time::Instant::now());
+    }
 }
 
 // ---------- work ----------
@@ -468,10 +583,21 @@ pub fn poll(app: &mut CleanApp) -> bool {
             // Leftovers may have changed: the ticked apps are measured again.
             st.pick_sizes.clear();
             measure_picked(app);
+            start_facts(app);
             return poll(app);
         } else if job.is_dead() {
             st.load = None;
             st.error = Some("Looking at the apps stopped unexpectedly.".into());
+        } else {
+            busy = true;
+        }
+    }
+    if let Some(job) = st.facts_job.as_mut() {
+        if let Some(f) = job.poll() {
+            st.facts_job = None;
+            st.facts = f;
+        } else if job.is_dead() {
+            st.facts_job = None;
         } else {
             busy = true;
         }
@@ -1078,53 +1204,221 @@ fn remover_page(app: &mut CleanApp, ui: &mut Ui) {
 /// list (Settings): CleanCraft does not offer to remove what the user asked it to leave alone.
 fn visible_apps(st: &State, settings: &cleancraft_core::Settings) -> Vec<AppInfo> {
     let now = now();
-    let q = st.search.trim().to_lowercase();
+    let q = kit_list::query(&st.search);
+    let filters = app_filters(st, settings);
     let mut v: Vec<AppInfo> = st
         .list
         .iter()
         .flatten()
-        .filter(|a| st.group.has(a, now))
+        .filter(|a| st.group.has(a, now) && listed(st, a))
         .filter(|a| !settings.is_ignored(&a.path))
         .filter(|a| q.is_empty() || matches_search(a, &q))
+        .filter(|a| kit_list::passes(&st.prefs, &filters, |k| app_has(st, a, k, now)))
         .cloned()
         .collect();
-    match st.sort {
-        SortBy::Size => v.sort_by_key(|a| std::cmp::Reverse(a.size)),
-        SortBy::Name => v.sort_by_key(|a| a.name.to_lowercase()),
-        // Longest unopened first; unknown dates last.
-        SortBy::LastOpened => v.sort_by_key(|a| a.last_used.unwrap_or(i64::MAX)),
-    }
+    sort_apps(st, &mut v);
     v
+}
+
+fn hit_field() -> f32 {
+    crate::theme::hit::FIELD
+}
+
+fn macos_line(n_mac: usize, showing: bool) -> String {
+    let apps = if n_mac == 1 { "app" } else { "apps" };
+    if showing {
+        format!("{n_mac} {apps} of macOS shown, locked.")
+    } else {
+        format!("{n_mac} macOS {apps} hidden")
+    }
+}
+
+const SHOW_MACOS_LABEL: &str = "Show apps that are part of macOS";
+
+/// The room the macOS apps line and its switch take.
+fn macos_toggle_width(ui: &Ui, n_mac: usize, showing: bool) -> f32 {
+    let t = kit::tokens(ui.ctx());
+    let line = kit::galley(
+        ui,
+        &macos_line(n_mac, showing),
+        font(size::FOOTNOTE, Weight::Regular),
+        t.text,
+    )
+    .size()
+    .x;
+    let check = kit::galley(
+        ui,
+        SHOW_MACOS_LABEL,
+        font(size::CALLOUT, Weight::Medium),
+        t.text,
+    )
+    .size()
+    .x;
+    line + space::S + check + 32.0
+}
+
+/// "2 macOS apps hidden" and the switch to show them. True when it was switched.
+fn macos_toggle(ui: &mut Ui, t: &crate::theme::Tokens, n_mac: usize, showing: bool) -> bool {
+    ui.spacing_mut().item_spacing.x = space::S;
+    kit::dim(ui, t, &macos_line(n_mac, showing));
+    let mut on = showing;
+    kit::check_text(ui, t, &mut on, SHOW_MACOS_LABEL).changed()
+}
+
+/// Apps that are part of macOS are listed only when the person asked for them.
+fn listed(st: &State, a: &AppInfo) -> bool {
+    !a.apple || show_macos(st)
+}
+
+fn show_macos(st: &State) -> bool {
+    kit_list::on(&st.prefs, SHOW_MACOS)
+}
+
+/// Does app `a` match the filter `key`?
+fn app_has(st: &State, a: &AppInfo, key: &str, now: i64) -> bool {
+    match key {
+        "app_store" => a.store == Store::AppStore,
+        "setapp" => a.store == Store::Setapp,
+        "other" => a.store == Store::Other,
+        "unused" => a.unused(now) && !a.apple,
+        "running" => st.facts.running.contains(&a.path),
+        "large" => a.size >= LARGE_APP,
+        "leftovers" => st.facts.leftovers.contains(&a.path),
+        "selected" => st.picked.contains(&a.path),
+        _ => false,
+    }
+}
+
+/// The app list's filters, each with how many apps of the open group it matches.
+fn app_filters(st: &State, settings: &cleancraft_core::Settings) -> Vec<Filter> {
+    let now = now();
+    let pool: Vec<&AppInfo> = st
+        .list
+        .iter()
+        .flatten()
+        .filter(|a| st.group.has(a, now) && listed(st, a) && !settings.is_ignored(&a.path))
+        .collect();
+    let n = |k: &str| pool.iter().filter(|a| app_has(st, a, k, now)).count();
+    vec![
+        Filter::any("Source", "app_store", "App Store", n("app_store")),
+        Filter::any("Source", "setapp", "Setapp", n("setapp")),
+        Filter::any("Source", "other", "Other sources", n("other")),
+        Filter::only("Show only", "unused", "Unused", n("unused")),
+        Filter::only("Show only", "running", "Running", n("running")),
+        Filter::only("Show only", "large", "Large (1 GB or more)", n("large")),
+        Filter::only(
+            "Show only",
+            "leftovers",
+            "Has files in Library",
+            n("leftovers"),
+        ),
+        Filter::only("Show only", "selected", "Selected", n("selected")),
+    ]
+}
+
+/// A date compare that keeps unknown dates last in either direction.
+fn by_date(a: Option<i64>, b: Option<i64>, desc: bool, rev: bool) -> std::cmp::Ordering {
+    use std::cmp::Ordering::*;
+    match (a, b) {
+        (Some(x), Some(y)) => {
+            let o = if desc { y.cmp(&x) } else { x.cmp(&y) };
+            if rev { o.reverse() } else { o }
+        }
+        (Some(_), None) => Less,
+        (None, Some(_)) => Greater,
+        (None, None) => Equal,
+    }
+}
+
+fn sort_apps(st: &State, v: &mut [AppInfo]) {
+    let (key, rev) = kit_list::sort_of(&st.prefs, &APP_SORTS);
+    let flip = |o: std::cmp::Ordering| if rev { o.reverse() } else { o };
+    let name = |a: &AppInfo| a.name.to_lowercase();
+    v.sort_by(|a, b| {
+        let o = match key.key {
+            "name" => flip(name(a).cmp(&name(b))),
+            // Longest unopened first; unknown dates last.
+            "opened" => by_date(a.last_used, b.last_used, false, rev),
+            "developer" => {
+                // Apps with no known developer go last.
+                match (a.vendor.is_empty(), b.vendor.is_empty()) {
+                    (false, true) => std::cmp::Ordering::Less,
+                    (true, false) => std::cmp::Ordering::Greater,
+                    _ => flip(a.vendor.to_lowercase().cmp(&b.vendor.to_lowercase())),
+                }
+            }
+            "installed" => by_date(
+                st.facts.installed.get(&a.path).copied(),
+                st.facts.installed.get(&b.path).copied(),
+                true,
+                rev,
+            ),
+            _ => flip(b.size.cmp(&a.size)),
+        };
+        o.then_with(|| name(a).cmp(&name(b)))
+    });
+}
+
+/// Does file item `it` of a file group match the filter `key`?
+fn file_has(it: &cleancraft_core::plan::Item, key: &str) -> bool {
+    match key {
+        "selected" => it.selected,
+        "unselected" => !it.selected && it.locked.is_none(),
+        "locked" => it.locked.is_some(),
+        _ => false,
+    }
+}
+
+/// The file groups' filters, counted in the open group.
+fn file_filters(st: &State) -> Vec<Filter> {
+    let (Some(plan), Some(cat)) = (&st.extras, st.group.category()) else {
+        return Vec::new();
+    };
+    let items: Vec<_> = plan.items.iter().filter(|i| i.category == cat).collect();
+    let n = |k: &str| items.iter().filter(|i| file_has(i, k)).count();
+    vec![
+        Filter::any("Show", "selected", "Selected", n("selected")),
+        Filter::any("Show", "unselected", "Not selected", n("unselected")),
+        Filter::any("Show", "locked", "Locked", n("locked")),
+    ]
 }
 
 fn visible_files(st: &State) -> Vec<usize> {
     let (Some(plan), Some(cat)) = (&st.extras, st.group.category()) else {
         return Vec::new();
     };
-    let q = st.search.trim().to_lowercase();
+    let q = kit_list::query(&st.search);
+    let filters = file_filters(st);
     let mut v: Vec<usize> = plan
         .items
         .iter()
         .filter(|i| i.category == cat)
         .filter(|i| {
-            q.is_empty()
-                || i.path.to_string_lossy().to_lowercase().contains(&q)
-                || i.reason.to_lowercase().contains(&q)
+            kit_list::matches(&q, &[&i.path.to_string_lossy(), &i.reason])
+                && kit_list::passes(&st.files_prefs, &filters, |k| file_has(i, k))
         })
         .map(|i| i.id)
         .collect();
-    match st.sort {
-        SortBy::Name => v.sort_by_key(|i| {
-            plan.items[*i]
-                .path
-                .file_name()
-                .map(|n| n.to_string_lossy().to_lowercase())
-                .unwrap_or_default()
-        }),
-        _ => v.sort_by(|a, b| plan.items[*b].size.cmp(&plan.items[*a].size)),
-    }
+    let (key, rev) = kit_list::sort_of(&st.files_prefs, &FILE_SORTS);
+    let name = |i: usize| {
+        plan.items[i]
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_lowercase())
+            .unwrap_or_default()
+    };
+    v.sort_by(|a, b| {
+        let o = match key.key {
+            "name" => name(*a).cmp(&name(*b)),
+            _ => plan.items[*b].size.cmp(&plan.items[*a].size),
+        };
+        if rev { o.reverse() } else { o }
+    });
     v
 }
+
+/// The file groups' sort orders.
+pub const FILE_SORTS: [kit_list::SortKey; 2] = [kit_list::BY_SIZE, kit_list::BY_NAME];
 
 fn group_count(st: &State, g: Group) -> (usize, u64) {
     if let Some(cat) = g.category() {
@@ -1138,20 +1432,34 @@ fn group_count(st: &State, g: Group) -> (usize, u64) {
     st.list
         .iter()
         .flatten()
-        .filter(|a| g.has(a, now))
+        .filter(|a| g.has(a, now) && listed(st, a))
         .fold((0, 0), |(n, s), a| (n + 1, s + a.size))
 }
 
+/// Apps that are part of macOS and hidden from the list (0 while they are shown).
+fn macos_hidden(st: &State) -> usize {
+    if show_macos(st) {
+        return 0;
+    }
+    st.list.iter().flatten().filter(|a| a.apple).count()
+}
+
 /// The apps of group `g` that can be ticked (not part of macOS, not on the ignore list).
-/// While searching, only the apps shown.
+/// While searching or filtering the open group, only the apps shown. Never an app that is
+/// part of macOS, shown or not.
 fn group_apps(st: &State, settings: &cleancraft_core::Settings, g: Group) -> Vec<PathBuf> {
     let now = now();
-    let q = st.search.trim().to_lowercase();
+    let q = kit_list::query(&st.search);
+    let filters = app_filters(st, settings);
     st.list
         .iter()
         .flatten()
         .filter(|a| g.has(a, now) && pickable(a) && !settings.is_ignored(&a.path))
-        .filter(|a| q.is_empty() || st.group != g || matches_search(a, &q))
+        .filter(|a| {
+            st.group != g
+                || ((q.is_empty() || matches_search(a, &q))
+                    && kit_list::passes(&st.prefs, &filters, |k| app_has(st, a, k, now)))
+        })
         .map(|a| a.path.clone())
         .collect()
 }
@@ -1250,11 +1558,32 @@ fn confirm_select_all(app: &mut CleanApp, ui: &mut Ui) {
 fn apps_bottom_bar(app: &mut CleanApp, ui: &mut Ui) {
     let t = app.t;
     let n = app.apps.picked.len();
-    let apps_text = if n == 1 {
-        "1 app selected".to_string()
-    } else {
-        format!("{n} apps selected")
+    // Ticked apps the search, filters or group do not show still go: say so.
+    // (The group column only navigates: a ticked app in another group is not hidden.)
+    let hidden = {
+        let st = &app.apps;
+        let q = kit_list::query(&st.search);
+        let filters = app_filters(st, &app.settings);
+        let now = now();
+        st.list
+            .iter()
+            .flatten()
+            .filter(|a| st.picked.contains(&a.path))
+            .filter(|a| {
+                !listed(st, a)
+                    || !(q.is_empty() || matches_search(a, &q))
+                    || !kit_list::passes(&st.prefs, &filters, |k| app_has(st, a, k, now))
+            })
+            .count()
     };
+    let apps_text = kit_list::selected_text(
+        &if n == 1 {
+            "1 app selected".to_string()
+        } else {
+            format!("{n} apps selected")
+        },
+        hidden,
+    );
     let size = picked_size(&app.apps);
     let (figure, full) = match size {
         Some(s) => (
@@ -1295,7 +1624,12 @@ fn browse(app: &mut CleanApp, ui: &mut Ui) {
     let t = app.t;
     // The headline every results page has (REVIEW-C C20): what the apps take, how many,
     // and Scan Again on the right.
+    // The remembered filters and sort (Settings is the one place they live).
+    app.apps.prefs = kit_list::prefs(&app.settings, LIST);
+    app.apps.files_prefs = kit_list::prefs(&app.settings, FILES_LIST);
+    refresh_running(app);
     let (n_apps, apps_size) = group_count(&app.apps, Group::All);
+    let n_mac_hidden = macos_hidden(&app.apps);
     let loading = app.apps.load.is_some();
     ui.horizontal_top(|ui| {
         kit::display_count(ui, &t, "apps-total", apps_size);
@@ -1304,10 +1638,17 @@ fn browse(app: &mut CleanApp, ui: &mut Ui) {
             ui.add_space(kit::baseline_offset(size::DISPLAY, size::TITLE3));
             ui.label(
                 // The apps themselves; their leftovers are measured when ticked (U7-18).
-                RichText::new(if n_apps == 1 {
-                    "in 1 app (apps only)".to_string()
-                } else {
-                    format!("in {n_apps} apps (apps only)")
+                RichText::new({
+                    let apps = if n_apps == 1 {
+                        "in 1 app (apps only)".to_string()
+                    } else {
+                        format!("in {n_apps} apps (apps only)")
+                    };
+                    if n_mac_hidden > 0 {
+                        format!("{apps}, {n_mac_hidden} from macOS hidden")
+                    } else {
+                        apps
+                    }
                 })
                 .font(font(size::TITLE3, Weight::Medium))
                 .color(t.text_dim),
@@ -1330,13 +1671,44 @@ fn browse(app: &mut CleanApp, ui: &mut Ui) {
         );
     });
     ui.add_space(space::M);
-    // Toolbar.
+    // Toolbar: search, Filter, Sort (the file groups have their own filters).
+    let file_group = app.apps.group.category().is_some();
+    let list = if file_group { FILES_LIST } else { LIST };
+    let filters = if file_group {
+        file_filters(&app.apps)
+    } else {
+        app_filters(&app.apps, &app.settings)
+    };
+    let sorts: &[kit_list::SortKey] = if file_group { &FILE_SORTS } else { &APP_SORTS };
+    let mut prefs = if file_group {
+        app.apps.files_prefs.clone()
+    } else {
+        app.apps.prefs.clone()
+    };
+    let mut prefs_changed = false;
+    // Apps of macOS in the open group (hidden unless asked for).
+    let n_mac = if file_group {
+        0
+    } else {
+        app.apps
+            .list
+            .iter()
+            .flatten()
+            .filter(|a| a.apple && app.apps.group.has(a, now()))
+            .count()
+    };
+    let mut mac_inline = false;
     ui.horizontal(|ui| {
-        let r = kit::search_field(ui, &t, &mut app.apps.search, "Search apps", 240.0);
-        r.widget_info(|| {
-            egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Search apps")
-        });
-        if r.changed() {
+        ui.spacing_mut().item_spacing.x = space::S;
+        let (r, changed) = kit_list::search(
+            ui,
+            &t,
+            &mut app.apps.search,
+            "Search apps",
+            "Search apps",
+            240.0,
+        );
+        if changed {
             app.act();
         }
         if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
@@ -1349,22 +1721,93 @@ fn browse(app: &mut CleanApp, ui: &mut Ui) {
                 return;
             }
         }
-        let mut sort = app.apps.sort;
-        let choices: Vec<(SortBy, &str)> = [SortBy::Size, SortBy::Name, SortBy::LastOpened]
-            .into_iter()
-            .map(|s| (s, s.label()))
-            .collect();
-        kit::sort_menu(ui, "apps-sort", &mut sort, &choices);
-        if sort != app.apps.sort {
+        if kit_list::menus(ui, &t, list, &filters, sorts, &mut prefs) {
             app.act();
-            app.apps.sort = sort;
+            prefs_changed = true;
+        }
+        // The macOS apps switch at the end of the toolbar when it fits, else on its own
+        // line under it.
+        if n_mac > 0 {
+            let showing = kit_list::on(&prefs, SHOW_MACOS);
+            let need = macos_toggle_width(ui, n_mac, showing) + space::L;
+            if ui.available_width() >= need {
+                mac_inline = true;
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    // Laid out right to left: drawn in reading order by a child.
+                    ui.allocate_ui_with_layout(
+                        vec2(need - space::L, hit_field()),
+                        Layout::left_to_right(Align::Center),
+                        |ui| {
+                            if macos_toggle(ui, &t, n_mac, showing) {
+                                app.act();
+                                kit_list::toggle(&mut prefs, SHOW_MACOS);
+                                prefs_changed = true;
+                            }
+                        },
+                    );
+                });
+            }
         }
     });
     if app.apps.selected.is_some() {
         return;
     }
+    // What the search and filters hide, and the apps of macOS left out of the list.
+    let (shown, total) = if file_group {
+        let cat = app.apps.group.category().unwrap_or_default();
+        (
+            visible_files(&app.apps).len(),
+            app.apps
+                .extras
+                .as_ref()
+                .map(|p| p.category_count(cat))
+                .unwrap_or(0),
+        )
+    } else {
+        (
+            visible_apps(&app.apps, &app.settings).len(),
+            group_count(&app.apps, app.apps.group).0,
+        )
+    };
+    let noun = if file_group {
+        ("item", "items")
+    } else {
+        ("app", "apps")
+    };
+    let st = kit_list::status(
+        ui,
+        &t,
+        shown,
+        total,
+        noun,
+        &filters,
+        &mut prefs,
+        &mut app.apps.search,
+    );
+    if st.any() {
+        app.act();
+        prefs_changed |= st.prefs;
+    }
+    if !file_group && n_mac > 0 && !mac_inline {
+        ui.horizontal(|ui| {
+            if macos_toggle(ui, &t, n_mac, kit_list::on(&prefs, SHOW_MACOS)) {
+                app.act();
+                kit_list::toggle(&mut prefs, SHOW_MACOS);
+                prefs_changed = true;
+            }
+        });
+    }
+    if prefs_changed {
+        if kit_list::store(&mut app.settings, list, prefs.clone()) {
+            app.save_settings();
+        }
+        if file_group {
+            app.apps.files_prefs = prefs;
+        } else {
+            app.apps.prefs = prefs;
+        }
+    }
     ui.add_space(8.0);
-    let file_group = app.apps.group.category().is_some();
     if file_group {
         files_bottom_bar(app, ui);
     } else if !app.apps.picked.is_empty() {
@@ -1477,16 +1920,22 @@ fn apps_list(app: &mut CleanApp, ui: &mut Ui, h: f32) {
     let rows = visible_apps(&app.apps, &app.settings);
     if rows.is_empty() {
         let searching = !app.apps.search.trim().is_empty();
+        let filtering =
+            kit_list::filtering(&app.apps.prefs, &app_filters(&app.apps, &app.settings));
         empty_state(
             ui,
             &t,
             Icon::Search,
-            if searching {
+            if filtering {
+                "No app matches these filters"
+            } else if searching {
                 "No app matches your search"
             } else {
                 "No apps here"
             },
-            if searching {
+            if filtering {
+                "No app in this group passes the filters. Clear Filters shows every app again."
+            } else if searching {
                 "Search looks at app names, developers and bundle ids."
             } else if app.apps.group == Group::Unused {
                 "Every app was opened in the last six months."
@@ -1985,13 +2434,38 @@ fn files_bottom_bar(app: &mut CleanApp, ui: &mut Ui) {
         .as_ref()
         .map(|p| (p.selected_count(), p.selected_size()))
         .unwrap_or((0, 0));
+    // Selected files the search, filters or group do not show still move: say so.
+    // (The group column only navigates: a ticked file of another group is not hidden.)
+    let hidden = {
+        let st = &app.apps;
+        let q = kit_list::query(&st.search);
+        let defs = [
+            Filter::any("Show", "selected", "", 0),
+            Filter::any("Show", "unselected", "", 0),
+            Filter::any("Show", "locked", "", 0),
+        ];
+        st.extras
+            .as_ref()
+            .map(|p| {
+                p.items
+                    .iter()
+                    .filter(|i| i.selected)
+                    .filter(|i| {
+                        !kit_list::matches(&q, &[&i.path.to_string_lossy(), &i.reason])
+                            || !kit_list::passes(&st.files_prefs, &defs, |k| file_has(i, k))
+                    })
+                    .count()
+            })
+            .unwrap_or(0)
+    };
+    let note = kit_list::hidden_note(hidden);
     kit::bottom_bar(ui, &t, egui::Id::new("apps-files-bottom"), |ui| {
         kit::bar_figure(
             ui,
             &t,
             &human_size(size),
-            &format!("{} selected", cleancraft_core::fsutil::items(n)),
-            &format!("{n} selected, {}", human_size(size)),
+            &format!("{} selected{note}", cleancraft_core::fsutil::items(n)),
+            &format!("{n} selected{note}, {}", human_size(size)),
             false,
         );
         ui.add_space(space::M);
@@ -3977,10 +4451,14 @@ fn updates_page(app: &mut CleanApp, ui: &mut Ui) {
         }
         return;
     };
-    let avail: Vec<UpdateInfo> = r.available().cloned().collect();
+    let all_avail: Vec<UpdateInfo> = r.available().cloned().collect();
+    let avail_total = all_avail.len();
+    let mut prefs = kit_list::prefs(&app.settings, UPDATES_LIST);
+    let filters = update_filters(&all_avail);
+    let avail = visible_updates(app, &all_avail, &prefs, &filters);
     ui.horizontal(|ui| {
         ui.label(
-            RichText::new(match avail.len() {
+            RichText::new(match avail_total {
                 0 => "All checked apps are up to date".to_string(),
                 1 => "1 update available".to_string(),
                 n => format!("{n} updates available"),
@@ -3997,6 +4475,44 @@ fn updates_page(app: &mut CleanApp, ui: &mut Ui) {
         });
     });
     ui.add_space(space::S);
+    if avail_total > 1 {
+        let mut changed = false;
+        let mut search = std::mem::take(&mut app.apps.upd_search);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = space::S;
+            let (_, ch) = kit_list::search(
+                ui,
+                &t,
+                &mut search,
+                "Search updates",
+                "Search updates",
+                240.0,
+            );
+            if ch {
+                app.act();
+            }
+            changed |= kit_list::menus(ui, &t, UPDATES_LIST, &filters, &UPDATE_SORTS, &mut prefs);
+        });
+        let st = kit_list::status(
+            ui,
+            &t,
+            avail.len(),
+            avail_total,
+            ("update", "updates"),
+            &filters,
+            &mut prefs,
+            &mut search,
+        );
+        changed |= st.prefs;
+        app.apps.upd_search = search;
+        if changed {
+            app.act();
+            if kit_list::store(&mut app.settings, UPDATES_LIST, prefs) {
+                app.save_settings();
+            }
+        }
+        ui.add_space(space::S);
+    }
     let h = ui.available_height() - 8.0;
     let fade_out = egui::ScrollArea::vertical()
         .id_salt("updates")
@@ -4125,6 +4641,61 @@ fn updates_page(app: &mut CleanApp, ui: &mut Ui) {
             }
         });
     kit::scroll_fade_page(ui, &fade_out, &t);
+}
+
+/// App Updates' list in the settings.
+pub const UPDATES_LIST: &str = "updates";
+/// App Updates' sort orders.
+pub const UPDATE_SORTS: [kit_list::SortKey; 2] = [kit_list::BY_NAME, kit_list::BY_SIZE];
+
+fn update_has(u: &UpdateInfo, key: &str) -> bool {
+    match key {
+        "app_store" => u.source == Source::AppStore,
+        "developer" => u.source == Source::Sparkle,
+        _ => false,
+    }
+}
+
+fn update_filters(all: &[UpdateInfo]) -> Vec<Filter> {
+    let n = |k: &str| all.iter().filter(|u| update_has(u, k)).count();
+    vec![
+        Filter::any("Source", "app_store", "App Store", n("app_store")),
+        Filter::any("Source", "developer", "From the developer", n("developer")),
+    ]
+}
+
+/// The updates shown: searched, filtered and sorted (size: the installed app's size).
+fn visible_updates(
+    app: &CleanApp,
+    all: &[UpdateInfo],
+    prefs: &ListPrefs,
+    filters: &[Filter],
+) -> Vec<UpdateInfo> {
+    let q = kit_list::query(&app.apps.upd_search);
+    let size_of = |u: &UpdateInfo| {
+        app.apps
+            .list
+            .iter()
+            .flatten()
+            .find(|a| a.path == u.app)
+            .map(|a| a.size)
+            .unwrap_or(0)
+    };
+    let mut v: Vec<UpdateInfo> = all
+        .iter()
+        .filter(|u| kit_list::matches(&q, &[&u.name, &u.bundle_id]))
+        .filter(|u| kit_list::passes(prefs, filters, |k| update_has(u, k)))
+        .cloned()
+        .collect();
+    let (key, rev) = kit_list::sort_of(prefs, &UPDATE_SORTS);
+    v.sort_by(|a, b| {
+        let o = match key.key {
+            "size" => size_of(b).cmp(&size_of(a)),
+            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+        };
+        if rev { o.reverse() } else { o }
+    });
+    v
 }
 
 fn update_row(app: &mut CleanApp, ui: &mut Ui, u: &UpdateInfo) {

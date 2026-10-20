@@ -18,7 +18,9 @@ use crate::app::CleanApp;
 use crate::icons::{self, Icon};
 use crate::jobs::Job;
 use crate::kit;
+use crate::kit_list::{self, Filter, SortKey};
 use crate::theme::{Weight, font, hit, icon as isz, size, space};
+use cleancraft_core::settings::ListPrefs;
 
 #[derive(Default)]
 pub enum Phase {
@@ -53,6 +55,214 @@ pub struct PlanState {
     pub cancel: Arc<AtomicBool>,
     /// Files came back since this list was made (an Undo): scan again when shown.
     pub stale: bool,
+    /// The list's filters and sort (a copy of `Settings::lists["plan.<module>"]`, read each
+    /// frame).
+    pub prefs: ListPrefs,
+    /// The home folder, for the Location filter.
+    pub home: std::path::PathBuf,
+    /// Each item's kind and location (by item id), worked out once per list.
+    facets: Facets,
+}
+
+/// Each item's (kind, location), for the plan with this id and item count.
+#[derive(Default)]
+struct Facets {
+    of: (String, usize),
+    items: Vec<(&'static str, String)>,
+}
+
+impl PlanState {
+    /// Work out each item's kind and location when the list changed.
+    pub fn refresh_facets(&mut self) {
+        let Some(plan) = &self.plan else {
+            return;
+        };
+        let of = (plan.id.clone(), plan.items.len());
+        if self.facets.of == of && self.facets.items.len() == plan.items.len() {
+            return;
+        }
+        let file = by_file(plan.feature);
+        self.facets.items = plan
+            .items
+            .iter()
+            .map(|i| {
+                if file {
+                    (
+                        features::large_old::item_kind(&i.path),
+                        location(&self.home, &i.path),
+                    )
+                } else {
+                    ("", String::new())
+                }
+            })
+            .collect();
+        self.facets.of = of;
+    }
+
+    fn facet(&self, it: &cleancraft_core::plan::Item) -> (&'static str, String) {
+        match self.facets.items.get(it.id) {
+            Some(f)
+                if self.facets.items.len() == self.plan.as_ref().map_or(0, |p| p.items.len()) =>
+            {
+                f.clone()
+            }
+            _ => (
+                features::large_old::item_kind(&it.path),
+                location(&self.home, &it.path),
+            ),
+        }
+    }
+}
+
+/// A results list's name in the settings: "plan.system_junk".
+pub fn list_id(f: FeatureId) -> String {
+    format!("plan.{}", f.as_str())
+}
+
+/// Modules whose items are your own files: these filter by kind and by location.
+fn by_file(f: Option<FeatureId>) -> bool {
+    matches!(
+        f,
+        Some(FeatureId::LargeOldFiles | FeatureId::Duplicates | FeatureId::SimilarPhotos)
+    )
+}
+
+/// The folder an item is in, for the Location filter: the folder of your home it is in
+/// ("Downloads"), the disk for an external one, else "Elsewhere".
+pub fn location(home: &std::path::Path, p: &std::path::Path) -> String {
+    if let Ok(rel) = p.strip_prefix(home) {
+        let mut c = rel.components();
+        return match (c.next(), c.next()) {
+            (Some(first), Some(_)) => first.as_os_str().to_string_lossy().into_owned(),
+            _ => "Home".to_string(),
+        };
+    }
+    let parts: Vec<String> = p
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .collect();
+    if let Some(k) = parts.iter().position(|c| c == "Volumes")
+        && let Some(name) = parts.get(k + 1)
+    {
+        return name.clone();
+    }
+    "Elsewhere".to_string()
+}
+
+/// Does item `it` match the filter `key`?
+fn item_has(st: &PlanState, it: &cleancraft_core::plan::Item, key: &str) -> bool {
+    match key {
+        "selected" => it.selected,
+        "unselected" => !it.selected && it.locked.is_none(),
+        "locked" => it.locked.is_some(),
+        k => {
+            if let Some(kind) = k.strip_prefix("kind:") {
+                st.facet(it).0 == kind
+            } else if let Some(loc) = k.strip_prefix("loc:") {
+                st.facet(it).1 == loc
+            } else {
+                false
+            }
+        }
+    }
+}
+
+/// A results list's filters with how many items each matches: selection state, and for
+/// your own files their kind and location.
+pub fn plan_filters(st: &PlanState) -> Vec<Filter> {
+    let Some(plan) = &st.plan else {
+        return Vec::new();
+    };
+    let n = |k: &str| plan.items.iter().filter(|i| item_has(st, i, k)).count();
+    let mut v = Vec::new();
+    if plan.items.iter().any(|i| i.locked.is_none()) {
+        v.push(Filter::any("Show", "selected", "Selected", n("selected")));
+        v.push(Filter::any(
+            "Show",
+            "unselected",
+            "Not selected",
+            n("unselected"),
+        ));
+    }
+    // Locked items are worth a filter only beside items that can be ticked.
+    if !v.is_empty() && plan.items.iter().any(|i| i.locked.is_some()) {
+        v.push(Filter::any("Show", "locked", "Locked", n("locked")));
+    }
+    if by_file(plan.feature) {
+        let facets: Vec<(&'static str, String)> = plan.items.iter().map(|i| st.facet(i)).collect();
+        let mut kinds: Vec<&'static str> = facets.iter().map(|f| f.0).collect();
+        kinds.sort_by_key(|k| features::large_old::kind_title(k));
+        kinds.dedup();
+        for k in kinds {
+            let c = facets.iter().filter(|f| f.0 == k).count();
+            v.push(Filter::any(
+                "Kind",
+                format!("kind:{k}"),
+                features::large_old::kind_title(k),
+                c,
+            ));
+        }
+        let mut locs: Vec<&String> = facets.iter().map(|f| &f.1).collect();
+        locs.sort();
+        locs.dedup();
+        for l in locs {
+            let c = facets.iter().filter(|f| &f.1 == l).count();
+            // Home folders read as paths ("~/Movies"), so they never look like a kind.
+            let label = match l.as_str() {
+                "Home" => "~ (home folder)".to_string(),
+                "Elsewhere" => l.clone(),
+                _ if plan
+                    .items
+                    .iter()
+                    .any(|i| i.path.starts_with(st.home.join(l))) =>
+                {
+                    format!("~/{l}")
+                }
+                _ => l.clone(),
+            };
+            v.push(Filter::any("Location", format!("loc:{l}"), label, c));
+        }
+    }
+    v
+}
+
+/// A results list's sort orders: size and name, and a date where the items have one.
+pub fn plan_sorts(plan: &Plan) -> Vec<SortKey> {
+    let mut v = vec![kit_list::BY_SIZE, kit_list::BY_NAME];
+    if plan.items.iter().any(|i| i.modified.is_some()) {
+        v.push(if plan.feature == Some(FeatureId::LargeOldFiles) {
+            SortKey {
+                key: "date",
+                label: "Sort by last opened",
+                first: "Longest unopened first",
+                second: "Recently opened first",
+                descending: false,
+            }
+        } else {
+            kit_list::BY_DATE
+        });
+    }
+    v
+}
+
+/// Does item `it` pass the search and the filters (the category column aside)?
+fn passes(st: &PlanState, filters: &[Filter], q: &str, it: &cleancraft_core::plan::Item) -> bool {
+    kit_list::matches(q, &[&it.path.to_string_lossy(), &it.reason])
+        && kit_list::passes(&st.prefs, filters, |k| item_has(st, it, k))
+}
+
+/// Selected items the search or the filters do not show (they still move: the bottom bar
+/// counts them and the confirmation lists them).
+pub fn hidden_selected(st: &PlanState) -> usize {
+    let Some(plan) = &st.plan else {
+        return 0;
+    };
+    let filters = plan_filters(st);
+    let q = kit_list::query(&st.search);
+    plan.items
+        .iter()
+        .filter(|i| i.selected && !passes(st, &filters, &q, i))
+        .count()
 }
 
 impl PlanState {
@@ -381,33 +591,65 @@ fn visible_items(st: &PlanState) -> Vec<usize> {
     let Some(plan) = &st.plan else {
         return Vec::new();
     };
-    let q = st.search.to_lowercase();
+    let q = kit_list::query(&st.search);
+    let filters = plan_filters(st);
     let mut v: Vec<usize> = plan
         .items
         .iter()
         .filter(|i| st.category.as_ref().is_none_or(|c| &i.category == c))
-        .filter(|i| {
-            q.is_empty()
-                || i.path.to_string_lossy().to_lowercase().contains(&q)
-                || i.reason.to_lowercase().contains(&q)
-        })
+        .filter(|i| passes(st, &filters, &q, i))
         .map(|i| i.id)
         .collect();
-    match st.sort {
-        Sort::Size => v.sort_by(|a, b| plan.items[*b].size.cmp(&plan.items[*a].size)),
-        Sort::Date => v.sort_by_key(|i| plan.items[*i].modified.unwrap_or(i64::MAX)),
-        Sort::Name => v.sort_by(|a, b| {
-            let n = |i: usize| {
-                plan.items[i]
-                    .path
-                    .file_name()
-                    .map(|s| s.to_string_lossy().to_lowercase())
-                    .unwrap_or_default()
-            };
-            n(*a).cmp(&n(*b))
-        }),
-    }
+    let (key, rev) = kit_list::sort_of(&st.prefs, &plan_sorts(plan));
+    let name = |i: usize| {
+        plan.items[i]
+            .path
+            .file_name()
+            .map(|s| s.to_string_lossy().to_lowercase())
+            .unwrap_or_default()
+    };
+    v.sort_by(|a, b| {
+        let (x, y) = (&plan.items[*a], &plan.items[*b]);
+        match key.key {
+            // Oldest first; unknown dates last either way.
+            "date" => match (x.modified, y.modified) {
+                (Some(p), Some(q)) => {
+                    let o = p.cmp(&q);
+                    if rev { o.reverse() } else { o }
+                }
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            },
+            "name" => {
+                let o = name(*a).cmp(&name(*b));
+                if rev { o.reverse() } else { o }
+            }
+            _ => {
+                let o = y.size.cmp(&x.size);
+                if rev { o.reverse() } else { o }
+            }
+        }
+    });
     v
+}
+
+/// Store a results list's filters and sort (and save the settings).
+fn set_prefs(app: &mut CleanApp, f: FeatureId, prefs: ListPrefs) {
+    if kit_list::store(&mut app.settings, &list_id(f), prefs.clone()) {
+        app.save_settings();
+    }
+    let st = app.plan_state(f);
+    st.sort = match st
+        .plan
+        .as_ref()
+        .map(|p| kit_list::sort_of(&prefs, &plan_sorts(p)).0.key)
+    {
+        Some("name") => Sort::Name,
+        Some("date") => Sort::Date,
+        _ => Sort::Size,
+    };
+    st.prefs = prefs;
 }
 
 /// Height of a line in the item list.
@@ -418,6 +660,18 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     let Some(plan) = app.plan_state(f).plan.clone() else {
         return;
     };
+    // The remembered filters and sort (Settings is the one place they live).
+    let prefs = kit_list::prefs(&app.settings, &list_id(f));
+    let home = app.env.home().to_path_buf();
+    let st = app.plan_state(f);
+    st.home = home;
+    st.refresh_facets();
+    st.sort = match kit_list::sort_of(&prefs, &plan_sorts(&plan)).0.key {
+        "name" => Sort::Name,
+        "date" => Sort::Date,
+        _ => Sort::Size,
+    };
+    st.prefs = prefs;
     // Nothing found: the module's object at rest, one line, the notes, Scan Again.
     if plan.items.is_empty() {
         let started = kit::first_seen(ui, ("empty", &plan.id));
@@ -564,10 +818,15 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                         format!("{} in the Trash", human_size(finder)),
                     )
                 } else {
+                    // Selected items the search or filters hide still move: say so.
+                    let note = kit_list::hidden_note(hidden_selected(app.plan_state(f)));
                     (
                         human_size(sel_size),
-                        format!("{} selected", cleancraft_core::fsutil::items(sel_count)),
-                        format!("{sel_count} selected, {}", human_size(sel_size)),
+                        format!(
+                            "{} selected{note}",
+                            cleancraft_core::fsutil::items(sel_count)
+                        ),
+                        format!("{sel_count} selected{note}, {}", human_size(sel_size)),
                     )
                 };
                 kit::bar_figure(ui, &t, &figure, &line, &full, false);
@@ -602,11 +861,20 @@ fn results_body(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan) {
     // get a second row, aligned right, when they do not: nothing ever overlaps.
     let extras_id = egui::Id::new(("plan-extras-w", f.as_str()));
     let extras_w: f32 = ui.data(|d| d.get_temp(extras_id)).unwrap_or(0.0);
-    // Search 220 (160 at least), sort about 140, Select All and Select None about 210.
-    let core_w = 160.0 + 140.0 + 210.0 + 4.0 * space::S;
+    let list = list_id(f);
+    let sorts = plan_sorts(plan);
+    // Filter about 100 when the list has filters.
+    let filter_w = if plan_filters(app.plan_state(f)).is_empty() {
+        0.0
+    } else {
+        100.0 + space::S
+    };
+    // Search 220 (160 at least), sort about 150, Select All and Select None about 210.
+    let core_w = 160.0 + 150.0 + filter_w + 210.0 + 4.0 * space::S;
     let extras_inline = extras_w <= 0.5 || ui.available_width() - core_w >= extras_w + space::S;
     let search_w = (ui.available_width()
-        - 140.0
+        - 150.0
+        - filter_w
         - 210.0
         - if extras_inline {
             extras_w
@@ -620,36 +888,15 @@ fn results_body(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = space::S;
         let st = app.plan_state(f);
-        let r = kit::search_field(ui, &t, &mut st.search, "Search", search_w);
-        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Search"));
-        // Cmd+F, as in every Mac app with a search field.
-        if ui.ctx().memory(|m| m.top_modal_layer()).is_none()
-            && ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::F))
-        {
-            r.request_focus();
-        }
-        if r.changed() {
+        let (_, changed) = kit_list::search(ui, &t, &mut st.search, "Search", "Search", search_w);
+        if changed {
             app.act();
         }
-        let st = app.plan_state(f);
-        let mut sort = st.sort;
-        kit::sort_menu(
-            ui,
-            "sort",
-            &mut sort,
-            if f == FeatureId::LargeOldFiles {
-                &[
-                    (Sort::Size, "Sort by size"),
-                    (Sort::Date, "Sort by date"),
-                    (Sort::Name, "Sort by name"),
-                ][..]
-            } else {
-                &[(Sort::Size, "Sort by size"), (Sort::Name, "Sort by name")][..]
-            },
-        );
-        if sort != app.plan_state(f).sort {
+        let filters = plan_filters(app.plan_state(f));
+        let mut prefs = app.plan_state(f).prefs.clone();
+        if kit_list::menus(ui, &t, &list, &filters, &sorts, &mut prefs) {
             app.act();
-            app.plan_state(f).sort = sort;
+            set_prefs(app, f, prefs);
         }
         // Right-aligned, in reading order for Tab and VoiceOver: the module's own buttons
         // (or "More" holding them when they do not fit), Select All, Select None. Where
@@ -710,6 +957,36 @@ fn results_body(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan) {
             }
         }
     });
+    // "Showing 12 of 135 items", the filters that are on, Clear Filters.
+    let filters = plan_filters(app.plan_state(f));
+    let total = plan.items.len();
+    let shown = {
+        let st = app.plan_state(f);
+        let q = kit_list::query(&st.search);
+        plan.items
+            .iter()
+            .filter(|i| passes(st, &filters, &q, i))
+            .count()
+    };
+    let mut prefs = app.plan_state(f).prefs.clone();
+    let mut search = std::mem::take(&mut app.plan_state(f).search);
+    let ch = kit_list::status(
+        ui,
+        &t,
+        shown,
+        total,
+        ("item", "items"),
+        &filters,
+        &mut prefs,
+        &mut search,
+    );
+    app.plan_state(f).search = search;
+    if ch.any() {
+        app.act();
+    }
+    if ch.prefs {
+        set_prefs(app, f, prefs);
+    }
     ui.add_space(space::M);
     let avail_h = ui.available_height() - 4.0;
     let body =
@@ -749,12 +1026,18 @@ fn results_body(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan) {
             .show(ui, |ui| {
                 ui.set_min_size(egui::vec2(ui.available_width(), list_h));
                 if rows.is_empty() {
+                    let st = app.plan_state(f);
+                    let filtering = kit_list::filtering(&st.prefs, &plan_filters(st));
                     kit::empty_state(
                         ui,
                         &t,
                         Icon::Search,
                         "No items match",
-                        "Try other words, or clear the search to see every item.",
+                        if filtering {
+                            "Clear Filters shows every item again."
+                        } else {
+                            "Try other words, or clear the search to see every item."
+                        },
                     );
                     return;
                 }
