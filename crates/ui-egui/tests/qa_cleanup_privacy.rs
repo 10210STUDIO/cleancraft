@@ -10,6 +10,7 @@ use cleancraft_core::testkit::FakeMac;
 use cleancraft_core::testkit_cleanup::{self as kit, privacy_mac};
 use cleancraft_core::{Fault, FeatureId, Plan};
 use common::*;
+use egui_kittest::kittest::Queryable;
 
 const CHROME: &str = "Library/Application Support/Google/Chrome";
 const FF: &str = "Library/Application Support/Firefox/Profiles/abcd.default-release";
@@ -19,6 +20,26 @@ fn plan(h: &H) -> Plan {
         .plan
         .clone()
         .expect("plan")
+}
+
+/// Click an item's checkbox (named after the file) on the plan page.
+fn tick(h: &mut H, name: &str) {
+    h.get_by_role_and_label(egui::accesskit::Role::CheckBox, name)
+        .click();
+    steps(h);
+}
+
+fn firefox_row(p: &Plan) -> String {
+    format!(
+        "Firefox  {}",
+        human_size(
+            p.items
+                .iter()
+                .filter(|i| i.category == "firefox")
+                .map(|i| i.size)
+                .sum(),
+        )
+    )
 }
 
 fn open(mac: &FakeMac) -> H {
@@ -76,6 +97,8 @@ fn browsers_numbers_and_clean() {
         "browsing history, download list and bookmarks"
     ));
     assert!(has(&h, "places.sqlite") && has(&h, "logins.json"));
+    // Cookies (signing out of websites) are not preselected.
+    assert!(!p.selected().any(privacy::signs_out));
     let sel: Vec<_> = p
         .selected()
         .map(|i| (i.path.clone(), tree_size(&i.path).0))
@@ -95,6 +118,8 @@ fn browsers_numbers_and_clean() {
         format!("{CHROME}/Default/Bookmarks"),
         format!("{FF}/places.sqlite"),
         format!("{FF}/logins.json"),
+        format!("{FF}/cookies.sqlite"),
+        format!("{CHROME}/Default/Cookies"),
         "Library/Safari/Bookmarks.plist".to_string(),
         "Library/Application Support/com.apple.sharedfilelist/com.apple.LSSharedFileList.FavoriteItems.sfl3".to_string(),
     ] {
@@ -126,6 +151,16 @@ fn running_browser_and_errors() {
             .filter(|i| i.category == "chrome")
             .all(|i| !i.selected)
     );
+    // Cookies are not preselected: the user ticks Firefox's to clean them too.
+    let ff_cookies = p
+        .items
+        .iter()
+        .find(|i| i.path == mac.env.home_path(&format!("{FF}/cookies.sqlite")))
+        .unwrap();
+    assert!(!ff_cookies.selected);
+    click(&mut h, &firefox_row(&p));
+    tick(&mut h, "cookies.sqlite");
+    assert!(plan(&h).items[ff_cookies.id].selected);
     // Faults on three selected files.
     let safari = mac.env.home_path("Library/Safari/History.db");
     let session = mac.env.home_path("Library/Safari/LastSession.plist");

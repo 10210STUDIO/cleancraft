@@ -1,9 +1,10 @@
 //! Privacy Traces.
 //!
 //! - Browsers (P3): per browser and profile, the files holding history, cookies, cache, the
-//!   last session, the download list and form values. Saved passwords are listed and never
-//!   preselected. A browser that is running has every item locked ("Quit <browser> first"), and
-//!   the cleanup refuses to start while a browser with selected items runs.
+//!   last session, the download list and form values. Cookies (removing them signs the user
+//!   out of websites) and saved passwords are listed and never preselected. A browser that is
+//!   running has every item locked ("Quit <browser> first"), and the cleanup refuses to start
+//!   while a browser with selected items runs.
 //! - Recent items (P4): the recent documents, apps and servers lists (`.sfl2`, `.sfl3`).
 //! - Wi-Fi networks (P5): listed from `networksetup -listpreferredwirelessnetworks <device>`;
 //!   macOS removes them in System Settings, so they are locked and the page offers a button to
@@ -118,11 +119,13 @@ pub const HISTORY: Kind = Kind {
     risk: Risk::Medium,
     selected: true,
 };
+/// Removing cookies signs the user out of websites, so they are never preselected: the user
+/// ticks them per browser.
 pub const COOKIES: Kind = Kind {
     label: "Cookies",
     what: "cookies (you will be signed out of websites)",
     risk: Risk::Medium,
-    selected: true,
+    selected: false,
 };
 pub const CACHE: Kind = Kind {
     label: "Cache",
@@ -257,6 +260,12 @@ pub const LOCK_PERMISSION: &str =
     "Not a file: use Reset Permissions to take this access back (the app asks again next time)";
 pub const NOTE_TCC: &str =
     "App permissions could not be read. Turn on Full Disk Access for CleanCraft to list them.";
+
+/// Does removing this item sign the user out of websites? True for browser cookies (told by
+/// their group, or by the reason for plans edited outside the scan).
+pub fn signs_out(item: &crate::plan::Item) -> bool {
+    item.group.as_deref() == Some(COOKIES.label) || item.reason.contains(COOKIES.what)
+}
 
 pub fn lock_running(browser: &str) -> String {
     format!("Quit {browser} first")

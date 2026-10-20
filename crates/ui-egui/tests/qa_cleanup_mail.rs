@@ -1,5 +1,6 @@
-//! Mail Downloads (M1 to M3) by clicks: numbers against disk, modified attachments left
-//! unselected, POP and On My Mac left out, Mail running, cleaning, undo and errors.
+//! Mail Downloads (M1 to M3) by clicks: numbers against disk, nothing preselected (the user
+//! ticks attachments; modified ones say why to keep them), POP and On My Mac left out, Mail
+//! running, cleaning, undo and errors.
 
 mod common;
 
@@ -10,6 +11,7 @@ use cleancraft_core::testkit::FakeMac;
 use cleancraft_core::testkit_cleanup::{self as kit, MAIL_V, mail_mac};
 use cleancraft_core::{Fault, FeatureId, Plan};
 use common::*;
+use egui_kittest::kittest::Queryable;
 
 fn plan(h: &H) -> Plan {
     h.state().plans[&FeatureId::MailAttachments]
@@ -25,6 +27,34 @@ fn open(mac: &FakeMac) -> H {
     click(&mut h, "Mail Downloads");
     click(&mut h, "Scan");
     h
+}
+
+/// Click an item's checkbox (named after the file) on the plan page.
+fn tick(h: &mut H, name: &str) {
+    h.get_by_role_and_label(egui::accesskit::Role::CheckBox, name)
+        .click();
+    steps(h);
+}
+
+/// Show one category's rows ("Opened attachments  500 KB"), so each row is on screen.
+fn show_category(h: &mut H, cat: &str, title: &str) {
+    let size: u64 = plan(h)
+        .items
+        .iter()
+        .filter(|i| i.category == cat)
+        .map(|i| i.size)
+        .sum();
+    click(h, &format!("{title}  {}", human_size(size)));
+}
+
+/// The user ticks every attachment that can be moved, then unticks the two changed after Mail
+/// saved them (what their reason tells them to keep).
+fn tick_unchanged(h: &mut H) {
+    click(h, "Select All");
+    show_category(h, "mail_opened", "Opened attachments");
+    tick(h, "Contract.docx");
+    show_category(h, "mail_downloaded", "Downloaded attachments");
+    tick(h, "edited.key");
 }
 
 fn att(m: &FakeMac, account: &str, mailbox: &str, msg: &str, file: &str) -> PathBuf {
@@ -65,6 +95,16 @@ fn scan_shows_disk_numbers_and_clean_keeps_modified() {
         &h,
         "could not tell whether the mail server keeps a copy"
     ));
+    // Nothing is preselected: the user ticks what to move.
+    assert_eq!(p.selected_count(), 0, "an attachment is preselected");
+    assert!(has(&h, "0 selected, 0 KB"));
+    assert!(!has(&h, "Review and Clean"));
+    tick_unchanged(&mut h);
+    let p = plan(&h);
+    assert!(
+        p.selected()
+            .all(|i| !i.reason.contains("changed after Mail saved it"))
+    );
     let sel: Vec<(PathBuf, u64)> = p
         .selected()
         .map(|i| (i.path.clone(), tree_size(&i.path).0))
@@ -112,7 +152,9 @@ fn mail_running_locks_and_blocks() {
     // Mail opened between the scan and the cleanup: the cleanup is refused.
     let mac = mail_mac();
     let mut h = open(&mac);
+    tick_unchanged(&mut h);
     let p = plan(&h);
+    assert!(p.selected_count() > 0);
     kit::set_running(&mac.env, "Mail", "/System/Applications/Mail.app");
     click(&mut h, "Review and Clean");
     click(&mut h, "Move to Trash");
@@ -124,6 +166,7 @@ fn mail_running_locks_and_blocks() {
 fn errors_per_attachment() {
     let mac = mail_mac();
     let mut h = open(&mac);
+    tick_unchanged(&mut h);
     let p = plan(&h);
     let photo = att(&mac, "IMAP-me@example.com", "INBOX", "12345", "photo.jpg");
     let deck = att(
