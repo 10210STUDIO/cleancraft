@@ -59,7 +59,8 @@ fn tool_calls(mac: &FakeMac) -> usize {
 /// 38 pt tile 28 pt from the row's left edge).
 fn tile_pixel(h: &mut H, name: &str) -> [u8; 3] {
     let r = h.get_by_label(name).rect();
-    let (x, y) = ((r.left() + 28.0) as u32, r.center().y as u32);
+    // The icon sits after the row's checkbox (apps6: multi-select), centred 62 pt in.
+    let (x, y) = ((r.left() + 60.0) as u32, r.center().y as u32);
     let img = h.render().expect("render");
     let p = img.get_pixel(x, y).0;
     [p[0], p[1], p[2]]
@@ -472,7 +473,8 @@ fn icons_render() {
 /// row's own background just right of the tile.
 fn tile_and_row_pixels(h: &mut H, name: &str) -> ([u8; 3], [u8; 3]) {
     let r = h.get_by_label(name).rect();
-    let (cx, cy) = (r.left() + 30.0, r.center().y);
+    // The icon sits after the row's checkbox (apps6: multi-select), centred 62 pt in.
+    let (cx, cy) = (r.left() + 62.0, r.center().y);
     let img = h.render().expect("render");
     let ppp = h.ctx.pixels_per_point();
     let at = |x: f32, y: f32| {

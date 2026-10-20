@@ -287,6 +287,8 @@ fn group_card(
                     }
                 });
             });
+            // An uninstall of several apps: Undo per app (App Remover).
+            crate::pages::apps::history_batch_rows(app, ui, &first.plan_id);
             // With Undo All on the card, the items (each with its own Undo) wait behind a
             // disclosure; a one-item action shows its item.
             let open = app.history.expanded.contains(&first.plan_id);
