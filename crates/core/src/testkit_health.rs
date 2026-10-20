@@ -149,3 +149,92 @@ pub fn calm_mac(now: i64) -> FakeMac {
     launch_agent(&mac, "com.example.sync", true);
     mac
 }
+
+/// Seconds since the epoch now (the app reads facts at the real time).
+pub fn now() -> i64 {
+    chrono::Utc::now().timestamp()
+}
+
+/// Free space readings over 90 days: slowly falling, with a cleanup bump on day 40.
+pub fn sample_history(env: &Env, now: i64, total: u64) {
+    let mut s = Vec::new();
+    for i in 0..(90 * 4) {
+        let d = 90.0 - i as f64 / 4.0;
+        let base = 120.0 - (90.0 - d) * 0.9 + if d < 40.0 { 25.0 } else { 0.0 };
+        let wobble = ((i as f64) * 0.7).sin() * 1.5;
+        s.push((d, ((base + wobble).max(5.0) * GB as f64) as u64));
+    }
+    history(env, now, &s, total);
+}
+
+/// A calm Mac at the real time, with 90 days of free space readings.
+pub fn calm_mac_now() -> FakeMac {
+    let n = now();
+    let mac = calm_mac(n);
+    sample_history(&mac.env, n, 500 * GB);
+    mac
+}
+
+/// A Mac with something for most cards: low space falling fast, a threat found, an unsigned
+/// startup item, elevated memory pressure, a worn battery, junk found, unused apps, and an
+/// old update check.
+pub fn troubled_mac_now() -> FakeMac {
+    let n = now();
+    let mac = calm_mac(n);
+    set_disk(&mac.env, 500 * GB, 45 * GB);
+    sample_history(&mac.env, n, 500 * GB);
+    let mut h = space_history::load(&mac.env).history;
+    // The last week: from 70 GB down to 45 GB.
+    h.samples.retain(|s| s.at < n - 7 * 86_400);
+    let mut week: Vec<(f64, u64)> = (0..28)
+        .map(|i| {
+            let d = 7.0 - i as f64 / 4.0;
+            (d, ((45.0 + d * 3.5) * GB as f64) as u64)
+        })
+        .collect();
+    week.push((0.0, 45 * GB));
+    let older: Vec<(f64, u64)> = h
+        .samples
+        .iter()
+        .map(|s| ((n - s.at) as f64 / 86_400.0, s.free))
+        .collect();
+    let all: Vec<(f64, u64)> = older.into_iter().chain(week).collect();
+    history(&mac.env, n, &all, 500 * GB);
+    note(&mac.env, FeatureId::Malware, 2, 0, 1, n);
+    note(&mac.env, FeatureId::SystemJunk, 4, 2_300_000_000, 1_204, n);
+    note(&mac.env, FeatureId::Updater, 20, 0, 0, n);
+    launch_agent(&mac, "com.unknown.updater", false);
+    set_pressure(&mac.env, 2);
+    set_battery(&mac.env, 3300, 4382, 812);
+    app_opened(&mac, "Atlas", 200, n);
+    app_opened(&mac, "Beacon", 400, n);
+    app_opened(&mac, "Comet", 260, n);
+    mac
+}
+
+/// CleanCraft installed, Claude Desktop with one other server, Claude Code's command.
+pub fn ai_mac() -> FakeMac {
+    let mac = FakeMac::new();
+    mac.sys_file(crate::mcp_setup::APP_BINARY, 100);
+    let p = crate::mcp_setup::desktop_config(&mac.env);
+    mac.write(
+        &p,
+        b"{\n  \"mcpServers\": {\n    \"files\": {\"command\": \"npx\", \"args\": [\"server-filesystem\"]}\n  }\n}\n",
+    );
+    mac.home_file(".local/bin/claude", 10);
+    let f = fake(&mac.env);
+    f.answer(
+        "claude mcp list",
+        "files: npx server-filesystem - Connected\n",
+    );
+    f.answer(
+        &format!(
+            "claude mcp add --scope user cleancraft -- {} serve",
+            crate::mcp_setup::APP_BINARY
+        ),
+        "Added stdio MCP server cleancraft\n",
+    );
+    f.answer("sh", "");
+    f.answer("/usr/bin/open", "");
+    mac
+}

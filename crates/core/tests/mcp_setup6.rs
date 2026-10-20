@@ -322,3 +322,56 @@ fn connecting_never_changes_agents_may_clean() {
     assert!(!Settings::load_checked(&mac.env).0.agents_may_clean);
     assert!(!Settings::path(&mac.env).exists());
 }
+
+#[test]
+fn odd_characters_in_the_path_are_escaped() {
+    let bin = "/Users/a\"b\\c/.local/bin/cleancraft";
+    let (new, _) = insert_entry("{}", bin).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&new).unwrap();
+    assert_eq!(v["mcpServers"][SERVER]["command"], bin);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_linked_config_is_left_alone_and_backups_are_private() {
+    use std::os::unix::fs::PermissionsExt;
+    let mac = installed();
+    let real = mac.env.home_path("dotfiles/claude.json");
+    mac.write(&real, OTHERS.as_bytes());
+    let p = with_desktop(&mac, None);
+    std::os::unix::fs::symlink(&real, &p).unwrap();
+    assert!(matches!(
+        state(&mac, ClientKind::ClaudeDesktop),
+        ClientState::Invalid(_)
+    ));
+    assert!(matches!(
+        mcp_setup::connect(&mac.env, ClientKind::ClaudeDesktop),
+        Err(ConnectError::Refused { .. })
+    ));
+    assert!(
+        std::fs::symlink_metadata(&p)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(std::fs::read_to_string(&real).unwrap(), OTHERS);
+
+    let mac = installed();
+    with_desktop(&mac, Some(OTHERS));
+    let done = mcp_setup::connect(&mac.env, ClientKind::ClaudeDesktop).unwrap();
+    let mode = std::fs::metadata(done.backup.unwrap())
+        .unwrap()
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o777, 0o600);
+}
+
+#[test]
+fn the_change_is_shown_before_connecting() {
+    let mac = installed();
+    with_desktop(&mac, Some(OTHERS));
+    let c = mcp_setup::detect(&mac.env).remove(0);
+    let text = mcp_setup::planned_change(&mac.env, &c).unwrap();
+    assert!(text.contains("claude_desktop_config.json"), "{text}");
+    assert!(text.contains(&format!("\"command\": \"{BIN}\"")), "{text}");
+}

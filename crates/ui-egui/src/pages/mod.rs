@@ -6,6 +6,8 @@ pub mod disk_map;
 pub mod extras;
 pub mod extras_cleanup;
 pub mod extras_files;
+pub mod guide;
+pub mod health;
 pub mod history;
 pub mod monitor;
 pub mod plan_page;
@@ -13,6 +15,7 @@ pub mod settings;
 pub mod startup;
 pub mod sweep;
 pub mod tasks;
+pub mod welcome;
 
 use cleancraft_core::FeatureId;
 use egui::Ui;

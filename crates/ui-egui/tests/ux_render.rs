@@ -195,6 +195,27 @@ fn nav(h: &mut H, page: &str) {
 
 fn scenes() -> Vec<Scene> {
     vec![
+        // Round 6 (health6): Mac Health, the AI apps step, the agent guide.
+        Scene {
+            name: "mac-health",
+            mac: cleancraft_core::testkit_health::troubled_mac_now,
+            go: |h| nav(h, "health"),
+        },
+        Scene {
+            name: "mac-health-good",
+            mac: cleancraft_core::testkit_health::calm_mac_now,
+            go: |h| nav(h, "health"),
+        },
+        Scene {
+            name: "connect-ai-apps",
+            mac: cleancraft_core::testkit_health::ai_mac,
+            go: |h| nav(h, "connect_ai"),
+        },
+        Scene {
+            name: "agent-guide",
+            mac: cleancraft_core::testkit_health::ai_mac,
+            go: |h| nav(h, "guide:ai_agents"),
+        },
         Scene {
             name: "quick-sweep-idle",
             mac: testkit_monitor::sweep_mac,
