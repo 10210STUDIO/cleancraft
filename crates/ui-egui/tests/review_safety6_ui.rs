@@ -114,7 +114,6 @@ fn assert_way_forward(h: &H, f: FeatureId, what: &str) {
     let all_locked = p.items.iter().all(|i| i.locked.is_some());
     assert!(all_locked, "{what}: the scenario should lock every item");
     let (buttons, steps) = ways_forward(h);
-    eprintln!("{what}: buttons {buttons:?} steps {steps:?}");
     assert!(
         !buttons.is_empty() || !steps.is_empty(),
         "{what}: every item is locked ({:?}) and the screen offers no enabled action and no step",
@@ -167,4 +166,105 @@ fn way_forward_privacy_every_browser_open() {
         !buttons.is_empty() || !steps.is_empty(),
         "browsers open: no enabled action and no step on screen"
     );
+}
+
+/// Developer Clutter with the person's code folder in Documents (very common): every project
+/// is locked as a protected place. The screen must say what to do instead (move the folder
+/// out of Documents, or run the project's own clean command), not only "never".
+#[test]
+fn way_forward_dev_clutter_in_documents() {
+    use cleancraft_core::Settings;
+    let mac = FakeMac::new();
+    let code = mac.env.home_path("Documents/code");
+    for name in ["game", "site"] {
+        let d = code.join(name);
+        mac.write(&d.join("Cargo.toml"), b"[package]\nname = \"x\"\n");
+        mac.write(&d.join("target/debug/app"), &vec![7u8; 300_000]);
+    }
+    let s = Settings {
+        dev_roots: vec![code],
+        ..Settings::default()
+    };
+    s.save(&mac.env).unwrap();
+    let h = open(&mac, "Clean", "Developer Clutter");
+    assert_way_forward(&h, FeatureId::DevClutter, "Developer Clutter, code in Documents");
+}
+
+/// H1: on Mac Health every enabled button only opens a page or starts a scan that looks.
+/// Clicking each one (on a Mac that needs attention everywhere) writes no journal line, moves
+/// no file, and runs no command that changes the system.
+#[test]
+fn h1_every_health_button_only_looks() {
+    use cleancraft_core::testkit_health::{self as th, GB};
+    use cleancraft_core::{FeatureId, executor};
+    use std::path::PathBuf;
+    let now = th::now();
+    let mac = th::calm_mac(now);
+    th::sample_history(&mac.env, now, 500 * GB);
+    th::set_disk(&mac.env, 500 * GB, 12 * GB);
+    th::set_pressure(&mac.env, 4);
+    th::launch_agent(&mac, "com.example.unsigned", false);
+    th::note(&mac.env, FeatureId::Malware, 1, 2_000_000, 1, now);
+    th::note(&mac.env, FeatureId::SystemJunk, 60, 3_000_000_000, 400, now);
+    mac.home_file("Library/Caches/com.example.big/blob", 2_000_000);
+    let snapshot = |m: &FakeMac| -> Vec<(PathBuf, u64)> {
+        let data = m.env.data_dir().to_path_buf();
+        let mut out = Vec::new();
+        let mut stack = vec![m.env.root().to_path_buf()];
+        while let Some(d) = stack.pop() {
+            for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+                let p = e.path();
+                if p.starts_with(&data) {
+                    continue;
+                }
+                match std::fs::symlink_metadata(&p) {
+                    Ok(md) if md.is_dir() => stack.push(p),
+                    Ok(md) => out.push((p, md.len())),
+                    _ => {}
+                }
+            }
+        }
+        out.sort();
+        out
+    };
+    let before = snapshot(&mac);
+    let mut h = harness(&mac);
+    let go_health = |h: &mut H| {
+        h.state_mut()
+            .open_route(&cleancraft_core::route::AppRoute::Health);
+        for _ in 0..6 {
+            h.step();
+        }
+    };
+    go_health(&mut h);
+    let (buttons, _) = ways_forward(&h);
+    assert!(buttons.len() >= 3, "few buttons on Mac Health: {buttons:?}");
+    for b in &buttons {
+        go_health(&mut h);
+        if h.query_all_by_label(b).count() != 1 {
+            continue;
+        }
+        // Below the fold the person scrolls first; the action is the same.
+        h.get_by_label(b).click();
+        for _ in 0..6 {
+            h.step();
+        }
+        assert!(executor::history(&mac.env).is_empty(), "'{b}' wrote a journal line");
+        let fake = mac.env.fake_sys().unwrap();
+        assert!(fake.admin_calls().is_empty(), "'{b}' asked for the administrator");
+        let changing: Vec<_> = fake
+            .calls()
+            .into_iter()
+            .filter(|c| {
+                let w: Vec<&str> = c.split_whitespace().collect();
+                (w.first().is_some_and(|p| p.ends_with("launchctl"))
+                    && w.get(1).is_some_and(|s| ["bootout", "bootstrap", "unload", "load", "disable", "remove"].contains(s)))
+                    || c.contains("/bin/mv")
+                    || c.contains("purge")
+                    || c.contains("periodic")
+            })
+            .collect();
+        assert!(changing.is_empty(), "'{b}' ran {changing:?}");
+    }
+    assert_eq!(before, snapshot(&mac), "files changed");
 }
