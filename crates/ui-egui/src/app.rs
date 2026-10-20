@@ -241,6 +241,36 @@ impl CleanApp {
         self.journal.is_primed()
     }
 
+    /// Standard Mac shortcuts (REVIEW-U U10): Cmd+, opens Settings, Cmd+1 to Cmd+7 the
+    /// sidebar sections. (Cmd+F is the page's own: it focuses its search field.) None while
+    /// a dialog is open.
+    fn shortcuts(&mut self, ctx: &egui::Context) {
+        if ctx.memory(|m| m.top_modal_layer()).is_some() {
+            return;
+        }
+        let cmd = egui::Modifiers::COMMAND;
+        if ctx.input_mut(|i| i.consume_key(cmd, egui::Key::Comma)) {
+            self.act();
+            self.navigate("settings");
+        }
+        const KEYS: [egui::Key; 7] = [
+            egui::Key::Num1,
+            egui::Key::Num2,
+            egui::Key::Num3,
+            egui::Key::Num4,
+            egui::Key::Num5,
+            egui::Key::Num6,
+            egui::Key::Num7,
+        ];
+        for (i, k) in KEYS.iter().enumerate() {
+            if i < GROUPS.len() && ctx.input_mut(|inp| inp.consume_key(cmd, *k)) {
+                self.act();
+                let f = self.section_tool.get(&i).copied().unwrap_or(GROUPS[i].1[0]);
+                self.page = Page::Feature(f);
+            }
+        }
+    }
+
     /// The original paths a cleanup report moved.
     pub fn moved_paths(rep: &cleancraft_core::executor::Report) -> Vec<std::path::PathBuf> {
         rep.moved
@@ -319,12 +349,14 @@ impl CleanApp {
     }
 
     pub fn ui(&mut self, ui: &mut Ui) {
+        self.shortcuts(ui.ctx());
         // A switch or checkbox toggled last frame: its click sound (when turned on).
         if kit::take_tap(ui.ctx()) {
             crate::sound::play(&self.env, crate::sound::Cue::Tap);
         }
         self.t = self.t.for_section(self.section());
         let t = self.t;
+        kit::set_tokens(ui.ctx(), &t);
         let full = ui.max_rect();
         ui.painter().rect_filled(full, 0.0, t.bg);
         // Inter is registered in logic() but only usable from the next pass.

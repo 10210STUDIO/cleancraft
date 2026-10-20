@@ -81,7 +81,7 @@ fn tiles_show_each_module_plan() {
     assert!(has(&h, &human_size(t)), "trash tile");
     assert!(has(&h, "3 updates"));
     assert!(has(&h, "Could not scan"));
-    assert!(has(&h, "rules could not be loaded"));
+    assert!(has(&h, "Rules could not be loaded."));
     // Header: what Run would move (Trash excluded).
     assert!(has(&h, &human_size(j + ml)));
     // One Review per tile, one Include per runnable tile (System Junk, Mail).

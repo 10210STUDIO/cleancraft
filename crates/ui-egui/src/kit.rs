@@ -64,6 +64,17 @@ pub fn feel(ui: &Ui, resp: &Response) -> Feel {
 
 const TAP_KEY: &str = "cleancraft-tap";
 
+/// The page's tokens (its section colours) for kit pieces drawn where no `Tokens` is passed
+/// (pop-up menus). The shell sets them every frame.
+pub fn set_tokens(ctx: &egui::Context, t: &Tokens) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("cleancraft-tokens"), *t));
+}
+
+pub fn tokens(ctx: &egui::Context) -> Tokens {
+    ctx.data(|d| d.get_temp::<Tokens>(egui::Id::new("cleancraft-tokens")))
+        .unwrap_or_else(Tokens::dark)
+}
+
 /// A switch or checkbox was toggled this frame: the shell plays the Tap cue once (only when
 /// "Click sounds on switches" is on, see `sound::play`). Kit widgets have no `Env`.
 pub fn note_tap(ctx: &egui::Context) {
@@ -124,6 +135,37 @@ pub fn row_tip(resp: &Response, row: Rect, text: &str) {
     tip.show(|ui| {
         ui.label(text);
     });
+}
+
+/// Width of a confirmation dialog that lists files: as wide as the window allows, up to
+/// 860 pt, so paths are not cut short (REVIEW-C C12).
+pub fn dialog_width(ctx: &egui::Context) -> f32 {
+    (ctx.content_rect().width() - 160.0).clamp(420.0, 860.0)
+}
+
+/// The colour of a well inside a dialog, for [`scroll_fade`].
+pub const DIALOG_WELL: Color32 = Color32::from_rgb(0x14, 0x18, 0x20);
+
+/// Under a list in a dialog that scrolls: the list fades at its cut edge and one line says
+/// how many items it holds, so nobody takes the visible rows for all of them.
+pub fn list_more<R>(
+    ui: &mut Ui,
+    t: &Tokens,
+    out: &egui::scroll_area::ScrollAreaOutput<R>,
+    total: usize,
+) {
+    scroll_fade(ui, out, DIALOG_WELL);
+    if out.content_size.y > out.inner_rect.height() + 1.0 {
+        ui.add_space(space::XS);
+        dim(
+            ui,
+            t,
+            &format!(
+                "{} in all. Scroll the list to see every one.",
+                cleancraft_core::fsutil::items(total)
+            ),
+        );
+    }
 }
 
 /// The Done screen's summary: "3 items moved." and, only when some did not move, "2
@@ -201,6 +243,16 @@ pub fn dialog_actions(ui: &mut Ui, t: &Tokens, action: &str, kind: Kind) -> (boo
         out.1 = secondary(ui, t, "Cancel");
         out.0 = pill(ui, t, action, kind, icon.then_some(Icon::Trash)).clicked();
     });
+    // Return presses the action, the dialog's default button (REVIEW-U U10), unless the
+    // keyboard is on another control (then Return presses that one).
+    let top = ui.ctx().memory(|m| m.top_modal_layer()) == Some(ui.layer_id());
+    if top
+        && ui.is_enabled()
+        && ui.ctx().memory(|m| m.focused()).is_none()
+        && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter))
+    {
+        out.0 = true;
+    }
     out
 }
 
@@ -1303,9 +1355,11 @@ pub fn hero(
                 let block_h = rest.max(240.0);
                 let top = ((avail - block_h) / 2.0).max(0.0) * 0.85;
                 ui.add_space(top);
+                // The object grows with big windows (REVIEW-C C23: at 1600 x 1000 the block
+                // fills about half the height instead of floating in empty backdrop).
                 let side = (width * 0.42)
-                    .min(avail * 0.82)
-                    .clamp(isz::HERO_MIN * 1.6, isz::HERO_MAX * 2.0)
+                    .min(avail * 0.62)
+                    .clamp(isz::HERO_MIN * 1.6, isz::HERO_MAX * 2.4)
                     .round();
                 let right_w = (width - side - space::XXL).min(space::MEASURE + 40.0);
                 let left_pad = ((width - side - space::XXL - right_w) / 2.0).max(0.0);
@@ -2100,7 +2154,7 @@ pub fn banner(
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             let btn_w = pill_size(ui, action, Kind::Secondary, false).x;
-            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.horizontal(|ui| {
                 let (r, _) = ui.allocate_exact_size(Vec2::splat(isz::INLINE), Sense::hover());
                 icons::paint(ui.painter(), r, icon, color);
                 ui.add_space(space::XS);
@@ -2552,13 +2606,65 @@ pub fn sort_menu<T: Copy + PartialEq>(ui: &mut Ui, id: &str, value: &mut T, choi
             })
             .show_ui(ui, |ui| {
                 for (v, l) in choices {
-                    pointer(&ui.selectable_value(value, *v, *l));
+                    if menu_choice(ui, l, *v == *value) {
+                        *value = *v;
+                        ui.close();
+                    }
                 }
             })
             .response;
         pointer(&r);
         r.widget_info(|| WidgetInfo::labeled(WidgetType::ComboBox, true, "Sort"));
     });
+}
+
+/// One entry of a CleanCraft pop-up menu, macOS style: a check mark before the current
+/// choice, a soft highlight under the pointer, no "Sort by" repeated (REVIEW-C C32). The
+/// entry is announced with its full label (`Sort by name`). Returns true when picked.
+pub fn menu_choice(ui: &mut Ui, full: &str, current: bool) -> bool {
+    let t = tokens(ui.ctx());
+    let shown = full
+        .strip_prefix("Sort by ")
+        .map(|r| {
+            let mut c = r.chars();
+            c.next()
+                .map(|f| f.to_uppercase().chain(c).collect::<String>())
+                .unwrap_or_default()
+        })
+        .unwrap_or_else(|| full.to_string());
+    let fid = font(size::CALLOUT, Weight::Medium);
+    let w = ui
+        .available_width()
+        .max(galley(ui, &shown, fid.clone(), t.text).size().x + 48.0)
+        .max(140.0);
+    let (r, resp) = ui.allocate_exact_size(vec2(w, 28.0), Sense::click());
+    resp.widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, true, current, full));
+    let f = feel(ui, &resp);
+    let p = ui.painter();
+    if f.hov > 0.0 {
+        p.rect_filled(
+            r,
+            6.0,
+            icons::lerp(t.sec_a, Color32::BLACK, 0.25 + 0.15 * f.down).gamma_multiply(f.hov),
+        );
+    }
+    if current {
+        icons::paint_with(
+            p,
+            Rect::from_center_size(pos2(r.left() + 16.0, r.center().y), Vec2::splat(12.0)),
+            Icon::Check,
+            t.text,
+            1.8,
+        );
+    }
+    p.text(
+        pos2(r.left() + 32.0, r.center().y),
+        Align2::LEFT_CENTER,
+        shown,
+        fid,
+        t.text,
+    );
+    resp.clicked()
 }
 
 /// A pop-up menu behind a secondary pill (`FIELD` tall, glass, rounded ends).

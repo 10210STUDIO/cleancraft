@@ -433,7 +433,11 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile, w: f32, tile_h: 
                 "Open the page to act on them.".to_string(),
                 t.text,
             ),
-            TileData::Failed(e) => ("Could not scan".to_string(), e.clone(), t.warning),
+            TileData::Failed(e) => (
+                "Could not scan".to_string(),
+                plan_page::sentence(e),
+                t.warning,
+            ),
         };
         let failed = matches!(tile.data, TileData::Failed(_));
         ui.horizontal(|ui| {
@@ -525,8 +529,8 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
     let size: u64 = plans.iter().map(|p| p.selected_size()).sum();
     let mut go = false;
     let mut close = false;
-    let width = (ui.ctx().content_rect().width() - 120.0).clamp(420.0, 680.0);
-    let max_list = (ui.ctx().content_rect().height() - 330.0).clamp(120.0, 380.0);
+    let width = kit::dialog_width(ui.ctx());
+    let max_list = (ui.ctx().content_rect().height() - 350.0).clamp(120.0, 380.0);
     let dlg = kit::modal(egui::Id::new("sweep-confirm"), &t).show(ui.ctx(), |ui| {
         ui.set_width(width);
         kit::dialog_head(
@@ -558,7 +562,7 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
                 .map(|p| 32.0 + p.selected_count() as f32 * crate::theme::hit::CONFIRM_LINE)
                 .sum();
             let list_h = est.min(max_list);
-            egui::ScrollArea::vertical()
+            let out = egui::ScrollArea::vertical()
                 .min_scrolled_height(list_h)
                 .max_height(list_h)
                 .auto_shrink([false, false])
@@ -594,20 +598,16 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
                         }
                     }
                 });
+            kit::list_more(ui, &t, &out, count);
         });
         ui.add_space(space::L);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let label = match app.settings.method {
-                Method::Trash => "Move to Trash",
-                Method::Quarantine | Method::AdminQuarantine => "Move to Quarantine",
-            };
-            if kit::danger(ui, &t, label) {
-                go = true;
-            }
-            if kit::secondary(ui, &t, "Cancel") {
-                close = true;
-            }
-        });
+        let label = match app.settings.method {
+            Method::Trash => "Move to Trash",
+            Method::Quarantine | Method::AdminQuarantine => "Move to Quarantine",
+        };
+        let (ok, cancel) = kit::dialog_actions(ui, &t, label, kit::Kind::Danger);
+        go |= ok;
+        close |= cancel;
     });
     if dlg.should_close() {
         close = true;
