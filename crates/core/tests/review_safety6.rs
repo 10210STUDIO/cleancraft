@@ -330,28 +330,18 @@ fn editor_with_data(m: &FakeMac) -> (PathBuf, Vec<PathBuf>) {
 /// must not preselect that app's data as "leftovers".
 #[test]
 fn w6_leftovers_route_for_an_installed_app_selects_nothing() {
-    use cleancraft_core::watch::{AppRoute, trashed_app_plan};
+    use cleancraft_core::route::AppRoute;
+    use cleancraft_core::watch::trashed_app_plan;
     let m = FakeMac::new();
     let (app, data) = editor_with_data(&m);
-    let route = AppRoute::AppRemoverLeftovers {
-        app_name: "Editor".into(),
-        bundle_id: "com.example.Editor".into(),
-        trashed: app.clone(),
-    };
-    let AppRoute::AppRemoverLeftovers { trashed, .. } =
-        AppRoute::decode(&route.encode()).expect("decodes")
-    else {
-        unreachable!()
-    };
-    match trashed_app_plan(&m.env, &Settings::default(), &trashed) {
+    // The route text a web page could send.
+    let r = AppRoute::parse(&AppRoute::UninstallApp(app.clone()).to_arg()).expect("parses");
+    let AppRoute::UninstallApp(p) = r else { unreachable!() };
+    match trashed_app_plan(&m.env, &Settings::default(), &p) {
         Err(_) => {}
-        Ok(p) => {
-            let sel: Vec<_> = p.selected().map(|i| i.path.clone()).collect();
-            assert!(
-                sel.is_empty(),
-                "an installed app's data is preselected as leftovers: {sel:?} (notes {:?})",
-                p.notes
-            );
+        Ok(plan) => {
+            let sel: Vec<_> = plan.selected().map(|i| i.path.clone()).collect();
+            assert!(sel.is_empty(), "installed app's data preselected: {sel:?}");
         }
     }
     assert!(data.iter().all(|d| d.exists()));
@@ -391,13 +381,12 @@ fn w1_really_trashed_app_offers_its_leftovers_without_moving_them() {
 // ----------------------------------------------------------------------------------------
 // health6: connect AI apps (mcp_setup)
 
-/// SAF6-5 S2: ~/.claude.json kept as a link into a dotfiles folder (common). Connecting
+/// SAF6-5 S2 (fixed in health6 439520a): ~/.claude.json kept as a link into a dotfiles folder (common). Connecting
 /// writes a temporary file and renames it over the link: the link is replaced by a plain
 /// file, the dotfiles copy silently stops being the one in use. Expected: refuse with a note,
 /// or write through to the link's target when it is inside the home folder.
 #[cfg(unix)]
 #[test]
-#[ignore = "SAF6-5: connecting replaces a symlinked ~/.claude.json with a plain file"]
 fn saf6_5_connect_keeps_a_linked_settings_file_a_link() {
     use cleancraft_core::mcp_setup::{APP_BINARY, CODE_CONFIG, ClientKind, connect};
     let m = FakeMac::new();
@@ -604,5 +593,53 @@ mod dev {
             .collect();
         assert!(bad.is_empty(), "{bad:?}");
         assert!(fake.admin_calls().is_empty());
+    }
+}
+
+// ----------------------------------------------------------------------------------------
+// files6: Trash Bins "Erase in Mail"
+
+/// SAF6-7 S1: Erase in Mail on an account Mail's files do not name uses Mail's "In All
+/// Accounts", which erases the deleted messages of every account (here also the 2 of On My
+/// Mac and the 3 of iCloud), while the confirmation counts only that group: "Erase 1 deleted
+/// message in Mail (20 KB)?". The person confirms one number and loses more. Expected: the
+/// numbers the dialog shows are what Mail erases (all accounts), or an unnamed account offers
+/// the steps in Mail instead of erasing every account.
+#[test]
+#[ignore = "SAF6-7: Erase in Mail on an unnamed account erases every account while the dialog counts one group"]
+fn saf6_7_erase_scope_matches_the_confirmed_numbers() {
+    use cleancraft_core::features::{self, trash};
+    use cleancraft_core::testkit_trash::{answer_account_names, mail_trash};
+    use cleancraft_core::FeatureId;
+    let m = FakeMac::new();
+    let unnamed = "BDEB6609-9DCF-4859-898F-019D1CA8E2D0";
+    let icloud = "AAAA6609-9DCF-4859-898F-019D1CA8E2D0";
+    mail_trash(&m, unnamed, "Deleted Messages", 1, 20_000);
+    mail_trash(&m, icloud, "Deleted Messages", 3, 20_000);
+    mail_trash(&m, "Mailboxes", "Trash", 2, 20_000);
+    answer_account_names(&m.env, &format!("{icloud}|iCloud|me@icloud.com\n"));
+    let p = features::scan(&m.env, &Settings::default(), FeatureId::TrashBins).unwrap();
+    let mut groups: Vec<String> = p
+        .items
+        .iter()
+        .filter(|i| i.category == "mail_trash")
+        .filter_map(|i| i.group.clone())
+        .collect();
+    groups.sort();
+    groups.dedup();
+    assert_eq!(groups.len(), 3, "{groups:?}");
+    let all: usize = groups
+        .iter()
+        .map(|g| trash::mail_group(&m.env, &p, g).unwrap().1)
+        .sum();
+    for g in &groups {
+        let (acct, n, _) = trash::mail_group(&m.env, &p, g).unwrap();
+        let script = trash::erase_script(acct.as_deref()).join("\n");
+        if script.contains("In All Accounts") {
+            assert_eq!(
+                n, all,
+                "group {g:?}: the dialog says {n} messages, Mail's In All Accounts erases {all}"
+            );
+        }
     }
 }
