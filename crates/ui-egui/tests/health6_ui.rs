@@ -62,10 +62,8 @@ fn health_is_a_tool_of_live_monitor_and_reads_good() {
     open_health(&mut h);
     assert!(has(&h, "Good"));
     assert!(has_text(&h, "No rule that needs attention applies"));
-    assert!(
-        has(&h, "Recommendations") == false,
-        "no cards on a calm Mac"
-    );
+    assert!(h.state().health.cards.is_empty(), "no cards on a calm Mac");
+    assert!(has_text(&h, "Nothing to do right now"));
     assert!(has_text(&h, "macOS 15.1"));
     assert!(has_text(&h, "Free space"));
     // The switcher goes back to Live Monitor, and the sidebar remembers Mac Health.
@@ -645,7 +643,10 @@ fn frames_per_second(h: &mut H, secs: f64) -> f64 {
         frames += 1;
         let delay = asked.lock().unwrap().unwrap_or(std::time::Duration::MAX);
         if frames < 4 && std::env::var("BUDGET_DEBUG").is_ok() {
-            eprintln!("frame {frames}: delay {delay:?} causes {:?}", h.ctx.repaint_causes());
+            eprintln!(
+                "frame {frames}: delay {delay:?} causes {:?}",
+                h.ctx.repaint_causes()
+            );
         }
         // egui asks to start the next frame one frame early (the delay has the predicted
         // frame time taken off), so the frame it wants lands one frame later.

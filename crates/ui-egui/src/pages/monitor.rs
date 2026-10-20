@@ -672,14 +672,29 @@ fn proc_rows(
         let was_hovered: bool = ui.data(|d| d.get_temp(hover_id)).unwrap_or(false);
         let resp = ui
             .scope(|ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
                 row(app, ui, &name, &value);
                 let wide = ui.available_width() >= 240.0;
                 if let Some(w) = &g.what
                     && wide
                 {
-                    let fid = font(size::CALLOUT, Weight::Medium);
+                    // A small faint line under the name; the whole text on hover and for
+                    // VoiceOver.
+                    let fid = font(size::FOOTNOTE, Weight::Regular);
                     let short = kit::truncate_end(ui.ctx(), w, &fid, ui.available_width());
-                    kit::quiet_label(ui, &t, &short, w);
+                    let (r, resp) =
+                        ui.allocate_exact_size(vec2(ui.available_width(), 16.0), Sense::hover());
+                    resp.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::WidgetType::Label, true, w.as_str())
+                    });
+                    ui.painter().text(
+                        r.left_center(),
+                        egui::Align2::LEFT_CENTER,
+                        short,
+                        fid,
+                        t.text_faint,
+                    );
+                    ui.add_space(2.0);
                 }
                 if was_hovered && !g.macos {
                     ui.push_id(("quit-link", by_cpu, i), |ui| {

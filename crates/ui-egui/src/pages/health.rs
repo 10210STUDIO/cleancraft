@@ -135,24 +135,47 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
             let w = ui.available_width();
             summary(app, ui);
             ui.add_space(space::M);
-            let cards = app.health.cards.clone();
-            if !cards.is_empty() {
-                section_label(ui, &t, "Recommendations");
-                for (i, c) in cards.iter().enumerate() {
-                    rec_card(app, ui, c, i);
-                    ui.add_space(space::S);
-                }
-                ui.add_space(space::S);
-            }
-            // Facts and the chart side by side when there is room.
-            if w >= 980.0 {
-                ui.columns(2, |cols| {
-                    facts_card(app, &mut cols[0]);
-                    chart_card(app, &mut cols[1]);
-                    cols[1].add_space(space::M);
-                    grew_card(app, &mut cols[1]);
+            // Two columns when there is room: what to do on the left, the figures on the
+            // right, so the chart is on the first screen.
+            if w >= 900.0 {
+                // Card frames draw their stroke just outside the width they are given.
+                let gap = space::GUTTER;
+                let left_w = ((w - gap) * 0.56).floor();
+                let right_w = w - gap - left_w - 8.0;
+                // With few recommendations the facts fill the left column.
+                let few = app.health.cards.len() <= 3;
+                ui.horizontal_top(|ui| {
+                    ui.allocate_ui_with_layout(
+                        vec2(left_w, 0.0),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            ui.set_width(left_w);
+                            recs(app, ui);
+                            if few {
+                                ui.add_space(space::M);
+                                facts_card(app, ui);
+                            }
+                        },
+                    );
+                    ui.add_space(gap);
+                    ui.allocate_ui_with_layout(
+                        vec2(right_w, 0.0),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            ui.set_width(right_w);
+                            chart_card(app, ui);
+                            ui.add_space(space::M);
+                            grew_card(app, ui);
+                            if !few {
+                                ui.add_space(space::M);
+                                facts_card(app, ui);
+                            }
+                        },
+                    );
                 });
             } else {
+                recs(app, ui);
+                ui.add_space(space::M);
                 chart_card(app, ui);
                 ui.add_space(space::M);
                 grew_card(app, ui);
@@ -162,11 +185,6 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
             ui.add_space(space::XL);
         });
     kit::scroll_fade_page(ui, &out, &t);
-}
-
-fn section_label(ui: &mut Ui, t: &Tokens, text: &str) {
-    kit::eyebrow(ui, t, text);
-    ui.add_space(space::XS);
 }
 
 fn summary(app: &mut CleanApp, ui: &mut Ui) {
@@ -263,48 +281,77 @@ fn summary(app: &mut CleanApp, ui: &mut Ui) {
     });
 }
 
-fn rec_card(app: &mut CleanApp, ui: &mut Ui, c: &Card, i: usize) {
+/// The recommendations: one card, one row each (most important first).
+fn recs(app: &mut CleanApp, ui: &mut Ui) {
     let t = app.t;
-    let color = level_color(&t, c.level);
+    let cards = app.health.cards.clone();
     kit::card(&t).show(ui, |ui| {
         ui.set_width(ui.available_width());
-        ui.horizontal(|ui| {
-            let (r, _) = ui.allocate_exact_size(vec2(6.0, 40.0), egui::Sense::hover());
-            ui.painter().rect_filled(r, 3.0, color);
-            ui.add_space(space::S);
-            let btn_w = kit::pill_size(ui, &c.action, kit::Kind::Secondary, false).x;
-            let text_w = (ui.available_width() - btn_w - space::L).max(180.0);
-            ui.allocate_ui_with_layout(
-                vec2(text_w, 0.0),
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| {
-                    ui.set_max_width(text_w);
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label(
-                            RichText::new(&c.headline)
-                                .font(font(size::BODY, Weight::SemiBold))
-                                .color(t.text),
-                        );
-                        kit::tag(ui, c.level.label(), color);
-                    });
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(&c.detail)
-                                .font(font(size::CALLOUT, Weight::Regular))
-                                .color(t.text_dim),
-                        )
-                        .wrap(),
-                    );
-                },
+        kit::card_head(ui, &t, Icon::Check, t.sec_a, "Recommendations");
+        ui.add_space(space::S);
+        if cards.is_empty() {
+            kit::dim(
+                ui,
+                &t,
+                "Nothing to do right now. Mac Health checks again each time you open it.",
             );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.push_id(("rec", i, c.rule), |ui| {
-                    if kit::secondary(ui, &t, &c.action) {
-                        app.act();
-                        // Opens the page (a scan from here only looks); nothing runs here.
-                        app.open_route(&c.route);
-                    }
+            return;
+        }
+        for (i, c) in cards.iter().enumerate() {
+            if i > 0 {
+                let y = ui.cursor().min.y + space::XS;
+                ui.painter().hline(
+                    ui.max_rect().x_range(),
+                    y,
+                    egui::Stroke::new(1.0, Color32::from_white_alpha(12)),
+                );
+                ui.add_space(space::S + 1.0);
+            }
+            rec_row(app, ui, c, i);
+        }
+    });
+}
+
+fn rec_row(app: &mut CleanApp, ui: &mut Ui, c: &Card, i: usize) {
+    let t = app.t;
+    let color = level_color(&t, c.level);
+    ui.horizontal(|ui| {
+        let (r, _) = ui.allocate_exact_size(vec2(4.0, 36.0), egui::Sense::hover());
+        ui.painter().rect_filled(r, 2.0, color);
+        ui.add_space(space::S);
+        let btn_w = kit::pill_size(ui, &c.action, kit::Kind::Secondary, false).x;
+        let text_w = (ui.available_width() - btn_w - space::M).max(160.0);
+        ui.allocate_ui_with_layout(
+            vec2(text_w, 0.0),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.set_max_width(text_w);
+                ui.spacing_mut().item_spacing.y = 2.0;
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        RichText::new(&c.headline)
+                            .font(font(size::BODY, Weight::SemiBold))
+                            .color(t.text),
+                    );
+                    kit::tag(ui, c.level.label(), color);
                 });
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(&c.detail)
+                            .font(font(size::CALLOUT, Weight::Regular))
+                            .color(t.text_dim),
+                    )
+                    .wrap(),
+                );
+            },
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.push_id(("rec", i, c.rule), |ui| {
+                if kit::secondary(ui, &t, &c.action) {
+                    app.act();
+                    // Opens the page (a scan from here only looks); nothing runs here.
+                    app.open_route(&c.route);
+                }
             });
         });
     });
@@ -516,7 +563,13 @@ fn chart_card(app: &mut CleanApp, ui: &mut Ui) {
             (now - days * 86_400, now),
             t.sec_a,
             guide,
-            &|v| human_size(v.max(0.0) as u64),
+            &|v| {
+                if v <= 0.0 {
+                    "0".to_string()
+                } else {
+                    human_size(v as u64)
+                }
+            },
             &date,
         );
         ui.add_space(space::XS);

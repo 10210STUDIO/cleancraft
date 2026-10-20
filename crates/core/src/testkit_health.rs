@@ -155,12 +155,14 @@ pub fn now() -> i64 {
     chrono::Utc::now().timestamp()
 }
 
-/// Free space readings over 90 days: slowly falling, with a cleanup bump on day 40.
-pub fn sample_history(env: &Env, now: i64, total: u64) {
+/// Free space readings over 90 days ending at `end_free`: slowly falling, with a cleanup on
+/// day 40 that gave back 25 GB.
+pub fn sample_history(env: &Env, now: i64, total: u64, end_free: u64) {
     let mut s = Vec::new();
+    let end = end_free as f64 / GB as f64;
     for i in 0..(90 * 4) {
         let d = 90.0 - i as f64 / 4.0;
-        let base = 120.0 - (90.0 - d) * 0.9 + if d < 40.0 { 25.0 } else { 0.0 };
+        let base = end + d * 0.9 - if d > 40.0 { 25.0 } else { 0.0 };
         let wobble = ((i as f64) * 0.7).sin() * 1.5;
         s.push((d, ((base + wobble).max(5.0) * GB as f64) as u64));
     }
@@ -171,7 +173,7 @@ pub fn sample_history(env: &Env, now: i64, total: u64) {
 pub fn calm_mac_now() -> FakeMac {
     let n = now();
     let mac = calm_mac(n);
-    sample_history(&mac.env, n, 500 * GB);
+    sample_history(&mac.env, n, 500 * GB, 300 * GB);
     mac
 }
 
@@ -182,7 +184,7 @@ pub fn troubled_mac_now() -> FakeMac {
     let n = now();
     let mac = calm_mac(n);
     set_disk(&mac.env, 500 * GB, 45 * GB);
-    sample_history(&mac.env, n, 500 * GB);
+    sample_history(&mac.env, n, 500 * GB, 70 * GB);
     let mut h = space_history::load(&mac.env).history;
     // The last week: from 70 GB down to 45 GB.
     h.samples.retain(|s| s.at < n - 7 * 86_400);
