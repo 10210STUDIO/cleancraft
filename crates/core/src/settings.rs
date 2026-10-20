@@ -40,10 +40,29 @@ pub struct Settings {
     /// Developer Clutter: a project with no file changed for this many days is inactive and
     /// its build folders are selected for you.
     pub dev_inactive_days: u64,
+    /// Scheduled scans by the menu bar agent (look only): off, daily or weekly.
+    pub scan_every: crate::schedule::ScanEvery,
+    /// Hour of the day for scheduled scans, 0 to 23, local time.
+    pub scan_hour: u8,
+    /// Day of the week for weekly scans, 1 (Monday) to 7 (Sunday).
+    pub scan_weekday: u8,
+    /// The menu bar agent warns (at most once a day) when the startup disk has less than this
+    /// percent free. 0: never.
+    pub disk_low_percent: u8,
+    /// The menu bar agent shows no notifications while this is on.
+    pub notifications_paused: bool,
+    /// Menu bar agent: offer to remove an app's leftovers when it is dragged to the Trash.
+    pub watch_trash_offer: bool,
+    /// Menu bar agent: check new apps and startup items with Threat Check's rules.
+    pub watch_new_items: bool,
 }
 
 /// Interface sounds start at this loudness (0.0 to 1.0).
 pub const DEFAULT_SOUND_VOLUME: f32 = 0.6;
+/// Scheduled scans run at this hour unless the user picks another.
+pub const DEFAULT_SCAN_HOUR: u8 = 10;
+/// "Disk almost full" below this percent free.
+pub const DEFAULT_DISK_LOW_PERCENT: u8 = 10;
 
 impl Default for Settings {
     fn default() -> Self {
@@ -62,6 +81,13 @@ impl Default for Settings {
             sound_ticks: false,
             dev_roots: Vec::new(),
             dev_inactive_days: 30,
+            scan_every: crate::schedule::ScanEvery::Off,
+            scan_hour: DEFAULT_SCAN_HOUR,
+            scan_weekday: 1,
+            disk_low_percent: DEFAULT_DISK_LOW_PERCENT,
+            notifications_paused: false,
+            watch_trash_offer: false,
+            watch_new_items: false,
         }
     }
 }

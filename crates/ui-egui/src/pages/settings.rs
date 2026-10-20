@@ -2,6 +2,8 @@
 
 use cleancraft_core::executor::{self, Method};
 use cleancraft_core::fsutil::human_size;
+use cleancraft_core::schedule::{self, ScanEvery};
+use cleancraft_core::{login_agent, notify};
 use egui::{RichText, Sense, Ui, vec2};
 
 use crate::app::CleanApp;
@@ -54,6 +56,19 @@ fn slider_row(
     range: std::ops::RangeInclusive<u32>,
     unit: &str,
 ) -> bool {
+    slider_row_with(ui, t, name, label, value, range, &|v| format!("{v}{unit}"))
+}
+
+/// [`slider_row`] with its own value text ("10:00", "10% free").
+fn slider_row_with(
+    ui: &mut Ui,
+    t: &crate::theme::Tokens,
+    name: &str,
+    label: &str,
+    value: &mut u32,
+    range: std::ops::RangeInclusive<u32>,
+    show: &dyn Fn(u32) -> String,
+) -> bool {
     ui.horizontal(|ui| {
         let (r, _) = ui.allocate_exact_size(vec2(260.0, crate::theme::hit::FIELD), Sense::hover());
         ui.painter().text(
@@ -81,8 +96,8 @@ fn slider_row(
         let name = name.to_string();
         r.widget_info(|| egui::WidgetInfo::slider(true, v, name.clone()));
         // The value, beside the slider: shown "50 MB", announced with what it sets.
-        let shown = format!("{value}{unit}");
-        let full = format!("{label}: {value}{unit}");
+        let shown = show(*value);
+        let full = format!("{label}: {shown}");
         let fid = font(size::CALLOUT, Weight::SemiBold);
         let w = kit::galley(ui, &shown, fid.clone(), t.text).size().x + 4.0;
         let (vr, _) = ui.allocate_exact_size(vec2(w.max(64.0), 20.0), Sense::hover());
@@ -269,6 +284,10 @@ pub struct State {
     watch: super::history::JournalWatch,
     /// The macOS folder dialog, while it is open.
     pick: Option<crate::jobs::Job<Result<Option<std::path::PathBuf>, String>>>,
+    /// "Open the app at this page" requests from the menu bar agent and `cleancraft open`.
+    inbox: notify::OpenInbox,
+    /// When the inbox was last read (egui time, seconds).
+    inbox_at: Option<f64>,
 }
 
 /// macOS's own folder dialog (through osascript and env.sys): the folder chosen, or None when
@@ -521,6 +540,8 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                 });
             });
             ui.add_space(space::M);
+            changed |= menu_bar_card(app, ui);
+            ui.add_space(space::M);
             kit::card(&t).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 heading(ui, &t, Icon::Monitor, "Sounds");
@@ -581,5 +602,215 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
     if changed {
         app.act();
         app.save_settings();
+    }
+}
+
+/// The menu bar switch, also its accessible name.
+pub const MENU_BAR_SWITCH: &str = "Show CleanCraft in the menu bar";
+pub const DISK_ALERT_SWITCH: &str = "Warn when the startup disk is almost full";
+pub const PAUSE_SWITCH: &str = "Pause notifications";
+pub const TRASH_OFFER_SWITCH: &str = "Offer to clean up after an app goes to the Trash";
+pub const NEW_ITEMS_SWITCH: &str = "Check new apps and startup items";
+/// Said under the menu bar group: osascript notifications cannot open CleanCraft.
+pub const NOTIFY_NOTE: &str = "Notifications come from macOS Script Editor, so clicking one does not open CleanCraft: what they found waits in the menu bar menu under Review.";
+
+/// The program the login item starts: the installed app's agent (a fixed path on the fake
+/// Mac of the tests).
+fn agent_program(env: &cleancraft_core::Env) -> std::path::PathBuf {
+    if env.is_fake() {
+        return env.sys_path("/Applications/CleanCraft.app/Contents/MacOS/CleanCraft");
+    }
+    match std::env::current_exe() {
+        Ok(exe) => login_agent::agent_program(&exe),
+        Err(_) => env.sys_path("/Applications/CleanCraft.app/Contents/MacOS/CleanCraft"),
+    }
+}
+
+/// Turn the menu bar agent on or off (login item and launchctl), with Undo in the notice.
+fn toggle_menu_bar(app: &mut CleanApp) {
+    let on = login_agent::is_on(&app.env);
+    let res = if on {
+        login_agent::turn_off(&app.env)
+    } else {
+        login_agent::turn_on(&app.env, &agent_program(&app.env))
+    };
+    match res {
+        Ok(ch) => {
+            let id = ch.record.id.clone();
+            let msg = match (&ch.note, on) {
+                (Some(n), _) => format!("CleanCraft is set to show in the menu bar. {n}"),
+                (None, false) => {
+                    "CleanCraft is in the menu bar now and starts there at login.".to_string()
+                }
+                (None, true) => {
+                    "CleanCraft left the menu bar. Its login item is in the Trash.".to_string()
+                }
+            };
+            app.tell_undo(
+                msg,
+                "Menu Bar Change",
+                move |app| match cleancraft_core::executor::undo(&app.env, &id) {
+                    Ok(_) => app.tell("The menu bar change was undone."),
+                    Err(e) => app.warn(format!("Could not undo: {e}")),
+                },
+            );
+        }
+        Err(e) => app.warn(e),
+    }
+}
+
+/// Menu bar, scheduled scans and alerts. Returns true when a setting changed.
+fn menu_bar_card(app: &mut CleanApp, ui: &mut Ui) -> bool {
+    let t = app.t;
+    let mut changed = false;
+    kit::card(&t).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        heading(ui, &t, Icon::Monitor, "Menu bar and notifications");
+        let on = login_agent::is_on(&app.env);
+        if switch_row(ui, &t, on, MENU_BAR_SWITCH, "Menu bar") {
+            app.act();
+            toggle_menu_bar(app);
+        }
+        note(ui, &t, if on {
+            "CPU and memory in the menu bar, from login on. It only looks: it scans, warns and opens CleanCraft, and never cleans by itself."
+        } else {
+            "Off: nothing of CleanCraft runs while the app is closed. The options below need the menu bar."
+        });
+        ui.add_enabled_ui(on, |ui| {
+            // Scheduled scans.
+            ui.horizontal(|ui| {
+                label_cell(ui, &t, "Scan automatically");
+                for every in ScanEvery::ALL {
+                    if kit::radio(ui, &t, app.settings.scan_every == every, every.label()).clicked()
+                        && app.settings.scan_every != every
+                    {
+                        app.settings.scan_every = every;
+                        changed = true;
+                    }
+                }
+            });
+            if app.settings.scan_every != ScanEvery::Off {
+                let mut h = u32::from(app.settings.scan_hour.min(23));
+                if slider_row_with(ui, &t, "Scan time", "At", &mut h, 0..=23, &|v| {
+                    schedule::hour_text(v as u8)
+                }) {
+                    app.settings.scan_hour = h as u8;
+                    changed = true;
+                }
+                if app.settings.scan_every == ScanEvery::Weekly {
+                    ui.horizontal_wrapped(|ui| {
+                        label_cell(ui, &t, "On");
+                        for d in 1..=7u8 {
+                            let name = schedule::weekday_name(d);
+                            if kit::radio(ui, &t, app.settings.scan_weekday == d, name).clicked()
+                                && app.settings.scan_weekday != d
+                            {
+                                app.settings.scan_weekday = d;
+                                changed = true;
+                            }
+                        }
+                    });
+                }
+                let next = schedule::next_text(&app.settings, schedule::local_now())
+                    .unwrap_or_default();
+                note(ui, &t, &format!(
+                    "{next}. A scheduled scan only looks: nothing moves until you review it in Quick Sweep and confirm."
+                ));
+            }
+            // Disk alert.
+            let alert = app.settings.disk_low_percent > 0;
+            if switch_row(ui, &t, alert, DISK_ALERT_SWITCH, "Disk alert") {
+                app.settings.disk_low_percent = if alert {
+                    0
+                } else {
+                    cleancraft_core::settings::DEFAULT_DISK_LOW_PERCENT
+                };
+                changed = true;
+            }
+            if alert {
+                let mut p = u32::from(app.settings.disk_low_percent.clamp(1, 50));
+                if slider_row_with(ui, &t, "Disk alert threshold (percent free)", "When free space is under", &mut p, 2..=30, &|v| {
+                    format!("{v}%")
+                }) {
+                    app.settings.disk_low_percent = p as u8;
+                    changed = true;
+                }
+                note(ui, &t, "At most one alert a day.");
+            }
+            // watch6's watchers, run by the agent.
+            if switch_row(ui, &t, app.settings.watch_trash_offer, TRASH_OFFER_SWITCH, "App in the Trash") {
+                app.settings.watch_trash_offer = !app.settings.watch_trash_offer;
+                changed = true;
+            }
+            note(ui, &t, "When you drag an app to the Trash, CleanCraft offers to show the files it left behind. Nothing moves until you confirm the list.");
+            if switch_row(ui, &t, app.settings.watch_new_items, NEW_ITEMS_SWITCH, "New items") {
+                app.settings.watch_new_items = !app.settings.watch_new_items;
+                changed = true;
+            }
+            note(ui, &t, "New apps and new startup items are checked with Threat Check's rules; a finding opens Threat Check.");
+            if switch_row(ui, &t, app.settings.notifications_paused, PAUSE_SWITCH, "Notifications") {
+                app.settings.notifications_paused = !app.settings.notifications_paused;
+                changed = true;
+            }
+            note(ui, &t, NOTIFY_NOTE);
+        });
+    });
+    changed
+}
+
+/// The label column of a form row (260 pt, right-aligned), like [`switch_row`]'s.
+fn label_cell(ui: &mut Ui, t: &crate::theme::Tokens, label: &str) {
+    let (r, _) = ui.allocate_exact_size(vec2(260.0, crate::theme::hit::FIELD), Sense::hover());
+    ui.painter().text(
+        r.right_center() - vec2(12.0, 0.0),
+        egui::Align2::RIGHT_CENTER,
+        label,
+        font(size::BODY, Weight::Regular),
+        t.text_dim,
+    );
+}
+
+/// A small dim line under a row, in the value column.
+fn note(ui: &mut Ui, t: &crate::theme::Tokens, text: &str) {
+    ui.horizontal(|ui| {
+        ui.add_space(272.0);
+        ui.add(
+            egui::Label::new(
+                RichText::new(text)
+                    .font(font(size::FOOTNOTE, Weight::Regular))
+                    .color(t.text_faint),
+            )
+            .wrap(),
+        );
+    });
+}
+
+/// Requests to open the app at a page (from the menu bar agent, `cleancraft open` or a
+/// notification's menu item): read twice a second, each handled once, then the window comes
+/// to the front. Called from [`CleanApp::logic`].
+pub fn follow_open_requests(app: &mut CleanApp, ctx: &egui::Context) {
+    let now = ctx.input(|i| i.time);
+    if app.settings_page.inbox_at.is_some_and(|at| now - at < 0.5) {
+        return;
+    }
+    app.settings_page.inbox_at = Some(now);
+    let env = app.env.clone();
+    if let Some(route) = app
+        .settings_page
+        .inbox
+        .poll(&env, chrono::Utc::now().timestamp())
+    {
+        open_route(app, &route);
+        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+    }
+}
+
+/// Go to the page a route names: "quick_sweep", "scan:quick_sweep" (Quick Sweep; the scan
+/// starts with the routing of app.rs once it has one), "history", "settings", a feature id.
+/// Empty or unknown: the page stays.
+pub fn open_route(app: &mut CleanApp, route: &str) {
+    let page = route.strip_prefix("scan:").unwrap_or(route).trim();
+    if !page.is_empty() {
+        app.navigate(page);
     }
 }

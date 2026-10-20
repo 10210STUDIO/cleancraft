@@ -68,6 +68,24 @@ pub enum Cmd {
     Startup,
     /// Run the MCP server on stdio (what AI agents launch).
     Serve,
+    /// Run the menu bar agent (live CPU and memory, scheduled scans, notifications). Started
+    /// at login when Settings > "Show CleanCraft in the menu bar" is on. It never cleans.
+    Agent,
+    /// Undo of "Connect AI Apps": `mcp-setup remove <config file> [--drop-empty]`.
+    #[command(name = "mcp-setup")]
+    McpSetup {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Open the app (bringing it to the front when it runs) on a page: quick_sweep,
+    /// scan:quick_sweep, system_junk, history, settings... or a cleancraft:// link.
+    Open {
+        /// Page or cleancraft:// link.
+        route: Option<String>,
+        /// The page, as an option.
+        #[arg(long)]
+        page: Option<String>,
+    },
     #[command(flatten)]
     Apps(crate::cli_apps::AppsCmd),
 }
@@ -94,6 +112,22 @@ pub fn run(args: Vec<String>) -> i32 {
             1
         }
     }
+}
+
+/// The route `cleancraft open` asks for: a cleancraft:// link is read, a page name is kept,
+/// nothing means just open the app.
+pub fn open_route(arg: Option<&str>) -> anyhow::Result<String> {
+    let Some(a) = arg.map(str::trim) else {
+        return Ok(String::new());
+    };
+    if a.contains("://") || a.to_lowercase().starts_with("cleancraft:") {
+        return cleancraft_core::notify::route_from_url(a)
+            .ok_or_else(|| anyhow::anyhow!("not a CleanCraft link: {a}"));
+    }
+    if !cleancraft_core::notify::valid_route(a) {
+        anyhow::bail!("not a page name: {a}");
+    }
+    Ok(a.to_string())
 }
 
 pub fn run_cmd(env: &Env, cmd: Cmd) -> anyhow::Result<()> {
@@ -215,6 +249,17 @@ pub fn run_cmd(env: &Env, cmd: Cmd) -> anyhow::Result<()> {
             crate::cli_perf::run_task(env, &id, yes, &mut std::io::stdout())?
         }
         Cmd::Startup => crate::cli_perf::startup(env, &mut std::io::stdout())?,
+        Cmd::Agent => crate::agent::run(env)?,
+        Cmd::McpSetup { args } => {
+            let code = cleancraft_core::mcp_setup::cli(env, &args);
+            if code != 0 {
+                std::process::exit(code);
+            }
+        }
+        Cmd::Open { route, page } => {
+            let route = open_route(route.or(page).as_deref())?;
+            cleancraft_core::notify::request_open(env, &route).map_err(anyhow::Error::msg)?;
+        }
         Cmd::Serve => {
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(async {
@@ -228,4 +273,83 @@ pub fn run_cmd(env: &Env, cmd: Cmd) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+    use cleancraft_core::testkit::FakeMac;
+
+    #[test]
+    fn open_routes_from_names_and_links() {
+        assert_eq!(open_route(None).ok().as_deref(), Some(""));
+        assert_eq!(
+            open_route(Some("quick-sweep")).ok().as_deref(),
+            Some("quick-sweep")
+        );
+        assert_eq!(
+            open_route(Some("scan:quick_sweep")).ok().as_deref(),
+            Some("scan:quick_sweep")
+        );
+        assert_eq!(
+            open_route(Some("cleancraft://open/history"))
+                .ok()
+                .as_deref(),
+            Some("history")
+        );
+        assert!(open_route(Some("https://example.com/x")).is_err());
+        assert!(open_route(Some("a\nb")).is_err());
+    }
+
+    #[test]
+    fn cleancraft_open_page_writes_the_request_and_opens_the_app() {
+        let m = FakeMac::new();
+        let fake = m.env.fake_sys().expect("fake");
+        fake.answer("open", "");
+        let cli =
+            Cli::try_parse_from(["cleancraft", "open", "--page", "quick-sweep"]).expect("args");
+        run_cmd(&m.env, cli.cmd).expect("open");
+        assert_eq!(
+            fake.calls(),
+            vec!["/usr/bin/open -b com.cristianizzo.cleancraft".to_string()]
+        );
+        let mut inbox = cleancraft_core::notify::OpenInbox::default();
+        assert_eq!(
+            inbox.poll(&m.env, chrono_now()).as_deref(),
+            Some("quick-sweep")
+        );
+        // The agent subcommand refuses while the menu bar is off.
+        let cli = Cli::try_parse_from(["cleancraft", "agent"]).expect("args");
+        let e = run_cmd(&m.env, cli.cmd)
+            .err()
+            .map(|e| e.to_string())
+            .unwrap_or_default();
+        assert!(e.starts_with("The menu bar is off."), "{e}");
+    }
+
+    #[test]
+    fn mcp_setup_passes_its_arguments_through() {
+        let cli = Cli::try_parse_from([
+            "cleancraft",
+            "mcp-setup",
+            "remove",
+            "/Users/me/x.json",
+            "--drop-empty",
+        ])
+        .expect("args");
+        match cli.cmd {
+            Cmd::McpSetup { args } => {
+                assert_eq!(args, ["remove", "/Users/me/x.json", "--drop-empty"])
+            }
+            _ => panic!("not mcp-setup"),
+        }
+    }
+
+    fn chrono_now() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0)
+    }
 }
