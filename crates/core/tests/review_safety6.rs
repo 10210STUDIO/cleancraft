@@ -772,3 +772,29 @@ fn f12_duplicate_downloads_never_lose_the_last_copy() {
     let rep = features::run_plan_with(&DownloadDuplicates, &m.env, &s, &p, &p.digest(), &mut |_, _| {});
     assert!(sel[0].exists(), "the last copy moved: {rep:?}");
 }
+
+/// X1: everything that runs in the background is off until the person turns it on, also for
+/// a settings file saved by an older version (no round 6 fields in it).
+#[test]
+fn x1_background_features_default_off() {
+    use cleancraft_core::schedule::ScanEvery;
+    let m = FakeMac::new();
+    let fresh = Settings::default();
+    assert_eq!(fresh.scan_every, ScanEvery::Off);
+    assert!(!fresh.agents_may_clean);
+    assert!(fresh.dev_roots.is_empty());
+    m.write(&m.env.data_dir().join("settings.json"), br#"{"agents_may_clean":false}"#);
+    let old = Settings::load(&m.env);
+    assert_eq!(old.scan_every, ScanEvery::Off);
+    assert!(!cleancraft_core::login_agent::is_on(&m.env));
+    // Any round 6 switch named like a watcher or schedule must be off by default.
+    let v = serde_json::to_value(&fresh).unwrap();
+    for (k, val) in v.as_object().unwrap() {
+        if ["watch", "notify", "menu_bar_agent", "schedule", "auto"]
+            .iter()
+            .any(|w| k.contains(w))
+        {
+            assert!(val != &serde_json::Value::Bool(true), "{k} is on by default");
+        }
+    }
+}
