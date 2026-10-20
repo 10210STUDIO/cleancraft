@@ -24,11 +24,11 @@ Threat model, defects and verification log: `docs/review/SAFETY-R6.md`.
 | SAF6-2 git pathspec globs | S1 | dev6 | fixed 43facd5 |
 | SAF6-3 venvs preselected | S2 | dev6 | fixed 43facd5 |
 | SAF6-5 symlinked AI settings file replaced | S2 | health6 | fixed 439520a |
-| SAF6-6 notification text read as osascript -e | S1 (MAC-CHECK) | tray6 | open |
+| SAF6-6 notification text read as osascript -e | S1 (MAC-CHECK) | tray6 | fixed ffd10da |
 | SAF6-7 Erase in Mail scope wider than the dialog | S1 | files6 | fixed 55dab45 |
 | SAF6-8 edited uninstall plan moves another app | S2 | apps6 | open |
 
-Counts: S1 4 (3 fixed, 1 open), S2 3 (2 fixed, 1 open), S3 0.
+Counts: S1 4 (4 fixed), S2 3 (2 fixed, 1 open: SAF6-8), S3 0.
 
 ## Real-Mac checks
 

@@ -98,7 +98,7 @@ running when off, missing lock reason). S3 = wording or hygiene.
 | SAF6-2 | S1 | dev6 | `git ls-files -- <rel>` without `--literal-pathspecs`: a project named `app [old]` is a glob, a git-tracked `target/` unlocked | `dev::saf6_2_bracket_named_project_tracked_target_is_locked` | fixed (43facd5) |
 | SAF6-3 | S2 | dev6 | Python venvs preselected in inactive projects | `dev::saf6_3_venvs_never_selected` | fixed (43facd5) |
 | SAF6-5 | S2 | health6 | `mcp_setup::connect` replaced a symlinked settings file (`~/.claude.json`) with a plain file | `saf6_5_connect_keeps_a_linked_settings_file_a_link` | fixed (health6 439520a) |
-| SAF6-6 | S1 (MAC-CHECK) | tray6 | Notification texts follow the `-e` options without `--`: a name starting with `-e` (an app dragged to the Trash) becomes an AppleScript statement (`do shell script`) | `saf6_6_notification_texts_never_become_statements` | open |
+| SAF6-6 | S1 (MAC-CHECK) | tray6 | Notification texts follow the `-e` options without `--`: a name starting with `-e` (an app dragged to the Trash) becomes an AppleScript statement (`do shell script`) | `saf6_6_notification_texts_never_become_statements` | fixed (tray6 ffd10da, `--` before the texts) |
 | SAF6-7 | S1 | files6 | Erase in Mail on an unnamed account ran Mail's "In All Accounts" while the dialog counted one group | `saf6_7_erase_scope_matches_the_confirmed_numbers` | fixed (files6 55dab45) |
 | SAF6-8 | S2 | apps6 | An edited uninstall plan (one app or batch) moves another installed app and its settings: `Uninstaller::validate` checks only running apps (since round 4; the batch widens it) | `review_safety6_apps::{a5_edited_batch_plan_cannot_take_other_apps_files, a5b_edited_single_plan_cannot_take_other_apps_files}` on agent6/safety6-apps | open |
 
@@ -131,7 +131,7 @@ Checked and found right (passing tests, kept as guards):
 - 18:22 health6 439520a: SAF6-5 fixed.
 - 19:13 files6 55dab45: SAF6-7 fixed; Disk Map and Duplicate Downloads guards still pass.
 - 19:40 apps6 6d5f550 (side branch): a1-a4 pass, SAF6-8 open.
-- tray6 c65d005: SAF6-6 open (reminded 19:34).
+- 19:45 tray6 ffd10da: SAF6-6 fixed.
 
 ## Real-Mac checks (cannot be proven here)
 

@@ -209,11 +209,10 @@ fn osascript_getopt(args: &[String]) -> (Vec<String>, Vec<String>) {
     (st, args[i.min(args.len())..].to_vec())
 }
 
-/// T2 / R7: a file or app name never becomes AppleScript code. Names that start with "-e"
+/// T2 / R7 / SAF6-6 (fixed in tray6 ffd10da): a file or app name never becomes AppleScript code. Names that start with "-e"
 /// matter because the texts follow the -e options as plain arguments: getopt reads
 /// "-e do shell script ..." as one more statement unless "--" ends the options first.
 #[test]
-#[ignore = "SAF6-6: a notification text starting with -e is read by osascript as a statement (no -- before argv)"]
 fn saf6_6_notification_texts_never_become_statements() {
     use cleancraft_core::notify::{Notification, osascript_args};
     // An app named like this in the Trash gives the title "<name> was moved to the Trash".
