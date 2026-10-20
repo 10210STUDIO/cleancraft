@@ -87,25 +87,18 @@ fn x2_processes_start_only_in_sys() {
 }
 
 /// D4 D5 D6: developer tools' own cleanup commands delete permanently, without the Trash or
-/// the journal. None of them may appear in app code.
+/// the journal. None of them may be built as program arguments in app code (a command shown
+/// as text for the person to copy is fine; the dynamic test below checks what runs).
 #[test]
-fn d456_no_permanent_developer_cleanup_commands() {
+fn d456_no_permanent_developer_cleanup_arguments() {
     let bad = offending(
         |_| true,
         &[
             "\"delete\", \"unavailable\"",
-            "simctl delete",
-            "simctl erase",
-            "\"erase\"",
+            "\"simctl\", \"delete\"",
+            "\"simctl\", \"erase\"",
             "\"prune\"",
-            "system prune",
-            "image prune",
-            "volume prune",
-            "builder prune",
-            "\"cleanup\"",
-            "brew cleanup",
             "\"autoremove\"",
-            "Docker.raw\")",
         ],
     );
     assert!(
@@ -438,4 +431,178 @@ fn h_connect_writes_valid_json_and_keeps_other_servers() {
     assert_eq!(v["mcpServers"]["other"]["env"]["KEY"], "secret");
     assert!(v["mcpServers"]["cleancraft"]["command"].is_string());
     assert!(executor::history(&m.env).len() == 1, "journaled once");
+}
+
+// ----------------------------------------------------------------------------------------
+// dev6: Developer Clutter
+
+mod dev {
+    use super::*;
+    use cleancraft_core::features::{self, dev_clutter as dc};
+    use cleancraft_core::testkit::age;
+    use cleancraft_core::{FeatureId, Plan};
+
+    pub fn age_tree(dir: &Path, days: u64) {
+        for (p, _) in files_under(dir) {
+            age(&p, days);
+        }
+    }
+
+    pub fn rust(m: &FakeMac, dir: &Path, days: u64) -> PathBuf {
+        m.write(&dir.join("Cargo.toml"), b"[package]\nname = \"x\"\n");
+        m.write(&dir.join("src/main.rs"), b"fn main() {}\n");
+        m.write(&dir.join("target/debug/app"), &vec![7u8; 200_000]);
+        age_tree(dir, days);
+        dir.join("target")
+    }
+
+    pub fn scan(m: &FakeMac, s: &Settings) -> Plan {
+        features::scan(&m.env, s, FeatureId::DevClutter).expect("scan")
+    }
+
+    fn item<'a>(p: &'a Plan, path: &Path) -> &'a cleancraft_core::Item {
+        p.items
+            .iter()
+            .find(|i| i.path == path)
+            .unwrap_or_else(|| panic!("{} not listed: {:?}", path.display(), p.items))
+    }
+
+    /// SAF6-2 (verify): a project folder whose name is a git pattern ("app [old]"): git is
+    /// asked with literal pathspecs, so the tracked target/ is locked.
+    #[test]
+    fn saf6_2_bracket_named_project_tracked_target_is_locked() {
+        let m = FakeMac::new();
+        let repo = m.env.home_path("Projects/mono");
+        m.write(&repo.join(".git/HEAD"), b"ref: refs/heads/main\n");
+        let t = rust(&m, &repo.join("app [old]"), 90);
+        age(&repo.join(".git/HEAD"), 90);
+        m.sys_file("/opt/homebrew/bin/git", 10);
+        let fake = m.env.fake_sys().unwrap();
+        let repo_s = repo.to_string_lossy();
+        // What git prints when the pathspec is taken literally.
+        fake.answer(
+            &format!("/opt/homebrew/bin/git --literal-pathspecs -C {repo_s} ls-files -z -- app [old]/target"),
+            "app [old]/target/debug/app\0",
+        );
+        // Without --literal-pathspecs '[old]' is a character class: git prints nothing.
+        fake.answer(
+            &format!("/opt/homebrew/bin/git -C {repo_s} ls-files -z -- app [old]/target"),
+            "",
+        );
+        let p = scan(&m, &Settings::default());
+        let it = item(&p, &t);
+        assert_eq!(it.locked.as_deref(), Some(dc::LOCK_TRACKED), "{it:?}");
+        assert!(!it.selected);
+    }
+
+    /// target/ holding its own repository is locked at scan time, not only at the move.
+    #[test]
+    fn d1_target_with_its_own_git_is_locked_in_the_scan() {
+        let m = FakeMac::new();
+        let t = rust(&m, &m.env.home_path("Projects/a"), 90);
+        m.write(&t.join(".git/HEAD"), b"ref: refs/heads/main\n");
+        m.write(&t.join("notes.md"), b"my work");
+        age_tree(&t, 90);
+        let p = scan(&m, &Settings::default());
+        let it = item(&p, &t);
+        assert!(it.locked.is_some() && !it.selected, "{it:?}");
+    }
+
+    /// SAF6-3 (verify): a venv in an inactive project is listed, never selected.
+    #[test]
+    fn saf6_3_venvs_never_selected() {
+        let m = FakeMac::new();
+        let py = m.env.home_path("Projects/py");
+        m.write(&py.join("main.py"), b"print(1)");
+        m.write(&py.join(".venv/pyvenv.cfg"), b"home = /usr/bin");
+        m.write(&py.join(".venv/lib/site.py"), &vec![1u8; 40_000]);
+        age_tree(&py, 200);
+        let p = scan(&m, &Settings::default());
+        let it = item(&p, &py.join(".venv"));
+        assert!(!it.selected, "{it:?}");
+    }
+
+    /// D2: code folders in Documents or Desktop: listed locked, and an edited plan that selects
+    /// them is refused at the move (files stay).
+    #[test]
+    fn d2_projects_in_documents_never_move() {
+        let m = FakeMac::new();
+        let code = m.env.home_path("Documents/code");
+        let t = rust(&m, &code.join("game"), 120);
+        let s = Settings {
+            dev_roots: vec![code.clone()],
+            ..Settings::default()
+        };
+        s.save(&m.env).unwrap();
+        let mut p = scan(&m, &s);
+        let i = item(&p, &t).id;
+        assert!(p.items[i].locked.is_some());
+        p.items[i].locked = None;
+        p.items[i].selected = true;
+        let d = p.digest();
+        let rep = features::run_plan(&m.env, &s, &p, &d, &mut |_, _| {});
+        assert!(t.join("debug/app").exists(), "{rep:?}");
+    }
+
+    /// D3: a link inside a code folder to a project elsewhere is never followed.
+    #[cfg(unix)]
+    #[test]
+    fn d3_linked_project_is_not_followed() {
+        let m = FakeMac::new();
+        let elsewhere = m.env.home_path("Archive/old");
+        let t = rust(&m, &elsewhere, 200);
+        fs::create_dir_all(m.env.home_path("Projects")).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, m.env.home_path("Projects/old")).unwrap();
+        let p = scan(&m, &Settings::default());
+        assert!(
+            p.items.iter().all(|i| !i.path.starts_with(m.env.home_path("Projects/old"))
+                && i.path != t),
+            "{:?}",
+            p.items
+        );
+    }
+
+    /// D4 D5 D6 (dynamic): scanning, scanning the tools and cleaning everything selected never
+    /// runs a tool's own delete (simctl delete/erase, docker prune, brew cleanup other than -n).
+    #[test]
+    fn d456_no_tool_delete_ever_runs() {
+        let m = FakeMac::new();
+        rust(&m, &m.env.home_path("Projects/a"), 90);
+        let dev = m.env.home_path(dc::SIM_DEVICES);
+        let udid = "11111111-2222-3333-4444-555555555555";
+        m.write(&dev.join(udid).join("data/x"), &vec![1u8; 10_000]);
+        for p in ["/usr/local/bin/docker", "/opt/homebrew/bin/brew"] {
+            m.sys_file(p, 10);
+        }
+        let fake = m.env.fake_sys().unwrap();
+        fake.answer(
+            "xcrun simctl list devices unavailable -j",
+            &format!(
+                r#"{{"devices":{{"com.apple.CoreSimulator.SimRuntime.iOS-14-0":[{{"udid":"{udid}","name":"iPhone 8","isAvailable":false,"state":"Shutdown","availabilityError":"runtime profile not found"}}]}}}}"#
+            ),
+        );
+        let s = Settings::default();
+        let _ = dc::scan_tools(&m.env);
+        let mut p = scan(&m, &s);
+        for i in 0..p.items.len() {
+            if p.items[i].locked.is_none() {
+                p.items[i].selected = true;
+            }
+        }
+        let d = p.digest();
+        let _ = features::run_plan(&m.env, &s, &p, &d, &mut |_, _| {});
+        let bad: Vec<_> = fake
+            .calls()
+            .into_iter()
+            .filter(|c| {
+                c.contains("simctl delete")
+                    || c.contains("simctl erase")
+                    || c.contains("prune")
+                    || (c.contains("brew") && c.contains("cleanup") && !c.contains(" -n"))
+                    || c.contains("autoremove")
+            })
+            .collect();
+        assert!(bad.is_empty(), "{bad:?}");
+        assert!(fake.admin_calls().is_empty());
+    }
 }
