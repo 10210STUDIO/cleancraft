@@ -165,7 +165,7 @@ impl Walker<'_> {
                     let mut kids: Vec<PathBuf> = rd.flatten().map(|e| e.path()).collect();
                     kids.sort();
                     for k in kids {
-                        if self.opts.skip.iter().any(|s| *s == k) {
+                        if self.opts.skip.contains(&k) {
                             continue;
                         }
                         if let Some(c) = self.node(&k) {
@@ -931,7 +931,7 @@ pub fn external_volumes(env: &Env) -> Vec<Volume> {
             free: l.free,
         });
     }
-    vols.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    vols.sort_by_key(|v| v.name.to_lowercase());
     vols
 }
 

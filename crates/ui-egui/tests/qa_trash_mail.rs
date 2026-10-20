@@ -17,7 +17,6 @@ use cleancraft_ui_egui::pages::extras_cleanup::{
     ACCESS_BUTTON, ERASE_BUTTON, ERASE_CONFIRM, FDA_BUTTON, OPEN_MAIL_BUTTON,
 };
 use common::*;
-use egui_kittest::kittest::Queryable;
 
 const UUID: &str = "BDEB6609-9DCF-4859-898F-019D1CA8E2D0";
 const GROUP: &str = "Mail trash, iCloud (izzo@icloud.com)";
@@ -169,6 +168,22 @@ fn mail_running_or_not() {
         assert_eq!(erase_calls(&m), 1);
         assert!(has_text(&h, "Mail is erasing"));
     }
+}
+
+#[test]
+fn unnamed_account_offers_open_mail_not_erase() {
+    let m = FakeMac::new();
+    std::fs::create_dir_all(m.env.user_trash()).unwrap();
+    mail_trash(&m, UUID, "Deleted Messages", 2, 20_000);
+    let f = m.env.fake_sys().unwrap();
+    f.answer("/usr/bin/open -a Mail", "");
+    let mut h = open(&m);
+    let g = "Mail trash, account BDEB6609";
+    assert!(!has(&h, &format!("{ERASE_BUTTON} {g}")));
+    click(&mut h, &format!("{OPEN_MAIL_BUTTON} {g}"));
+    assert!(f.calls().iter().any(|c| c == "/usr/bin/open -a Mail"));
+    assert_eq!(erase_calls(&m), 0, "nothing erased");
+    assert!(has_text(&h, "Choose Mailbox > Erase Deleted Items"));
 }
 
 #[test]

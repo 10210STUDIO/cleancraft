@@ -151,9 +151,39 @@ pub fn trash_hint(plan: &cleancraft_core::Plan) -> String {
     }
 }
 
-/// "Erase in Mail..." for one Mail account's trash (its group header).
+/// "Erase in Mail..." for one Mail account's trash (its group header). When Mail's name for
+/// the account is not known, "Open Mail" instead: the person picks the account in Mail's own
+/// menu (CleanCraft never uses "In All Accounts", which would erase more than is shown).
 pub fn erase_button(app: &mut CleanApp, ui: &mut Ui, group: &str) {
     let t = app.t;
+    let env = app.env.clone();
+    let named = app
+        .plan_state(FeatureId::TrashBins)
+        .plan
+        .as_ref()
+        .and_then(|p| trash::mail_group(&env, p, group))
+        .is_some_and(|g| g.0.is_some());
+    if !named {
+        let r = kit::secondary_resp(ui, &t, OPEN_MAIL_BUTTON)
+            .on_hover_text("In Mail: Mailbox > Erase Deleted Items, then the account");
+        r.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::Button,
+                true,
+                format!("{OPEN_MAIL_BUTTON} {group}"),
+            )
+        });
+        if r.clicked() {
+            app.act();
+            match trash::open_mail(&app.env) {
+                Ok(()) => app.tell(
+                    "Mail is open. Choose Mailbox > Erase Deleted Items and pick this account, then Scan Again here.",
+                ),
+                Err(e) => app.warn(format!("Could not open Mail: {e}")),
+            }
+        }
+        return;
+    }
     let r = kit::secondary_resp(ui, &t, ERASE_BUTTON)
         .on_hover_text("Mail erases this account's deleted messages for good");
     r.widget_info(|| {
@@ -229,14 +259,9 @@ pub fn trash_frame(app: &mut CleanApp, ui: &mut Ui) {
     if let Some(ask) = st.erase.clone() {
         let mut go = false;
         let mut cancel = false;
-        let whose = match &ask.account {
-            Some(a) => format!("of {a}"),
-            None => "of every Mail account".to_string(),
-        };
-        let menu = format!(
-            "Mailbox > Erase Deleted Items > {}",
-            ask.account.as_deref().unwrap_or("In All Accounts")
-        );
+        let name = ask.account.clone().unwrap_or_default();
+        let whose = format!("of {name}");
+        let menu = format!("Mailbox > Erase Deleted Items > {name}");
         let dlg = kit::modal(Id::new("confirm-erase-mail"), &t).show(ui.ctx(), |ui| {
             ui.set_width(540.0);
             kit::dialog_head(
