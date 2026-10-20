@@ -155,8 +155,8 @@ pub fn run_plan_with(
     Ok(report)
 }
 
-/// `plan` with every selected item that fails [`Feature::validate`] or is on the ignore list
-/// unselected, and those items with the reason.
+/// `plan` with every selected item that fails [`Feature::validate`], is on the ignore list or
+/// holds an item on it unselected, and those items with the reason.
 fn validated(
     f: &dyn Feature,
     env: &Env,
@@ -170,8 +170,15 @@ fn validated(
         if !(it.selected && it.locked.is_none()) {
             continue;
         }
+        let inside = policy::ignored_inside(&settings.ignore, &it.path);
         let why = if settings.is_ignored(&it.path) {
             Err("it is on your ignore list".to_string())
+        } else if let Some(first) = inside.first() {
+            // A folder holding an ignored item never moves as a whole (CHK7-2).
+            Err(format!(
+                "it holds {}, which is on your ignore list",
+                env.display(first)
+            ))
         } else {
             f.validate(env, settings, plan, it)
         };
@@ -278,8 +285,169 @@ pub fn allow_roots(env: &Env, id: FeatureId) -> Vec<PathBuf> {
 /// twice counts once ([`Plan::count_links_once`]).
 pub fn scan_with(f: &dyn Feature, ctx: &ScanCtx<'_>) -> anyhow::Result<Plan> {
     let mut plan = f.scan(ctx)?;
+    narrow_ignored(f, ctx.env, ctx.settings, &mut plan);
+    lock_linked_roots(f, ctx.env, &mut plan);
     plan.count_links_once();
     Ok(plan)
+}
+
+/// Category of the rows that say an allow-list folder is reached through a link.
+pub const CAT_LINKED: &str = "linked";
+
+/// CHK7-1 at scan time: an allow-list folder that is a link or lies under one is never
+/// cleaned (the fence refuses everything in it), so the scan lists the link as one locked
+/// row with the reason and the next step, instead of leaving the person to wonder. Not
+/// added when the scan already lists something under that link (locked with its own reason).
+fn lock_linked_roots(f: &dyn Feature, env: &Env, plan: &mut Plan) {
+    for (link, roots) in policy::linked_roots(env, &f.allow_roots(env)) {
+        if plan.items.iter().any(|i| i.path.starts_with(&link.link)) {
+            continue;
+        }
+        plan.add_category(
+            CAT_LINKED,
+            "Reached through a link",
+            "These folders lead to another place through a link. CleanCraft never cleans through a link.",
+            crate::plan::Risk::High,
+        );
+        let size = roots.iter().map(|r| crate::fsutil::tree_size(r).0).sum();
+        let id = plan.push(
+            link.link.clone(),
+            size,
+            CAT_LINKED,
+            "Reached through a link",
+            crate::plan::Risk::High,
+            false,
+        );
+        plan.lock(id, policy::link_lock_reason(env, &link));
+    }
+}
+
+/// The lock reason of a folder that holds an item on the ignore list.
+pub fn ignored_inside_reason(env: &Env, ignored: &Path) -> String {
+    format!(
+        "It holds {}, which is on your ignore list, so it never moves as a whole. Take it off the ignore list in Settings, or remove the other items yourself in Finder",
+        env.display(ignored)
+    )
+}
+
+/// How deep [`narrow_ignored`] goes to leave an ignored item out.
+const NARROW_DEPTH: usize = 8;
+
+/// CHK7-2 at scan time: a folder the scan offers that holds an item on the ignore list is
+/// replaced by what is in it, minus the ignored item (folders on the way to it are opened the
+/// same way), when the feature accepts those items ([`Feature::validate`] for each,
+/// [`Feature::validate_set`] for the whole selection). Otherwise the folder stays listed,
+/// locked with the reason. The ignored item itself is never offered.
+fn narrow_ignored(f: &dyn Feature, env: &Env, settings: &Settings, plan: &mut Plan) {
+    if settings.ignore.is_empty()
+        || !plan
+            .items
+            .iter()
+            .any(|i| !policy::ignored_inside(&settings.ignore, &i.path).is_empty())
+    {
+        return;
+    }
+    let before = plan.clone();
+    let mut items: Vec<Item> = Vec::new();
+    let mut narrowed = false;
+    for it in &before.items {
+        let inside = policy::ignored_inside(&settings.ignore, &it.path);
+        if inside.is_empty() {
+            items.push(it.clone());
+            continue;
+        }
+        let mut parts = Vec::new();
+        let opened = it.locked.is_none()
+            && std::fs::symlink_metadata(&it.path).is_ok_and(|m| m.is_dir())
+            && split_around(&it.path, &settings.ignore, 0, &mut parts);
+        let children: Vec<Item> = parts
+            .into_iter()
+            .map(|p| {
+                let md = std::fs::symlink_metadata(&p).ok();
+                Item {
+                    size: crate::fsutil::tree_size(&p).0,
+                    modified: md
+                        .and_then(|m| m.modified().ok())
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs() as i64)
+                        .or(it.modified),
+                    path: p,
+                    ..it.clone()
+                }
+            })
+            .collect();
+        let accepted = opened
+            && !children.is_empty()
+            && children
+                .iter()
+                .all(|c| f.validate(env, settings, &before, c).is_ok());
+        if accepted {
+            items.extend(children);
+            narrowed = true;
+        } else {
+            let mut locked = it.clone();
+            locked.selected = false;
+            if locked.locked.is_none() {
+                locked.locked = Some(ignored_inside_reason(env, inside[0]));
+            }
+            items.push(locked);
+        }
+    }
+    let renumber = |items: &mut Vec<Item>| {
+        for (n, i) in items.iter_mut().enumerate() {
+            i.id = n;
+        }
+    };
+    renumber(&mut items);
+    plan.items = items;
+    if narrowed && f.validate_set(env, settings, plan).is_err() {
+        // The feature does not take the parts as a set: lock the folders instead.
+        let mut items: Vec<Item> = Vec::new();
+        for it in &before.items {
+            let inside = policy::ignored_inside(&settings.ignore, &it.path);
+            let mut it = it.clone();
+            if let Some(first) = inside.first() {
+                it.selected = false;
+                if it.locked.is_none() {
+                    it.locked = Some(ignored_inside_reason(env, first));
+                }
+            }
+            items.push(it);
+        }
+        renumber(&mut items);
+        plan.items = items;
+    }
+}
+
+/// What is in `dir` minus the ignored items, opening the folders that hold one. `false` when
+/// it cannot be read or the ignored item lies too deep.
+fn split_around(dir: &Path, ignore: &[PathBuf], depth: usize, out: &mut Vec<PathBuf>) -> bool {
+    if depth >= NARROW_DEPTH {
+        return false;
+    }
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    let mut kids: Vec<PathBuf> = rd.flatten().map(|e| e.path()).collect();
+    kids.sort();
+    for c in kids {
+        if ignore
+            .iter()
+            .any(|i| policy::same_path_ci(&c, i) || policy::starts_with_ci(&c, i))
+        {
+            continue;
+        }
+        if policy::ignored_inside(ignore, &c).is_empty() {
+            out.push(c);
+        } else if std::fs::symlink_metadata(&c).is_ok_and(|m| m.is_dir()) {
+            if !split_around(&c, ignore, depth + 1, out) {
+                return false;
+            }
+        } else {
+            return false;
+        }
+    }
+    true
 }
 
 /// Scan with a fresh context.

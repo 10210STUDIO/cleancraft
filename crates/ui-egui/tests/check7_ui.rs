@@ -19,7 +19,6 @@ fn count(h: &H, needle: &str) -> usize {
 /// exact files and sizes before anything is removed; the confirmation shows only the total.
 /// It must list each item that Finder will erase, with its size.
 #[test]
-#[ignore = "CHK7-3: the Empty Trash confirmation shows a total, not the exact files"]
 fn chk7_3_empty_trash_confirmation_lists_the_exact_items() {
     let mac = trash_mac();
     let mut h = harness(&mac);

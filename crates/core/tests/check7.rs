@@ -32,7 +32,6 @@ fn age_tree(dir: &Path, days: u64) {
 /// refuse it.
 #[cfg(unix)]
 #[test]
-#[ignore = "CHK7-1: links above an allow-list folder are not checked"]
 fn chk7_1_fence_refuses_an_allow_root_reached_through_a_link_into_documents() {
     let mac = FakeMac::new();
     let store = mac.env.home_path("Documents/npm-store");
@@ -52,7 +51,6 @@ fn chk7_1_fence_refuses_an_allow_root_reached_through_a_link_into_documents() {
 /// Documents into the Trash.
 #[cfg(unix)]
 #[test]
-#[ignore = "CHK7-1: System Junk moves Documents contents through a linked ~/.npm"]
 fn chk7_1_system_junk_never_moves_documents_contents_through_a_linked_dot_folder() {
     let mac = FakeMac::new();
     let store = mac.env.home_path("Documents/npm-store");
@@ -102,7 +100,6 @@ fn chk7_1_developer_clutter_never_moves_documents_contents_through_a_linked_pare
 /// home folder can be selected there); System Junk, Large & Old and Developer Clutter behave
 /// the same.
 #[test]
-#[ignore = "CHK7-2: a folder holding an ignored item is moved with it"]
 fn chk7_2_a_folder_holding_an_ignored_item_is_not_moved() {
     let mac = FakeMac::new();
     let projects = mac.env.home_path("Projects");

@@ -1,6 +1,9 @@
 //! The safety fence. Before anything is moved, [`check`] proves the path is
 //! - strictly inside one of the feature's allow-list folders (never the folder itself),
-//! - reached without following a symbolic link,
+//! - reached without following a symbolic link: no folder on the way to it, from the top of
+//!   the disk down to its parent, is a link (macOS's own `/var`, `/tmp` and `/etc` links into
+//!   `/private` excepted), so an allow-list folder that is itself a link, or lies under one
+//!   (`~/.npm`, `~/.cache` linked into Documents or anywhere else), is never cleaned,
 //! - not in a protected location (SIP-protected system folders, iCloud Drive and other cloud
 //!   folders, Photos libraries, the contents of Documents and Desktop, keychains, CleanCraft's
 //!   own data),
@@ -232,23 +235,176 @@ pub fn check(env: &Env, allow: &[PathBuf], p: &Path) -> Result<(), Refusal> {
     if p == root {
         return Err(Refusal::IsAllowRoot);
     }
-    // Every folder from the allow root down to the item's parent must be a real folder.
-    let mut cur = p.parent();
-    while let Some(dir) = cur {
-        if !dir.starts_with(root) {
-            break;
-        }
-        if let Ok(md) = std::fs::symlink_metadata(dir)
-            && md.file_type().is_symlink()
-        {
-            return Err(Refusal::SymlinkOnPath(dir.to_path_buf()));
-        }
-        if dir == root {
-            break;
-        }
-        cur = dir.parent();
+    // No folder on the way to the item may be a link: not below the allow-list folder, not the
+    // allow-list folder itself, not above it (CHK7-1). The item itself may be a link (moving a
+    // link never moves what it points to).
+    if let Some(l) = link_above(env, p) {
+        return Err(match &l.protected {
+            Some(why) => Refusal::Protected(format!(
+                "{why}, reached through the link {}",
+                env.display(&l.link)
+            )),
+            None => Refusal::SymlinkOnPath(l.link),
+        });
+    }
+    // Through one of macOS's own links (/var, /tmp): the real place must not be protected.
+    if let Some(real) = real_place(env, p)
+        && let Some(why) = protected_reason(env, &real)
+    {
+        return Err(Refusal::Protected(why));
     }
     Ok(())
+}
+
+/// macOS's own links at the top of the startup disk: they lead into `/private` and are not
+/// a way around the fence.
+pub const SYSTEM_LINKS: &[&str] = &["/var", "/tmp", "/etc"];
+
+/// A symbolic link found on the way to a path.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinkAbove {
+    /// The link as written (`~/.npm`).
+    pub link: PathBuf,
+    /// Where the path really is, inside the env root; `None` when it leads out of it or cannot
+    /// be found.
+    pub real: Option<PathBuf>,
+    /// The protected place the real path lies in, if any (Documents, Desktop, iCloud Drive, a
+    /// Photos library...). A real place outside the env root counts as protected.
+    pub protected: Option<String>,
+}
+
+fn is_link(p: &Path) -> bool {
+    std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_symlink())
+}
+
+fn is_system_link(env: &Env, p: &Path) -> bool {
+    SYSTEM_LINKS.iter().any(|s| p == env.sys_path(s))
+}
+
+/// The first symbolic link (from the top down) among the folders above `p`: every folder
+/// between the env root (excluded) and `p` (excluded). macOS's own [`SYSTEM_LINKS`] are not
+/// counted. `None`: `p` is reached through real folders only.
+pub fn link_above(env: &Env, p: &Path) -> Option<LinkAbove> {
+    let mut above: Vec<&Path> = p
+        .ancestors()
+        .skip(1)
+        .take_while(|a| a.starts_with(env.root()) && *a != env.root())
+        .collect();
+    above.reverse();
+    let link = above
+        .into_iter()
+        .find(|a| is_link(a) && !is_system_link(env, a))?;
+    Some(describe_link(env, link.to_path_buf(), p))
+}
+
+/// [`link_above`], also counting `p` itself: an allow-list folder that is a link.
+pub fn link_at_or_above(env: &Env, p: &Path) -> Option<LinkAbove> {
+    link_above(env, p).or_else(|| {
+        (is_link(p) && !is_system_link(env, p)).then(|| describe_link(env, p.to_path_buf(), p))
+    })
+}
+
+fn describe_link(env: &Env, link: PathBuf, p: &Path) -> LinkAbove {
+    let real = resolve(env, p);
+    let protected = match &real {
+        Some(r) => protected_reason(env, r).or_else(|| {
+            // Under the link but not protected by name: a folder holding a protected place
+            // (the link leads to the home folder or to Documents' parent) is protected too.
+            if same_path_ci(r, env.home()) || starts_with_ci(env.home(), r) {
+                Some("your home folder".into())
+            } else {
+                None
+            }
+        }),
+        None => Some("a place outside your Mac's folders CleanCraft looks in".into()),
+    };
+    LinkAbove {
+        link,
+        real,
+        protected,
+    }
+}
+
+/// Where `p` really is, with every link resolved, written inside the env root; `None` when it
+/// cannot be found or lies outside the env root. A path that does not exist is resolved
+/// through its deepest existing folder.
+fn resolve(env: &Env, p: &Path) -> Option<PathBuf> {
+    let root = std::fs::canonicalize(env.root()).ok()?;
+    let mut rest: Vec<&OsStr> = Vec::new();
+    let mut cur = p;
+    let real = loop {
+        if let Ok(r) = std::fs::canonicalize(cur) {
+            break r;
+        }
+        rest.push(cur.file_name()?);
+        cur = cur.parent()?;
+    };
+    let mut out = env.root().join(real.strip_prefix(&root).ok()?);
+    for n in rest.into_iter().rev() {
+        out.push(n);
+    }
+    Some(out)
+}
+
+/// The real place of `p` when the way to it crosses one of macOS's own [`SYSTEM_LINKS`];
+/// `None` otherwise (then the path as written is the real place).
+fn real_place(env: &Env, p: &Path) -> Option<PathBuf> {
+    let crosses = SYSTEM_LINKS
+        .iter()
+        .any(|s| p.starts_with(env.sys_path(s)) && is_link(&env.sys_path(s)));
+    if !crosses {
+        return None;
+    }
+    // The item itself is not resolved: moving a link moves the link.
+    let parent = resolve(env, p.parent()?)?;
+    Some(parent.join(p.file_name()?))
+}
+
+/// The lock reason for things a scan cannot offer because the way to them goes through a
+/// link: plain words and the next step.
+pub fn link_lock_reason(env: &Env, l: &LinkAbove) -> String {
+    let link = env.display(&l.link);
+    let place = match (&l.protected, &l.real) {
+        (Some(why), Some(real)) => format!("a link into {why} ({})", env.display(real)),
+        (Some(why), None) => format!("a link into {why}"),
+        (None, Some(real)) => format!(
+            "a link to {}, outside the folders this feature cleans",
+            env.display(real)
+        ),
+        (None, None) => "a link to another place".into(),
+    };
+    format!(
+        "{link} is {place}. CleanCraft never cleans through a link, so nothing in it is moved. Clear it with the app or tool that made it, or make {link} a real folder again, then scan again"
+    )
+}
+
+/// The allow-list folders that are links or lie under one, grouped by the link: (the link,
+/// its allow-list folders that exist, what the link is). Scans list these locked with
+/// [`link_lock_reason`] so the person sees why nothing there is offered.
+pub fn linked_roots(env: &Env, allow: &[PathBuf]) -> Vec<(LinkAbove, Vec<PathBuf>)> {
+    let mut out: Vec<(LinkAbove, Vec<PathBuf>)> = Vec::new();
+    for r in allow {
+        if std::fs::symlink_metadata(r).is_err() {
+            continue;
+        }
+        let Some(l) = link_at_or_above(env, r) else {
+            continue;
+        };
+        match out.iter_mut().find(|(o, _)| o.link == l.link) {
+            Some((_, roots)) => roots.push(r.clone()),
+            None => out.push((l, vec![r.clone()])),
+        }
+    }
+    out
+}
+
+/// The ignore-list entries that lie strictly inside `p` (a folder that holds an ignored item:
+/// it never moves as a whole, CHK7-2).
+pub fn ignored_inside<'a>(ignore: &'a [PathBuf], p: &Path) -> Vec<&'a PathBuf> {
+    ignore
+        .iter()
+        .filter(|i| starts_with_ci(i, p) && !same_path_ci(i, p))
+        .collect()
 }
 
 #[cfg(test)]
