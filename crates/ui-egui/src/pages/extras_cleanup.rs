@@ -140,9 +140,13 @@ pub fn trash_hint(plan: &cleancraft_core::Plan) -> String {
         .any(|i| i.category != "mail_trash" && i.size > 0);
     let mail = plan.items.iter().any(|i| i.category == "mail_trash");
     match (finder, mail) {
-        (true, true) => "Finder empties the Trash; Mail erases deleted mail. Neither can be undone.".into(),
+        (true, true) => {
+            "Finder empties the Trash; Mail erases deleted mail. Neither can be undone.".into()
+        }
         (true, false) => "Finder empties the Trash. CleanCraft cannot put those items back.".into(),
-        (false, true) => "Use Erase in Mail to remove deleted messages. Only Mail can erase them.".into(),
+        (false, true) => {
+            "Use Erase in Mail to remove deleted messages. Only Mail can erase them.".into()
+        }
         (false, false) => "Nothing is waiting in the Trash.".into(),
     }
 }

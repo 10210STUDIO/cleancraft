@@ -9,14 +9,21 @@ use crate::testkit::FakeMac;
 use crate::testkit_cleanup::MAIL_V;
 
 /// A UUID account folder's trash mailbox with `messages` messages of `bytes` each.
-pub fn mail_trash(m: &FakeMac, account: &str, mailbox: &str, messages: usize, bytes: usize) -> PathBuf {
+pub fn mail_trash(
+    m: &FakeMac,
+    account: &str,
+    mailbox: &str,
+    messages: usize,
+    bytes: usize,
+) -> PathBuf {
     for i in 0..messages {
         m.home_file(
             &format!("{MAIL_V}/{account}/{mailbox}.mbox/0A/Data/Messages/{i}.emlx"),
             bytes,
         );
     }
-    m.env.home_path(&format!("{MAIL_V}/{account}/{mailbox}.mbox"))
+    m.env
+        .home_path(&format!("{MAIL_V}/{account}/{mailbox}.mbox"))
 }
 
 /// The system account store lists `rows` ("UUID|Description|user"): the sqlite3 answer for

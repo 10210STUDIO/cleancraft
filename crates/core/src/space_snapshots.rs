@@ -147,10 +147,7 @@ pub fn record_at(env: &Env, loc: &MapLocation, tree: &Tree, taken: i64) -> std::
     });
     std::fs::create_dir_all(env.data_dir())?;
     let tmp = path(env).with_extension("json.tmp");
-    std::fs::write(
-        &tmp,
-        serde_json::to_vec(&f).map_err(std::io::Error::other)?,
-    )?;
+    std::fs::write(&tmp, serde_json::to_vec(&f).map_err(std::io::Error::other)?)?;
     std::fs::rename(tmp, path(env))?;
     Ok(true)
 }

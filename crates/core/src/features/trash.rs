@@ -222,8 +222,7 @@ pub fn trashes(env: &Env) -> Vec<TrashInfo> {
                         .file_name()
                         .map(|n| n.to_string_lossy().into_owned())
                         .unwrap_or_default();
-                    let (kind, classified) =
-                        crate::features::mail::classify(&folder, &known);
+                    let (kind, classified) = crate::features::mail::classify(&folder, &known);
                     let (account, user) = if folder == "Mailboxes" {
                         (Some("On My Mac".to_string()), None)
                     } else if let Some((name, user)) = names.get(&folder) {

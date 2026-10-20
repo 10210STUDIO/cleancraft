@@ -138,7 +138,12 @@ pub const SIZE_EDGES: [u64; 3] = [50_000_000, 1_000_000_000, 5_000_000_000];
 
 /// Size groups: (id, title, smallest size included, first size excluded).
 pub const SIZE_GROUPS: &[(&str, &str, u64, u64)] = &[
-    ("size_50mb_1gb", "50 MB to 1 GB", SIZE_EDGES[0], SIZE_EDGES[1]),
+    (
+        "size_50mb_1gb",
+        "50 MB to 1 GB",
+        SIZE_EDGES[0],
+        SIZE_EDGES[1],
+    ),
     ("size_1gb_5gb", "1 to 5 GB", SIZE_EDGES[1], SIZE_EDGES[2]),
     ("size_over_5gb", "Over 5 GB", SIZE_EDGES[2], u64::MAX),
     ("size_under_50mb", "Under 50 MB", 0, SIZE_EDGES[0]),
@@ -163,8 +168,18 @@ pub const AGE_GROUPS: &[(&str, &str, i64, i64)] = &[
         DAYS_6_MONTHS,
         DAYS_YEAR,
     ),
-    ("age_over_year", "Not opened for over a year", DAYS_YEAR, i64::MAX),
-    ("age_recent", "Opened in the last 3 months", i64::MIN, DAYS_3_MONTHS),
+    (
+        "age_over_year",
+        "Not opened for over a year",
+        DAYS_YEAR,
+        i64::MAX,
+    ),
+    (
+        "age_recent",
+        "Opened in the last 3 months",
+        i64::MIN,
+        DAYS_3_MONTHS,
+    ),
 ];
 
 /// Items whose last-opened time is not known.
@@ -813,11 +828,7 @@ pub fn scan_location(ctx: &ScanCtx<'_>, loc: &Location) -> anyhow::Result<Plan> 
     if w.stopped {
         plan.notes.push("Scan stopped before the end.".into());
     }
-    regroup(
-        &mut plan,
-        ScanOptions::load(env).large_old_group,
-        secs(now),
-    );
+    regroup(&mut plan, ScanOptions::load(env).large_old_group, secs(now));
     Ok(plan)
 }
 
