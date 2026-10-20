@@ -132,7 +132,10 @@ fn scan_select_three_review_confirm_all_gone_then_undo() {
     assert!(
         has(
             &h,
-            &format!("3 apps selected, {} with their leftovers", human_size(size))
+            &format!(
+                "3 apps selected: {} to move, leftovers included",
+                human_size(size)
+            )
         ),
         "bar: 3 apps selected, {}",
         human_size(size)

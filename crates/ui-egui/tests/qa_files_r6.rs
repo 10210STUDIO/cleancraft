@@ -89,7 +89,8 @@ fn duplicate_downloads_tile_review_run_undo() {
         "2 of 2 extra copies selected. One of each set stays."
     ));
     // Review opens Duplicates on that plan.
-    click(&mut h, "Review");
+    let l = tile_label(&h, "Review", 0);
+    click(&mut h, &l);
     assert_eq!(h.state().page, Page::Feature(FeatureId::Duplicates));
     let shown = h.state().plans[&FeatureId::Duplicates]
         .plan
@@ -316,9 +317,23 @@ fn external_volume_folder_removed_and_put_back() {
     assert!(has(&h, &human_size(walked)), "volume total");
     // The disk's index is not walked; a top folder is locked with its reason.
     assert!(!has(&h, ".Spotlight-V100"));
+    // fix7 U7-8: ticking a top folder selects what is inside it; the folder stays.
+    click(&mut h, "Select Movies");
+    assert_eq!(
+        h.state()
+            .disk_map
+            .selected
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>(),
+        vec![movie.clone()]
+    );
+    assert!(has_text(
+        &h,
+        "itself stays: it is a top folder of this disk"
+    ));
     click(&mut h, "Select Movies");
     assert!(h.state().disk_map.selected.is_empty());
-    assert!(has_text(&h, "a top folder of this disk"));
     click(&mut h, "Movies");
     click(&mut h, "Select old.mov");
     click(&mut h, "Review and Remove");

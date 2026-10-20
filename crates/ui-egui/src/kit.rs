@@ -1522,8 +1522,10 @@ pub fn hero(
         ui.add_space(space::XS);
         // A short window gets a smaller round button (it is 156 pt tall with its halo).
         let d = if avail < 620.0 { 88.0 } else { 112.0 };
+        // A stable id (not the auto id of a scope, which moves when the content above
+        // changes): the button keeps its identity from one frame to the next.
         *clicked = ui
-            .scope(|ui| {
+            .push_id("hero-action", |ui| {
                 if !text.enabled {
                     ui.disable();
                     ui.multiply_opacity(0.4);

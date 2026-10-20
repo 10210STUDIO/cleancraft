@@ -379,7 +379,9 @@ fn disk_map_summaries_keep_two_per_folder() {
     mac.home_file("Movies/big2.mov", 1_000_000);
     let tree3 = space::build(mac.env.home(), &stop, &|_, _| {});
     assert!(health::note_disk_map(&mac.env, &tree3, 30).unwrap());
-    assert_eq!(health::map_summaries(&mac.env).len(), 2);
+    // fix7 U7-1: the two newest, plus the first of each day (kept for the 7/30/90-day
+    // comparisons).
+    assert_eq!(health::map_summaries(&mac.env).len(), 3);
     let g = health::what_grew(&mac.env).unwrap();
     assert_eq!((g.from, g.to), (20, 30));
     // 1 MB is under the 500 MB line: nothing is named.

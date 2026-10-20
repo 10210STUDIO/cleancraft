@@ -68,10 +68,11 @@ fn review(h: &mut H, id: FeatureId) {
         .iter()
         .position(|t| t.id == id)
         .expect("tile");
-    let node = h.get_all_by_label("Review").nth(n).expect("Review button");
+    let label = tile_label(h, "Review", n);
+    let node = h.get_all_by_label(&label).next().expect("Review button");
     node.scroll_to_me();
     steps(h);
-    let node = h.get_all_by_label("Review").nth(n).unwrap();
+    let node = h.get_all_by_label(&label).next().unwrap();
     let r = node.rect();
     assert!(r.max.x <= W + 0.5 && r.max.y <= HGT + 0.5 && r.min.y >= 0.0);
     node.click();

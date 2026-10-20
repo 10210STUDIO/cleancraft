@@ -339,30 +339,42 @@ pub const KEEP_DAILY_DAYS: i64 = 10;
 /// ...then one a week, up to this age.
 pub const KEEP_DAYS: i64 = 100;
 
-/// The retention of [`keep_map_summary`]: newest first, the two newest of each folder, then
-/// one at least 20 hours older than the last kept (6 days past [`KEEP_DAILY_DAYS`]), none
-/// older than [`KEEP_DAYS`]; at most [`MAP_ROOTS`] folders.
+/// The retention of [`keep_map_summary`]: per folder the two newest, then one per day (by
+/// the day it was taken) for [`KEEP_DAILY_DAYS`] days and one per week after that, none
+/// older than [`KEEP_DAYS`], at most [`MAP_PER_ROOT`]; at most [`MAP_ROOTS`] folders. Days
+/// and weeks are counted from the epoch, so a measure kept once stays kept as time goes on.
 fn thin(mut all: Vec<MapSummary>) -> Vec<MapSummary> {
     all.sort_by_key(|o| std::cmp::Reverse(o.at));
-    let mut kept: BTreeMap<PathBuf, Vec<i64>> = BTreeMap::new();
-    all.retain(|o| {
-        let k = kept.entry(o.root.clone()).or_default();
-        let newest = k.first().copied().unwrap_or(o.at);
-        let age = newest - o.at;
-        let keep = if k.len() < 2 {
-            true
-        } else if k.len() >= MAP_PER_ROOT || age > KEEP_DAYS * 86_400 {
-            false
+    let newest: BTreeMap<PathBuf, i64> = all.iter().fold(BTreeMap::new(), |mut m, o| {
+        m.entry(o.root.clone()).or_insert(o.at);
+        m
+    });
+    // The oldest measure of each day or week bucket stays (oldest first, so it wins).
+    let mut by_bucket: BTreeMap<(PathBuf, i64), i64> = BTreeMap::new();
+    for o in all.iter().rev() {
+        let age = newest[&o.root] - o.at;
+        let bucket = if age <= KEEP_DAILY_DAYS * 86_400 {
+            o.at.div_euclid(86_400)
         } else {
-            let gap = if age <= KEEP_DAILY_DAYS * 86_400 {
-                20 * 3_600
-            } else {
-                6 * 86_400
-            };
-            k.last().is_some_and(|last| last - o.at >= gap)
+            -1 - o.at.div_euclid(7 * 86_400)
         };
+        by_bucket.entry((o.root.clone(), bucket)).or_insert(o.at);
+    }
+    let mut count: BTreeMap<PathBuf, usize> = BTreeMap::new();
+    all.retain(|o| {
+        let n = count.entry(o.root.clone()).or_default();
+        let age = newest[&o.root] - o.at;
+        let bucket = if age <= KEEP_DAILY_DAYS * 86_400 {
+            o.at.div_euclid(86_400)
+        } else {
+            -1 - o.at.div_euclid(7 * 86_400)
+        };
+        let keep = *n < 2
+            || (*n < MAP_PER_ROOT
+                && age <= KEEP_DAYS * 86_400
+                && by_bucket.get(&(o.root.clone(), bucket)) == Some(&o.at));
         if keep {
-            k.push(o.at);
+            *n += 1;
         }
         keep
     });

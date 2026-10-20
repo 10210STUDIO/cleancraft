@@ -146,6 +146,11 @@ fn tour(w: f32, hgt: f32, mut each: impl FnMut(&str, &H)) {
     let sm = testkit_monitor::sweep_mac();
     let mut q = harness(&sm, w, hgt);
     q.state_mut().sweep.sources = Some(testkit_monitor::sweep_sources());
+    // The start screen lays out its chips for these sources first (fix7: the chips are
+    // toggles now, so their lines can change).
+    for _ in 0..4 {
+        q.step();
+    }
     settle(&mut q);
     each("Quick Sweep", &q);
 }

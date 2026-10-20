@@ -226,10 +226,20 @@ fn review_c1_every_control_shows_the_pointing_hand() {
     let screens: Vec<(&str, fn() -> FakeMac, Go)> = vec![
         ("quick-sweep-idle", testkit_monitor::sweep_mac, |h| {
             h.state_mut().sweep.sources = Some(testkit_monitor::sweep_sources());
+            // The start screen lays out its chips for these sources first (fix7: the chips are
+            // toggles now, so their lines can change).
+            for _ in 0..4 {
+                h.step();
+            }
             settle(h);
         }),
         ("quick-sweep-results", testkit_monitor::sweep_mac, |h| {
             h.state_mut().sweep.sources = Some(testkit_monitor::sweep_sources());
+            // The start screen lays out its chips for these sources first (fix7: the chips are
+            // toggles now, so their lines can change).
+            for _ in 0..4 {
+                h.step();
+            }
             click(h, "Scan");
         }),
         ("system-junk-results", testkit_cleanup::junk_mac, |h| {
@@ -675,6 +685,11 @@ fn review_c16_start_screen_descriptions_have_no_widow() {
             let mut h = harness(&m, w, hgt, 1.0);
             if page.is_empty() {
                 h.state_mut().sweep.sources = Some(testkit_monitor::sweep_sources());
+                // The start screen lays out its chips for these sources first (fix7: the chips are
+                // toggles now, so their lines can change).
+                for _ in 0..4 {
+                    h.step();
+                }
                 settle(&mut h);
             } else {
                 go(&mut h, page);

@@ -69,3 +69,40 @@ pub fn type_into(h: &mut H, label: &str, text: &str) {
     node.type_text(text);
     steps(h);
 }
+
+/// The n-th control named "<what> <tile>" (Quick Sweep's tiles name their Review and Include
+/// after the module since fix7 U7-12), in tile order.
+pub fn tile_label(h: &H, what: &str, n: usize) -> String {
+    use egui_kittest::kittest::NodeT;
+    let prefix = format!("{what} ");
+    h.root()
+        .children_recursive()
+        .filter_map(|x| x.accesskit_node().label())
+        .filter(|l| is_tile_label(l, &prefix))
+        .nth(n)
+        .unwrap_or_else(|| panic!("no control #{n} starting with {prefix}"))
+}
+
+/// How many controls are named "<what> <tile>".
+pub fn count_tile(h: &H, what: &str) -> usize {
+    use egui_kittest::kittest::NodeT;
+    let prefix = format!("{what} ");
+    let kinds = [
+        egui::accesskit::Role::Button,
+        egui::accesskit::Role::CheckBox,
+    ];
+    h.root()
+        .children_recursive()
+        .filter(|x| kinds.contains(&x.accesskit_node().role()))
+        .filter_map(|x| x.accesskit_node().label())
+        .filter(|l| is_tile_label(l, &prefix))
+        .count()
+}
+
+fn is_tile_label(l: &str, prefix: &str) -> bool {
+    l.strip_prefix(prefix).is_some_and(|rest| {
+        cleancraft_core::FeatureId::ALL
+            .iter()
+            .any(|f| cleancraft_core::sweep::tile_title(*f) == rest)
+    })
+}

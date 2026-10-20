@@ -414,7 +414,10 @@ fn watcher_notices_are_shown_and_open_their_page_from_the_menu() {
         osascripts(&m.env),
         vec![line(
             "\"Editor\" went to the Trash",
-            "Remove them with App Remover. Nothing moves without your OK.",
+            &format!(
+                "Remove them with App Remover. Nothing moves without your OK. {}",
+                notify::MENU_HINT
+            ),
             Some("Its leftovers take 120 MB")
         )]
     );

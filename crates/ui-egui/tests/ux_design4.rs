@@ -220,6 +220,11 @@ fn quick_sweep_title_stays_and_the_grid_is_full() {
     base(&m);
     let mut h = harness(&m, 1280.0, 820.0);
     h.state_mut().sweep.sources = Some(testkit_monitor::sweep_sources());
+    // The start screen lays out its chips for these sources first (fix7: the chips are
+    // toggles now, so their lines can change).
+    for _ in 0..4 {
+        h.step();
+    }
     settle(&mut h);
     let idle = title_y(&h).expect("title on the start screen");
     h.state_mut().sweep.phase =

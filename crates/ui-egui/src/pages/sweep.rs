@@ -909,6 +909,15 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
     }
 }
 
+/// The files of a run that did not move and can be tried again (not the ones that are gone).
+fn retryable(rep: &executor::Report) -> Vec<std::path::PathBuf> {
+    rep.skipped
+        .iter()
+        .filter(|(_, w)| !matches!(w, executor::SkipReason::Missing))
+        .map(|(p, _)| p.clone())
+        .collect()
+}
+
 /// Did the runs move anything to the Trash, to the quarantine?
 fn moved_to(runs: &[ModuleRun]) -> (bool, bool) {
     let (mut trash, mut quarantine) = (false, false);
@@ -939,6 +948,7 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
         .collect();
     let started = kit::first_seen(ui, ("sweep-done", key));
     let mut undo: Option<(FeatureId, String)> = None;
+    let mut retry: Option<Vec<std::path::PathBuf>> = None;
     // One centred composition like every module's Done screen: the object, the headline,
     // the buttons, then a card per module, all centred in the page (scrolls when long).
     egui::ScrollArea::vertical()
@@ -1067,8 +1077,10 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
                                         }
                                     });
                                     if let Ok(rep) = &r.result {
+                                        // Each file that stayed: why, and the next step, as
+                                        // on every module's Done screen.
                                         for (p, why) in &rep.skipped {
-                                            ui.horizontal(|ui| {
+                                            ui.horizontal_wrapped(|ui| {
                                                 ui.add_space(44.0);
                                                 ui.label(
                                                     RichText::new(app.env.display(p))
@@ -1077,6 +1089,34 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
                                                 ui.label(
                                                     RichText::new(why.to_string()).color(t.warning),
                                                 );
+                                                if let Some(h) = plan_page::skip_hint(why) {
+                                                    ui.label(
+                                                        RichText::new(h)
+                                                            .font(font(
+                                                                size::FOOTNOTE,
+                                                                Weight::Regular,
+                                                            ))
+                                                            .color(t.text_dim),
+                                                    );
+                                                }
+                                            });
+                                        }
+                                        let again = retryable(rep);
+                                        if !again.is_empty() && !app.sweep.undone.contains(&r.id) {
+                                            ui.horizontal(|ui| {
+                                                ui.add_space(44.0);
+                                                let b = kit::secondary_resp(ui, &t, "Try Again");
+                                                let title = sweep::tile_title(r.id);
+                                                b.widget_info(|| {
+                                                    egui::WidgetInfo::labeled(
+                                                        egui::WidgetType::Button,
+                                                        true,
+                                                        format!("Try Again {title}"),
+                                                    )
+                                                });
+                                                if b.clicked() {
+                                                    retry = Some(again.clone());
+                                                }
                                             });
                                         }
                                     }
@@ -1087,6 +1127,28 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
                 }
             });
         });
+    if let Some(again) = retry {
+        // Only what did not move, with the same confirmation listing it.
+        app.act();
+        if let Some(res) = app.sweep.result.as_mut() {
+            for tile in &mut res.tiles {
+                if let TileData::Plan(plan) = &mut tile.data {
+                    for i in 0..plan.items.len() {
+                        let on = again.contains(&plan.items[i].path);
+                        plan.set_selected(i, on);
+                    }
+                }
+            }
+            if !res.to_run(&app.settings.sweep_skip).is_empty() {
+                app.sweep.phase = Phase::Confirm;
+            } else {
+                app.warn(
+                    "Those files are no longer in Quick Sweep's list. Scan Again to look for them.",
+                );
+            }
+        }
+        return;
+    }
     if let Some((id, plan_id)) = undo {
         app.act();
         let (n, errs) = executor::undo_plan(&app.env, &plan_id);

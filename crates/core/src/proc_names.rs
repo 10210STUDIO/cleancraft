@@ -311,6 +311,19 @@ mod tests {
     }
 
     #[test]
+    fn ps_paths_give_names_and_apps() {
+        let v = crate::monitor::parse_ps_usage(
+            "  1 2.0 100 /Applications/Docker.app/Contents/MacOS/com.docker.backend\n  2 1.0 10 Brave Browser Helper (Renderer)\n  3 0.0 1 (kernel_task)\n",
+        )
+        .unwrap();
+        assert_eq!(v[0].name, "com.docker.backend");
+        assert_eq!(explain_proc(&v[0]).unwrap().what, "Helper of Docker.");
+        assert_eq!(v[1].name, "Brave Browser Helper (Renderer)");
+        assert_eq!(v[1].path, None);
+        assert_eq!(v[2].name, "kernel_task");
+    }
+
+    #[test]
     fn unknown_processes_get_words() {
         let mut d = p("com.docker.backend", 38.0, 1);
         assert_eq!(

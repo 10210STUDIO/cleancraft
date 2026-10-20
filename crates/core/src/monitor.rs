@@ -344,12 +344,11 @@ pub fn parse_ps_usage(stdout: &str) -> Option<Vec<AppUse>> {
             (n.to_string(), Some(comm.to_string()))
         } else {
             // "(kernel_task)": a name in brackets when ps cannot read the path.
-            (
-                comm.trim_start_matches('(')
-                    .trim_end_matches(')')
-                    .to_string(),
-                None,
-            )
+            let bare = comm
+                .strip_prefix('(')
+                .and_then(|c| c.strip_suffix(')'))
+                .unwrap_or(comm);
+            (bare.to_string(), None)
         };
         out.push(AppUse {
             pid,

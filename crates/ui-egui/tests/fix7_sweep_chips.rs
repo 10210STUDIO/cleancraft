@@ -113,3 +113,25 @@ fn none_on_disables_scan_with_a_hint() {
     steps(&mut h);
     assert!(h.state().sweep.result.is_none(), "nothing scanned");
 }
+
+/// Lead's extra: a file that stayed shows its next step, and Try Again moves it after the
+/// same confirmation.
+#[test]
+fn done_shows_the_next_step_and_try_again_moves_what_stayed() {
+    let m = sweep_mac();
+    let mut h = open(&m);
+    click(&mut h, "Scan");
+    let b = m.env.home_path("Library/Mail Downloads/b.zip");
+    m.env.fake_sys().unwrap().set_open(&b);
+    click(&mut h, "Review and Clean");
+    click(&mut h, "Move to Trash");
+    assert!(b.exists());
+    assert!(has_text(&h, "Quit the app that uses it, then Try Again."));
+    let label = format!("Try Again {}", tile_title(FeatureId::MailAttachments));
+    // The app was quit.
+    m.env.fake_sys().unwrap().with(|s| s.open_files.clear());
+    click(&mut h, &label);
+    assert!(has_text(&h, "b.zip"), "the confirmation lists what stayed");
+    click(&mut h, "Move to Trash");
+    assert!(!b.exists());
+}

@@ -85,17 +85,17 @@ fn every_card_opens_its_page() {
         (
             "Only 45.0 GB free",
             "See What Takes Space",
-            AppRoute::Feature(FeatureId::SpaceLens),
+            AppRoute::Scan(FeatureId::SpaceLens),
         ),
         (
             "Free space fell by",
             "Open Disk Map",
-            AppRoute::Feature(FeatureId::SpaceLens),
+            AppRoute::Scan(FeatureId::SpaceLens),
         ),
         (
             "Threat Check found 1 item",
             "Review in Threat Check",
-            AppRoute::Feature(FeatureId::Malware),
+            AppRoute::Scan(FeatureId::Malware),
         ),
         (
             "1 startup item is not signed",
@@ -109,13 +109,13 @@ fn every_card_opens_its_page() {
         ),
         (
             "The battery holds 75%",
-            "Open Live Monitor",
-            AppRoute::Feature(FeatureId::Monitor),
+            "Open Battery Settings",
+            AppRoute::BatterySettings,
         ),
         (
             "2.30 GB of junk found 4 days ago",
             "Review in System Junk",
-            AppRoute::Feature(FeatureId::SystemJunk),
+            AppRoute::Scan(FeatureId::SystemJunk),
         ),
         (
             "3 apps not opened for 6 months",
@@ -145,9 +145,12 @@ fn every_card_opens_its_page() {
         let node = h.get_all_by_label(action).nth(n).expect("button");
         node.click();
         steps(&mut h);
+        // fix7: "Review in ..." scans at once (U7-3); the battery opens System Settings
+        // and the page stays (U7-16).
         let want = match &route {
-            AppRoute::Feature(f) => Page::Feature(*f),
+            AppRoute::Feature(f) | AppRoute::Scan(f) => Page::Feature(*f),
             AppRoute::UnusedApps => Page::Feature(FeatureId::Uninstaller),
+            AppRoute::BatterySettings => Page::Health,
             _ => unreachable!(),
         };
         assert_eq!(h.state().page, want, "{action}");
@@ -167,27 +170,30 @@ fn why_lists_the_deciding_cards_and_rules_are_shown() {
     let mac = th::troubled_mac_now();
     let mut h = harness(&mac);
     open_health(&mut h);
-    let why = h
-        .query_all_by_label_contains("Why: ")
-        .next()
-        .expect("why line")
-        .accesskit_node()
-        .label()
-        .or(None)
-        .map(|s| s.to_string())
-        .or_else(|| {
-            h.query_all_by_label_contains("Why: ")
-                .next()
-                .and_then(|n| n.accesskit_node().value().map(|v| v.to_string()))
-        })
-        .unwrap_or_default();
-    for c in h.state().health.cards.clone() {
-        assert_eq!(
-            why.contains(&c.headline),
-            c.level >= Level::Attention,
-            "{} in {why}",
+    // fix7: a short list of reasons, one line each (the first four).
+    let attention: Vec<_> = h
+        .state()
+        .health
+        .cards
+        .iter()
+        .filter(|c| c.level >= Level::Attention)
+        .cloned()
+        .collect();
+    assert!(has_text(
+        &h,
+        &format!("{} things need attention:", attention.len())
+    ));
+    for c in attention.iter().take(4) {
+        assert!(
+            has(&h, &format!("\u{2022}  {}", c.headline)),
+            "{}",
             c.headline
         );
+    }
+    for c in h.state().health.cards.clone() {
+        if c.level < Level::Attention {
+            assert!(!has(&h, &format!("\u{2022}  {}", c.headline)));
+        }
     }
     click(&mut h, "How this is decided");
     for r in cleancraft_core::health::RULES {
@@ -306,7 +312,11 @@ fn what_grew_after_two_disk_map_scans() {
     let mut h = harness(&mac);
     open_health(&mut h);
     assert!(has_text(&h, "+8.00 GB"));
-    assert!(has_text(&h, "Disk Map scans of"));
+    assert!(has_text(&h, "measures of"));
+    // fix7 U7-16: each folder opens in Disk Map.
+    let shown = mac.env.display(&home.join("Movies"));
+    click(&mut h, &format!("Open {shown} in Disk Map"));
+    assert_eq!(h.state().page, Page::Feature(FeatureId::SpaceLens));
 }
 
 #[test]
@@ -380,6 +390,10 @@ fn first_launch_asks_once_and_not_now_is_remembered() {
     // Tests do not run launch work by themselves; the real app does at its first frame.
     h.state_mut().launch_checks();
     steps(&mut h);
+    // fix7 U7-5: the welcome first (Full Disk Access is on here, so its step is skipped).
+    assert_eq!(h.state().page, Page::Welcome);
+    h.state_mut().fda = cleancraft_core::permissions::Access::Granted;
+    click(&mut h, "Continue");
     assert_eq!(h.state().page, Page::ConnectAi);
     assert!(has_text(&h, "AI apps such as Claude can ask CleanCraft"));
     assert!(has_text(&h, "Claude Desktop"));
