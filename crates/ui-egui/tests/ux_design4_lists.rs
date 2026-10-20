@@ -151,11 +151,17 @@ fn stale_items(h: &mut H) -> Vec<String> {
     bad
 }
 
-/// Scan, keep the preselection, confirm, Done; returns what was selected.
+/// Scan, keep the preselection (Mail Downloads: tick everything), confirm, Done; returns what
+/// was selected.
 fn clean(h: &mut H, f: FeatureId) -> Vec<PathBuf> {
     go(h, f.as_str());
     click(h, "Scan");
     steps(h);
+    if f == FeatureId::MailAttachments {
+        // Mail Downloads preselects nothing: the user ticks every attachment.
+        assert!(selected(h, f).is_empty(), "Mail Downloads: preselected");
+        click(h, "Select All");
+    }
     let chosen = selected(h, f);
     assert!(!chosen.is_empty(), "{}: nothing preselected", f.title());
     let before = paths(h, f);
