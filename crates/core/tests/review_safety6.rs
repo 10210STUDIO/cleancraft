@@ -643,3 +643,132 @@ fn saf6_7_erase_scope_matches_the_confirmed_numbers() {
         }
     }
 }
+
+// ----------------------------------------------------------------------------------------
+// files6: Disk Map on the whole disk and external drives
+
+mod disk_map {
+    use super::*;
+    use cleancraft_core::features;
+    use cleancraft_core::{FeatureId, Plan, Risk};
+
+    /// A Mac with one external drive "USB" mounted (df answers), and a link
+    /// /Volumes/Macintosh HD -> / like a real Mac.
+    pub fn mac_with_usb() -> FakeMac {
+        let m = FakeMac::new();
+        let df = "Filesystem 1024-blocks Used Available Capacity Mounted on\n\
+/dev/disk3s1s1 971350180 10000000 500000000 3% /\n\
+/dev/disk3s5 971350180 400000000 500000000 45% /System/Volumes/Data\n\
+/dev/disk4s1 62000000 1000000 61000000 2% /Volumes/USB\n\
+//me@nas/share 900000000 1000 800000000 1% /Volumes/share\n";
+        m.env.fake_sys().unwrap().answer("/bin/df -Pk", df);
+        fs::create_dir_all(m.env.sys_path("/Volumes/USB")).unwrap();
+        fs::create_dir_all(m.env.sys_path("/Volumes/share")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(m.env.root(), m.env.sys_path("/Volumes/Macintosh HD")).unwrap();
+        m
+    }
+
+    /// A Disk Map plan selecting `paths` (what an edited plan file or a buggy page could send).
+    pub fn plan_of(paths: &[PathBuf]) -> Plan {
+        let mut p = Plan::new(FeatureId::SpaceLens);
+        p.add_category("items", "Items", "", Risk::High);
+        for x in paths {
+            p.push(x.clone(), 1, "items", "picked in the map".to_string(), Risk::High, true);
+        }
+        p
+    }
+
+    /// F7: outside the home folder only external drives' own files may move; macOS folders,
+    /// apps, the other user's files, a network share, a drive's system folders and the drive
+    /// itself never do, even when a plan selects them.
+    #[test]
+    fn f7_edited_disk_map_plan_cannot_reach_system_or_volume_internals() {
+        let m = mac_with_usb();
+        let targets = vec![
+            m.sys_file("/Library/Preferences/com.apple.x.plist", 1_000),
+            m.sys_file("/Applications/Editor.app/Contents/MacOS/Editor", 1_000),
+            m.sys_file("/Users/Shared/family.jpg", 1_000),
+            m.sys_file("/private/var/log/system.log", 1_000),
+            m.sys_file("/opt/homebrew/bin/git", 1_000),
+            m.sys_file("/Volumes/share/team.doc", 1_000),
+            m.sys_file("/Volumes/USB/.Spotlight-V100/store.db", 1_000),
+            m.sys_file("/Volumes/USB/Backups.backupdb/Mac/2026/x", 1_000),
+            m.sys_file("/Volumes/USB/.fseventsd/0001", 1_000),
+            m.sys_file("/Volumes/USB/Photos Library.photoslibrary/db", 1_000),
+            m.home_file("Documents/thesis.pdf", 1_000),
+            m.home_file("Library/Mobile Documents/com~apple~CloudDocs/a.txt", 1_000),
+        ];
+        let mut sel: Vec<PathBuf> = targets.clone();
+        sel.push(m.env.sys_path("/Volumes/USB"));
+        sel.push(m.env.sys_path("/Applications"));
+        sel.push(m.env.sys_path("/Volumes/USB/Photos Library.photoslibrary"));
+        #[cfg(unix)]
+        sel.push(m.env.sys_path("/Volumes/Macintosh HD/Users/tester/Downloads"));
+        let p = plan_of(&sel);
+        let s = Settings::default();
+        let rep = features::run_plan(&m.env, &s, &p, &p.digest(), &mut |_, _| {});
+        let moved: Vec<_> = rep
+            .as_ref()
+            .map(|r| r.moved.iter().map(|x| x.id.clone()).collect())
+            .unwrap_or_default();
+        let gone: Vec<_> = targets.iter().filter(|t| !t.exists()).collect();
+        assert!(gone.is_empty() && moved.is_empty(), "moved {moved:?}, gone {gone:?}");
+        assert!(m.env.sys_path("/Volumes/USB").is_dir());
+    }
+
+    /// F9: a person's file on an external drive goes to that drive's Trash (one rename on the
+    /// same disk), journaled, and Undo puts it back.
+    #[test]
+    fn f9_external_drive_file_goes_to_its_own_trash_and_back() {
+        let m = mac_with_usb();
+        let f = m.sys_file("/Volumes/USB/Movies/holiday.mov", 50_000);
+        let p = plan_of(std::slice::from_ref(&f));
+        let s = Settings::default();
+        let rep = features::run_plan(&m.env, &s, &p, &p.digest(), &mut |_, _| {}).expect("run");
+        assert_eq!(rep.moved.len(), 1, "{rep:?}");
+        assert!(!f.exists());
+        let trash = m.env.sys_path("/Volumes/USB/.Trashes");
+        assert!(
+            files_under(&trash).iter().any(|(x, _)| x.ends_with("holiday.mov")),
+            "not in the drive's Trash"
+        );
+        executor::undo(&m.env, &rep.moved[0].id).expect("undo");
+        assert!(f.exists());
+    }
+}
+
+/// F1 F2: Quick Sweep's Duplicate Downloads keeps one copy of each set; when the kept copy
+/// changed or went away after the scan, the run moves nothing of that set.
+#[test]
+fn f12_duplicate_downloads_never_lose_the_last_copy() {
+    use cleancraft_core::features::duplicates::DownloadDuplicates;
+    use cleancraft_core::features::{self, Feature, ScanCtx};
+    use std::sync::atomic::AtomicBool;
+    let m = FakeMac::new();
+    let data = vec![42u8; 300_000];
+    let a = m.env.home_path("Downloads/report.pdf");
+    let b = m.env.home_path("Downloads/report (1).pdf");
+    m.write(&a, &data);
+    m.write(&b, &data);
+    let s = Settings::default();
+    let cancel = AtomicBool::new(false);
+    let ctx = ScanCtx {
+        env: &m.env,
+        settings: &s,
+        cancel: &cancel,
+        progress: &|_| {},
+    };
+    let p = DownloadDuplicates.scan(&ctx).expect("scan");
+    let sel: Vec<_> = p.selected().map(|i| i.path.clone()).collect();
+    assert_eq!(sel.len(), 1, "one of two copies preselected: {:?}", p.items);
+    let kept = if sel[0] == a { b.clone() } else { a.clone() };
+    // The kept copy is edited after the scan: it is no longer a copy.
+    m.write(&kept, b"edited");
+    let rep = features::run_plan_with(&DownloadDuplicates, &m.env, &s, &p, &p.digest(), &mut |_, _| {});
+    assert!(sel[0].exists(), "the last copy moved: {rep:?}");
+    // The kept copy is gone (the person moved it): same.
+    fs::remove_file(&kept).unwrap();
+    let rep = features::run_plan_with(&DownloadDuplicates, &m.env, &s, &p, &p.digest(), &mut |_, _| {});
+    assert!(sel[0].exists(), "the last copy moved: {rep:?}");
+}
