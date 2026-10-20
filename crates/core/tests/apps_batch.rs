@@ -170,7 +170,8 @@ fn apps_of_macos_cannot_be_in_a_batch_even_through_an_edited_plan() {
         uninstaller::batch_plan(env, &set(), &[m.editor.clone(), m.safari.clone()]).unwrap_err();
     assert!(err.to_string().contains("Safari is part of macOS"), "{err}");
     // An edited plan: Safari's bundle and its cache pushed in, selected, unlocked.
-    let (mut plan, apps) = uninstaller::batch_plan(env, &set(), &[m.editor.clone()]).unwrap();
+    let (mut plan, apps) =
+        uninstaller::batch_plan(env, &set(), std::slice::from_ref(&m.editor)).unwrap();
     for p in [
         m.safari.clone(),
         env.home_path("Library/Caches/com.apple.Safari"),
