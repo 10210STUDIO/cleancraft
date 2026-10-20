@@ -10,8 +10,11 @@
 //! Every card opens a page ([`AppRoute`]); none runs a cleanup or a task. Scans started from
 //! a card only look, and the person reviews and confirms as anywhere else.
 //!
-//! Also here: the notes of the last scans (`scan-notes.json`) and the two latest Disk Map
-//! summaries per folder (`disk-map-history.json`), both in CleanCraft's data folder.
+//! Also here: the notes of the last scans (`scan-notes.json`) and the Disk Map summaries per
+//! folder (`disk-map-history.json`, thinned to about one a day, then one a week), both in
+//! CleanCraft's data folder. A light measure of the home folder is added at most once a day
+//! (at launch and on scheduled scans), so "what grew" has data without the person mapping
+//! anything.
 
 use std::collections::BTreeMap;
 use std::io;
@@ -167,7 +170,14 @@ pub struct ScanNote {
     /// The plan the note is about (empty for counts).
     #[serde(default)]
     pub plan_id: String,
+    /// Threat Check only: the items found (at most [`NOTE_PATHS`]), so Mac Health can open
+    /// Threat Check with the one it counted selected.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paths: Vec<PathBuf>,
 }
+
+/// Paths kept in a Threat Check note.
+pub const NOTE_PATHS: usize = 20;
 
 fn notes_path(env: &Env) -> PathBuf {
     env.data_dir().join("scan-notes.json")
@@ -216,6 +226,15 @@ pub fn note_plan(env: &Env, plan: &Plan) -> io::Result<()> {
             bytes: plan.items.iter().map(|i| i.size).sum(),
             items: plan.items.len(),
             plan_id: plan.id.clone(),
+            paths: if f == FeatureId::Malware {
+                plan.items
+                    .iter()
+                    .take(NOTE_PATHS)
+                    .map(|i| i.path.clone())
+                    .collect()
+            } else {
+                Vec::new()
+            },
         },
     )
 }
@@ -230,6 +249,7 @@ pub fn note_count(env: &Env, f: FeatureId, items: usize, at: i64) -> io::Result<
             bytes: 0,
             items,
             plan_id: String::new(),
+            paths: Vec::new(),
         },
     )
 }
@@ -295,7 +315,9 @@ pub fn note_disk_map(env: &Env, tree: &crate::space::Tree, at: i64) -> io::Resul
 }
 
 /// Keep a summary made with [`summarize`] (the app writes it once the person leaves Disk Map,
-/// so its own file never changes the sizes on screen).
+/// so its own file never changes the sizes on screen). Per folder the two newest stay, and
+/// older ones thinned out (about one a day for [`KEEP_DAILY_DAYS`] days, then one a week up
+/// to [`KEEP_DAYS`] days), so "what grew" can compare over 7, 30 or 90 days.
 pub fn keep_map_summary(env: &Env, s: MapSummary) -> io::Result<bool> {
     let mut all = map_summaries(env);
     if all
@@ -305,12 +327,44 @@ pub fn keep_map_summary(env: &Env, s: MapSummary) -> io::Result<bool> {
         return Ok(false);
     }
     all.push(s.clone());
+    all = thin(all);
+    write_json(&map_path(env), &all)?;
+    Ok(true)
+}
+
+/// Summaries kept at most per folder.
+pub const MAP_PER_ROOT: usize = 24;
+/// Older summaries: about one a day for this many days...
+pub const KEEP_DAILY_DAYS: i64 = 10;
+/// ...then one a week, up to this age.
+pub const KEEP_DAYS: i64 = 100;
+
+/// The retention of [`keep_map_summary`]: newest first, the two newest of each folder, then
+/// one at least 20 hours older than the last kept (6 days past [`KEEP_DAILY_DAYS`]), none
+/// older than [`KEEP_DAYS`]; at most [`MAP_ROOTS`] folders.
+fn thin(mut all: Vec<MapSummary>) -> Vec<MapSummary> {
     all.sort_by_key(|o| std::cmp::Reverse(o.at));
-    let mut per_root: BTreeMap<PathBuf, usize> = BTreeMap::new();
+    let mut kept: BTreeMap<PathBuf, Vec<i64>> = BTreeMap::new();
     all.retain(|o| {
-        let n = per_root.entry(o.root.clone()).or_default();
-        *n += 1;
-        *n <= 2
+        let k = kept.entry(o.root.clone()).or_default();
+        let newest = k.first().copied().unwrap_or(o.at);
+        let age = newest - o.at;
+        let keep = if k.len() < 2 {
+            true
+        } else if k.len() >= MAP_PER_ROOT || age > KEEP_DAYS * 86_400 {
+            false
+        } else {
+            let gap = if age <= KEEP_DAILY_DAYS * 86_400 {
+                20 * 3_600
+            } else {
+                6 * 86_400
+            };
+            k.last().is_some_and(|last| last - o.at >= gap)
+        };
+        if keep {
+            k.push(o.at);
+        }
+        keep
     });
     let mut roots: Vec<PathBuf> = Vec::new();
     for o in &all {
@@ -320,8 +374,72 @@ pub fn keep_map_summary(env: &Env, s: MapSummary) -> io::Result<bool> {
     }
     roots.truncate(MAP_ROOTS);
     all.retain(|o| roots.contains(&o.root));
-    write_json(&map_path(env), &all)?;
-    Ok(true)
+    all
+}
+
+/// A light measure of the home folder for "what grew" (U7-1): the size of each folder at
+/// the first two levels, no tree kept in memory. Read only; the same size formula as Disk
+/// Map. Runs off the UI thread (it reads the whole home folder once).
+pub fn light_summary(env: &Env, at: i64) -> Option<MapSummary> {
+    let home = env.home();
+    if !std::fs::symlink_metadata(home).is_ok_and(|m| m.is_dir()) {
+        return None;
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut entries = Vec::new();
+    let mut total = std::fs::symlink_metadata(home)
+        .map(|m| crate::fsutil::entry_size(&m))
+        .unwrap_or(0);
+    for c in crate::fsutil::children(home) {
+        let Ok(md) = std::fs::symlink_metadata(&c) else {
+            continue;
+        };
+        if !md.is_dir() {
+            total += crate::fsutil::tree_size_once(&c, &mut seen).0;
+            continue;
+        }
+        let mut size = crate::fsutil::entry_size(&md);
+        for cc in crate::fsutil::children(&c) {
+            let s = crate::fsutil::tree_size_once(&cc, &mut seen).0;
+            if std::fs::symlink_metadata(&cc).is_ok_and(|m| m.is_dir()) {
+                entries.push((cc, s));
+            }
+            size += s;
+        }
+        entries.push((c, size));
+        total += size;
+    }
+    entries.push((home.to_path_buf(), total));
+    entries.sort_by_key(|e| std::cmp::Reverse(e.1));
+    entries.truncate(MAP_ENTRIES);
+    Some(MapSummary {
+        at,
+        root: home.to_path_buf(),
+        entries,
+    })
+}
+
+/// A light home measure is taken at most this often (seconds).
+pub const BASELINE_EVERY: i64 = 20 * 3_600;
+
+/// Is a light home measure due at `now`: none of the home folder in [`BASELINE_EVERY`]?
+pub fn baseline_due(env: &Env, now: i64) -> bool {
+    let home = env.home();
+    !map_summaries(env)
+        .iter()
+        .any(|s| s.root == home && now - s.at < BASELINE_EVERY && s.at <= now + 60)
+}
+
+/// Take and keep a light home measure when one is due (at launch and on each scheduled scan).
+/// Writes only CleanCraft's own `disk-map-history.json`. Returns whether one was kept.
+pub fn record_baseline(env: &Env, now: i64) -> io::Result<bool> {
+    if !baseline_due(env, now) {
+        return Ok(false);
+    }
+    match light_summary(env, now) {
+        Some(s) => keep_map_summary(env, s),
+        None => Ok(false),
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -383,6 +501,32 @@ pub fn what_grew(env: &Env) -> Option<Growth> {
         return None;
     }
     Some(compare(same[same.len() - 2], same[same.len() - 1]))
+}
+
+/// What grew over the chart's range (U7-1): the newest measure of the most recently measured
+/// folder compared with the one of the same folder closest to `days` days before `now`
+/// (an older one always; the nearest one when none is that old).
+pub fn what_grew_in(all: &[MapSummary], now: i64, days: i64) -> Option<Growth> {
+    let newest = all.iter().max_by_key(|s| s.at)?;
+    let start = now - days * 86_400;
+    let older = all
+        .iter()
+        .filter(|s| s.root == newest.root && s.at < newest.at)
+        .min_by_key(|s| (s.at - start).abs())?;
+    Some(compare(older, newest))
+}
+
+/// The measures of the most recently measured folder: (how many, the oldest one's time).
+pub fn measures(all: &[MapSummary]) -> (usize, Option<i64>) {
+    let Some(newest) = all.iter().max_by_key(|s| s.at) else {
+        return (0, None);
+    };
+    let same: Vec<i64> = all
+        .iter()
+        .filter(|s| s.root == newest.root)
+        .map(|s| s.at)
+        .collect();
+    (same.len(), same.iter().min().copied())
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -532,6 +676,9 @@ pub struct Card {
     /// The one button: its label and the page it opens.
     pub action: String,
     pub route: AppRoute,
+    /// Said on the page the button opens when it scans again to show what the card counted
+    /// ("Scanning again to show what Threat Check found 2 days ago.").
+    pub landing: Option<String>,
 }
 
 /// "today", "yesterday", "3 days ago".
@@ -585,7 +732,8 @@ pub fn recommendations(f: &Facts) -> Vec<Card> {
                 _ => "macOS needs room for updates, caches and swap.".into(),
             },
             action: "See What Takes Space".into(),
-            route: AppRoute::Feature(FeatureId::SpaceLens),
+            route: AppRoute::Scan(FeatureId::SpaceLens),
+            landing: None,
         });
     }
     if let Some((delta, secs)) = f.free_change
@@ -601,10 +749,11 @@ pub fn recommendations(f: &Facts) -> Vec<Card> {
                 human_size(delta.unsigned_abs()),
                 count(days as usize, "day", "days")
             ),
-            detail: "Disk Map shows which folders take the space; scan it twice to see what grew."
+            detail: "What grew (on the right) compares the home folder with a measure from days ago; Disk Map shows what takes the space now."
                 .into(),
             action: "Open Disk Map".into(),
-            route: AppRoute::Feature(FeatureId::SpaceLens),
+            route: AppRoute::Scan(FeatureId::SpaceLens),
+            landing: None,
         });
     }
     if let Some(n) = &f.threats
@@ -620,7 +769,14 @@ pub fn recommendations(f: &Facts) -> Vec<Card> {
             ),
             detail: "Nothing was removed. Review what it found and decide.".into(),
             action: "Review in Threat Check".into(),
-            route: AppRoute::Feature(FeatureId::Malware),
+            route: match n.paths.first() {
+                Some(p) => AppRoute::ThreatReview(p.clone()),
+                None => AppRoute::Scan(FeatureId::Malware),
+            },
+            landing: Some(format!(
+                "Scanning again to show what Threat Check found {}.",
+                ago(n.at, now)
+            )),
         });
     }
     if let Some(s) = &f.startup
@@ -650,6 +806,7 @@ pub fn recommendations(f: &Facts) -> Vec<Card> {
             ),
             action: "Review Startup Items".into(),
             route: AppRoute::Feature(FeatureId::LoginItems),
+            landing: None,
         });
     }
     if let Some(m) = &f.memory
@@ -669,6 +826,7 @@ pub fn recommendations(f: &Facts) -> Vec<Card> {
             ),
             action: "Open Live Monitor".into(),
             route: AppRoute::Feature(FeatureId::Monitor),
+            landing: None,
         });
     }
     if let Some(BatteryReading::Present(b)) = &f.battery {
@@ -686,9 +844,10 @@ pub fn recommendations(f: &Facts) -> Vec<Card> {
                 rule: "battery",
                 level: Level::Attention,
                 headline: format!("The battery {}", parts.join(" and ")),
-                detail: "An older battery lasts less per charge. System Settings > Battery says if it needs service.".into(),
-                action: "Open Live Monitor".into(),
-                route: AppRoute::Feature(FeatureId::Monitor),
+                detail: "An older battery lasts less per charge. Battery Settings says if it needs service.".into(),
+                action: "Open Battery Settings".into(),
+                route: AppRoute::BatterySettings,
+                landing: None,
             });
         }
     }
@@ -701,7 +860,8 @@ pub fn recommendations(f: &Facts) -> Vec<Card> {
             headline: format!("The Trash holds {}", human_size(t)),
             detail: "It still takes space on your disk until the Trash is emptied.".into(),
             action: "Review in Trash Bins".into(),
-            route: AppRoute::Feature(FeatureId::TrashBins),
+            route: AppRoute::Scan(FeatureId::TrashBins),
+            landing: None,
         });
     }
     match &f.junk {
@@ -714,7 +874,11 @@ pub fn recommendations(f: &Facts) -> Vec<Card> {
                 count(n.items, "item", "items")
             ),
             action: "Review in System Junk".into(),
-            route: AppRoute::Feature(FeatureId::SystemJunk),
+            route: AppRoute::Scan(FeatureId::SystemJunk),
+            landing: Some(format!(
+                "Scanning again to show what was found {}.",
+                ago(n.at, now)
+            )),
         }),
         Some(n) if days_since(n.at, now) < SCAN_STALE_DAYS => {}
         _ => v.push(Card {
@@ -724,6 +888,7 @@ pub fn recommendations(f: &Facts) -> Vec<Card> {
             detail: "A scan only looks; you choose what moves to the Trash.".into(),
             action: "Scan System Junk".into(),
             route: AppRoute::Scan(FeatureId::SystemJunk),
+            landing: None,
         }),
     }
     if f.threats
@@ -738,6 +903,7 @@ pub fn recommendations(f: &Facts) -> Vec<Card> {
                 .into(),
             action: "Run Threat Check".into(),
             route: AppRoute::Scan(FeatureId::Malware),
+            landing: None,
         });
     }
     if let Some(n) = f.unused_apps
@@ -751,6 +917,7 @@ pub fn recommendations(f: &Facts) -> Vec<Card> {
                 .into(),
             action: "Review in App Remover".into(),
             route: AppRoute::UnusedApps,
+            landing: None,
         });
     }
     if let Some(s) = &f.startup
@@ -763,6 +930,7 @@ pub fn recommendations(f: &Facts) -> Vec<Card> {
             detail: "Agents and services outside macOS that are turned on. Fewer can mean a quicker start.".into(),
             action: "Review Startup Items".into(),
             route: AppRoute::Feature(FeatureId::LoginItems),
+            landing: None,
         });
     }
     match &f.updates {
@@ -777,6 +945,7 @@ pub fn recommendations(f: &Facts) -> Vec<Card> {
             detail: "Updates fix bugs and security issues.".into(),
             action: "Open App Updates".into(),
             route: AppRoute::Feature(FeatureId::Updater),
+            landing: None,
         }),
         Some(n) if days_since(n.at, now) < UPDATES_STALE_DAYS => {}
         _ => v.push(Card {
@@ -786,6 +955,7 @@ pub fn recommendations(f: &Facts) -> Vec<Card> {
             detail: "App Updates looks for new versions of your apps and macOS.".into(),
             action: "Check in App Updates".into(),
             route: AppRoute::Feature(FeatureId::Updater),
+            landing: None,
         }),
     }
     // Most important first; the sort is stable, so rule order stays within a level.

@@ -1,11 +1,17 @@
 //! Notifications from the menu bar agent, and "open the app at this page" requests.
 //!
-//! Notifications go through `osascript -e 'display notification ...'` (through `env.sys`, so
-//! tests record them). That needs no entitlement and no signed bundle. Its limit: macOS shows
-//! such a notification as coming from Script Editor, and clicking it opens Script Editor (or
-//! nothing) on some macOS versions, never CleanCraft. So every notification that leads
-//! somewhere also leaves a "Review" item in the menu bar menu, which opens the app on the
-//! right page.
+//! Two senders (U7-2):
+//! - The native one, installed by the menu bar agent on macOS ([`set_native_sender`]): the
+//!   notification is posted as CleanCraft (its bundle id and icon) and a click opens the app
+//!   on the notification's route. Never used on a fake Mac.
+//! - `osascript -e 'display notification ...'` (through `env.sys`, so tests record it), the
+//!   fallback when the native one is missing or fails. macOS shows such a notification as
+//!   coming from Script Editor, and clicking it opens Script Editor (or nothing), never
+//!   CleanCraft.
+//!
+//! Either way every notification that leads somewhere also leaves a "Review" item in the menu
+//! bar menu, and its text ends with [`MENU_HINT`] (until the native sender's click is
+//! verified on a Mac, it is said with both).
 //!
 //! Opening the app on a page: [`request_open`] writes `open-request.json` in CleanCraft's data
 //! folder, then asks Launch Services to open the app by its bundle id (`open -b`). A running
@@ -45,6 +51,38 @@ pub struct Notification {
 /// The longest title, subtitle or body passed on (characters).
 pub const TEXT_MAX: usize = 200;
 
+/// The last sentence of every notification that leads somewhere.
+pub const MENU_HINT: &str = "Open the CleanCraft menu bar item to review.";
+
+/// The body as shown: for a notification with a route, cut so [`MENU_HINT`] always fits, then
+/// the hint (once).
+pub fn shown_body(n: &Notification) -> String {
+    let body = n.body.trim();
+    if n.route.is_none() || body.ends_with(MENU_HINT) {
+        return clean_text(body);
+    }
+    let room = TEXT_MAX - MENU_HINT.chars().count() - 1;
+    let cut = clean_text(body);
+    let cut: String = cut.chars().take(room).collect();
+    if cut.is_empty() {
+        MENU_HINT.to_string()
+    } else {
+        format!("{} {MENU_HINT}", cut.trim_end())
+    }
+}
+
+/// A sender that posts a notification as CleanCraft itself and opens the app on its route
+/// when it is clicked (the menu bar agent installs it on macOS). Errors fall back to
+/// `osascript`.
+pub type NativeSender = Box<dyn Fn(&Notification) -> Result<(), String> + Send + Sync>;
+
+static NATIVE: std::sync::OnceLock<NativeSender> = std::sync::OnceLock::new();
+
+/// Install the native sender (once per process; later calls are ignored).
+pub fn set_native_sender(s: NativeSender) {
+    let _ = NATIVE.set(s);
+}
+
 /// One notification text as an argument: control characters (line breaks) become spaces,
 /// cut at [`TEXT_MAX`] characters.
 pub fn clean_text(s: &str) -> String {
@@ -74,7 +112,7 @@ pub fn osascript_args(n: &Notification) -> Vec<String> {
         // getopt stops here: a text that starts with "-e" stays a text (safety6 SAF6-6).
         "--".into(),
         clean_text(&n.title),
-        clean_text(&n.body),
+        shown_body(n),
     ];
     if let Some(sub) = &n.subtitle {
         v.push(clean_text(sub));
@@ -82,8 +120,17 @@ pub fn osascript_args(n: &Notification) -> Vec<String> {
     v
 }
 
-/// Show `n` through `osascript`. No shell is involved and the texts are arguments.
+/// Show `n`: with the native sender when one is installed (never on a fake Mac), else, or
+/// when it fails, through `osascript`. No shell is involved and the texts are arguments.
 pub fn send(env: &Env, n: &Notification) -> io::Result<()> {
+    if !env.is_fake()
+        && let Some(native) = NATIVE.get()
+    {
+        match native(n) {
+            Ok(()) => return Ok(()),
+            Err(e) => eprintln!("CleanCraft: native notification failed ({e}); using osascript"),
+        }
+    }
     let args = osascript_args(n);
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
     let out = env.sys.run(OSASCRIPT, &refs)?;
@@ -278,6 +325,34 @@ mod tests {
             ]
         );
         assert_eq!(clean_text(&"y".repeat(500)).chars().count(), TEXT_MAX);
+    }
+
+    #[test]
+    fn every_routed_body_ends_with_the_menu_bar_hint() {
+        let mut n = Notification {
+            title: "Viewer was moved to the Trash".into(),
+            subtitle: None,
+            body: "4 items it left behind use 1 MB.".into(),
+            route: Some("uninstall:/Users/a/.Trash/Viewer.app".into()),
+        };
+        assert_eq!(
+            shown_body(&n),
+            format!("4 items it left behind use 1 MB. {MENU_HINT}")
+        );
+        // Once only, and it survives a long body.
+        n.body = format!("x {MENU_HINT}");
+        assert_eq!(shown_body(&n), format!("x {MENU_HINT}"));
+        n.body = "z".repeat(600);
+        let b = shown_body(&n);
+        assert!(
+            b.ends_with(MENU_HINT) && b.chars().count() <= TEXT_MAX,
+            "{b}"
+        );
+        assert_eq!(osascript_args(&n)[8], b);
+        // Nothing to open: no hint.
+        n.route = None;
+        n.body = "Done.".into();
+        assert_eq!(shown_body(&n), "Done.");
     }
 
     #[test]

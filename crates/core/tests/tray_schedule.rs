@@ -211,7 +211,7 @@ fn a_scheduled_scan_only_looks_then_notifies() {
         osascripts(&m.env),
         vec![line(
             "CleanCraft",
-            &format!("{text}. Open the menu bar item to review it."),
+            &format!("{text}. {}", notify::MENU_HINT),
             None
         )]
     );
@@ -332,7 +332,10 @@ fn disk_low_alert_at_most_once_a_day_and_the_badge() {
         osascripts(&m.env),
         vec![line(
             "Your startup disk is almost full",
-            "40.0 GB free. Quick Sweep can show what to clean.",
+            &format!(
+                "40.0 GB free. Quick Sweep can show what to clean. {}",
+                notify::MENU_HINT
+            ),
             None
         )]
     );

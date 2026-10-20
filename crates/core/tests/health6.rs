@@ -278,6 +278,7 @@ fn every_card_has_a_documented_rule_and_one_action() {
             bytes: 0,
             items: 1,
             plan_id: String::new(),
+            paths: Vec::new(),
         }),
         updates: None,
         unused_apps: Some(3),

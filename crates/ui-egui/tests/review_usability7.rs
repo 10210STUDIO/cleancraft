@@ -898,7 +898,6 @@ fn open_health(h: &mut H) {
 /// U7-1 (S1). A first-time user cannot find what grew: nothing records a baseline until the
 /// user maps the same folder twice, days apart. Launching the app should record one.
 #[test]
-#[ignore = "U7-1: fails today"]
 fn u7_01_a_baseline_for_what_grew_is_recorded_without_the_user() {
     let mac = th::troubled_mac_now();
     base(&mac);
@@ -917,7 +916,6 @@ fn u7_01_a_baseline_for_what_grew_is_recorded_without_the_user() {
 /// U7-1 (S1). "Open Disk Map" from Mac Health lands on Disk Map's start screen: one more
 /// click, and still no comparison.
 #[test]
-#[ignore = "U7-1: fails today"]
 fn u7_01_open_disk_map_from_health_starts_measuring() {
     let mac = th::troubled_mac_now();
     base(&mac);
@@ -936,7 +934,6 @@ fn u7_01_open_disk_map_from_health_starts_measuring() {
 /// U7-3 (S2). "Review in Threat Check" and "Review in System Junk" open start screens: the
 /// item the card talks about is not shown, the user must scan again.
 #[test]
-#[ignore = "U7-3: fails today"]
 fn u7_03_review_buttons_show_what_the_card_talks_about() {
     let mac = th::troubled_mac_now();
     base(&mac);
@@ -971,7 +968,6 @@ fn u7_03_review_buttons_show_what_the_card_talks_about() {
 /// U7-4 (S2). Mac Health is only a segment inside Live Monitor; the start page says nothing
 /// about it.
 #[test]
-#[ignore = "U7-4: fails today"]
 fn u7_04_mac_health_is_visible_from_the_start_page() {
     let mac = th::troubled_mac_now();
     base(&mac);
@@ -985,7 +981,6 @@ fn u7_04_mac_health_is_visible_from_the_start_page() {
 
 /// U7-5 (S2). First launch opens on the AI apps step; Full Disk Access is not part of it.
 #[test]
-#[ignore = "U7-5: fails today"]
 fn u7_05_first_launch_welcomes_and_asks_for_full_disk_access_first() {
     let mac = th::ai_mac();
     base(&mac);
@@ -1004,7 +999,6 @@ fn u7_05_first_launch_welcomes_and_asks_for_full_disk_access_first() {
 /// U7-6 (S2). Developer Clutter finds nothing: the way to add a code folder is a sentence
 /// under Details, with no button.
 #[test]
-#[ignore = "U7-6: fails today"]
 fn u7_06_nothing_found_offers_to_add_a_code_folder() {
     let m = FakeMac::new();
     base(&m);
@@ -1026,7 +1020,6 @@ fn u7_06_nothing_found_offers_to_add_a_code_folder() {
 /// U7-6 (S2). After adding a code folder in Settings, Developer Clutter still shows its old
 /// "Nothing to clean here".
 #[test]
-#[ignore = "U7-6: fails today"]
 fn u7_06_a_new_code_folder_is_looked_in_at_once() {
     let m = FakeMac::new();
     base(&m);
@@ -1130,13 +1123,15 @@ fn u7_08_external_drive_top_folder_can_be_selected() {
 /// U7-9 (S3). One setting, two names; the page title is not announced; Done and Not Now
 /// both close the first launch step.
 #[test]
-#[ignore = "U7-9: fails today"]
 fn u7_09_ai_step_names_and_buttons() {
     use cleancraft_ui_egui::pages::{settings, welcome};
     let mac = th::ai_mac();
     base(&mac);
     let mut h = harness(&mac);
     h.state_mut().launch_checks();
+    settle(&mut h);
+    // fix7: the AI step now follows the welcome (U7-5); Full Disk Access is on here.
+    h.get_by_label("Continue").click();
     settle(&mut h);
     let mut problems = Vec::new();
     if welcome::CLEAN_SWITCH != settings::AGENTS_SWITCH {
@@ -1201,7 +1196,6 @@ fn u7_11_quick_sweep_confirmation_says_what_stays() {
 /// U7-12 (S3). Quick Sweep: the subtitle leaves out the new tiles; tiles with nothing to
 /// clean still have Include; six "Include" and eight "Review" with the same name.
 #[test]
-#[ignore = "U7-12: fails today"]
 fn u7_12_quick_sweep_tiles_are_named_and_only_offer_what_applies() {
     let (m, _) = dl_mac();
     let mut h = harness(&m);
@@ -1269,7 +1263,6 @@ fn u7_14_mail_erase_can_be_tried_again() {
 
 /// U7-15 (S3). With the menu bar off, "Warn when the startup disk is almost full" shows On.
 #[test]
-#[ignore = "U7-15: fails today"]
 fn u7_15_options_that_cannot_run_do_not_show_on() {
     use cleancraft_ui_egui::pages::settings::DISK_ALERT_SWITCH;
     let m = FakeMac::new();
@@ -1292,7 +1285,6 @@ fn u7_15_options_that_cannot_run_do_not_show_on() {
 /// U7-16 (S3). Mac Health: the battery card's button opens Live Monitor although its text
 /// points to System Settings > Battery; the folders under What grew cannot be opened.
 #[test]
-#[ignore = "U7-16: fails today"]
 fn u7_16_health_buttons_go_where_the_text_says() {
     use cleancraft_core::health::MapSummary;
     let mac = th::troubled_mac_now();

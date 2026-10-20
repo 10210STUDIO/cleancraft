@@ -567,6 +567,16 @@ pub fn title(ui: &mut Ui, t: &Tokens, text: &str) {
     heading(ui, text, font(size::TITLE, Weight::Bold), t.text);
 }
 
+/// A page title announced to VoiceOver, for pages without a sidebar entry or switcher tool
+/// that names them (the AI apps step, the guides, the welcome).
+pub fn title_announced(ui: &mut Ui, t: &Tokens, text: &str) {
+    let fid = font(size::TITLE, Weight::Bold);
+    let g = galley(ui, text, fid, t.text);
+    let (r, resp) = ui.allocate_exact_size(g.size(), Sense::hover());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, text));
+    ui.painter().galley(r.min, g, t.text);
+}
+
 /// A page heading, painted: the sidebar entry or the selected tool in the section switcher
 /// already names the page for VoiceOver, so the heading adds no second node with the same
 /// name (which would make "System Junk" ambiguous to assistive tools and tests).
@@ -2268,6 +2278,28 @@ pub fn quiet_label(ui: &mut Ui, t: &Tokens, shown: &str, full: &str) -> Response
     let w = galley(ui, shown, fid.clone(), t.text_dim).size().x + 2.0;
     let (r, _) = ui.allocate_exact_size(vec2(w, 20.0), Sense::hover());
     text_at(ui, r, shown, full, fid, t.text_dim, egui::Align::Min)
+}
+
+/// A text link (callout size, accent colour, underlined on hover, pointing hand, focus ring).
+/// The caller names it for VoiceOver with `widget_info` when the text alone is not enough.
+pub fn link(ui: &mut Ui, t: &Tokens, text: &str) -> Response {
+    let fid = font(size::CALLOUT, Weight::Medium);
+    let color = icons::lerp(t.sec_a, Color32::WHITE, 0.25);
+    let g = galley(ui, text, fid.clone(), color);
+    let (r, resp) = ui.allocate_exact_size(vec2(g.size().x + 2.0, 20.0), Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, text));
+    pointer(&resp);
+    let pos = egui::pos2(r.left(), r.center().y - g.size().y / 2.0);
+    let p = ui.painter();
+    p.galley(pos, g.clone(), color);
+    if resp.hovered() {
+        let y = pos.y + g.size().y - 1.0;
+        p.hline(r.left()..=r.left() + g.size().x, y, Stroke::new(1.0, color));
+    }
+    if resp.has_focus() {
+        focus_ring(p, t, r.expand(2.0), 4.0);
+    }
+    resp
 }
 
 /// One line of a confirmation list: kind icon, path (shortened in the middle), reason, size.

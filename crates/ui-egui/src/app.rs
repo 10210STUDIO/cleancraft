@@ -22,8 +22,11 @@ pub enum Page {
     Settings,
     /// The guide "Connect an AI agent" (docs/guide-ai-agents.md), opened from Settings.
     AgentGuide,
-    /// "Use CleanCraft from your AI apps?": shown once at first launch, later from Settings.
+    /// "Use CleanCraft from your AI apps?": the last step of the first launch (when an AI app
+    /// is found), later from Settings.
     ConnectAi,
+    /// The first launch's welcome and Full Disk Access steps (U7-5).
+    Welcome,
 }
 
 /// The sidebar's entries, in order: one per section, each opening one or more tools. Names
@@ -99,6 +102,7 @@ pub fn page_look(t: &Tokens, p: Page) -> (Icon, &'static str) {
         Page::Settings => (Icon::Settings, "Settings"),
         Page::AgentGuide => (Icon::File, "Connect an AI Agent"),
         Page::ConnectAi => (Icon::App, "AI Apps"),
+        Page::Welcome => (Icon::Check, "Welcome"),
     }
 }
 
@@ -283,6 +287,14 @@ impl CleanApp {
     /// Open a route: a page, a page that starts its scan, App Remover on one app. A route only
     /// opens and looks; nothing is ever cleaned from here.
     pub fn open_route(&mut self, r: &AppRoute) {
+        if *r == AppRoute::BatterySettings {
+            // Outside the app: the page stays.
+            let url = cleancraft_core::route::BATTERY_SETTINGS_URL;
+            if let Err(e) = self.env.sys.open_url(url) {
+                self.warn(format!("Could not open System Settings: {e}"));
+            }
+            return;
+        }
         self.flush_health_notes();
         // A notice belongs to the page it was about (REVIEW-U U14).
         self.notice = None;
@@ -297,6 +309,7 @@ impl CleanApp {
             AppRoute::UnusedApps | AppRoute::UninstallApp(_) => {
                 Page::Feature(FeatureId::Uninstaller)
             }
+            AppRoute::BatterySettings => self.page,
         };
         match r {
             AppRoute::History => self.history.reload(&self.env),
@@ -390,6 +403,10 @@ impl CleanApp {
             if self.apps.list.is_none() && !self.apps.is_loading() {
                 pages::apps::start_load(self);
             }
+            return;
+        }
+        if f == FeatureId::SpaceLens {
+            pages::disk_map::start_if_idle(self, cleancraft_core::space::MapLocation::Home);
             return;
         }
         let own_page = matches!(
@@ -556,19 +573,29 @@ impl CleanApp {
     }
 
     /// Work done once per launch of the real app (never in tests, which call it directly):
-    /// a free space sample on a background thread, and the AI apps question the first time.
+    /// a free space sample and, at most once a day, a light measure of the home folder for
+    /// Mac Health's "What grew" (U7-1), on a background thread; the first-launch steps once
+    /// ([`Settings::setup_done`]).
     pub fn launch_checks(&mut self) {
         let env = self.env.clone();
-        if self.sync {
+        let work = move || {
             let _ = cleancraft_core::space_history::record(&env);
+            let _ = cleancraft_core::health::record_baseline(&env, chrono::Utc::now().timestamp());
+        };
+        if self.sync {
+            work();
         } else {
-            std::thread::spawn(move || {
-                let _ = cleancraft_core::space_history::record(&env);
-            });
+            std::thread::spawn(work);
+            // Mac Health's state for the line on Quick Sweep's start screen (U7-4).
+            pages::health::refresh(self);
         }
-        if cleancraft_core::mcp_setup::welcome_due(&self.env) {
-            self.page = Page::ConnectAi;
-            pages::welcome::refresh(self);
+        if !self.settings.setup_done {
+            // Welcome, then Full Disk Access, then AI apps (when one is found) (U7-5). Seen
+            // as soon as it shows: from the second launch on the app opens on Quick Sweep,
+            // whatever happened here (Done, Not Now, Skip or quitting midway).
+            self.settings.setup_done = true;
+            self.save_settings();
+            pages::welcome::start(self);
         }
     }
 
@@ -692,7 +719,9 @@ impl CleanApp {
         match self.page {
             Page::Feature(f) => Section::of(f),
             Page::Health => Section::of(FeatureId::Monitor),
-            Page::History | Page::Settings | Page::AgentGuide | Page::ConnectAi => Section::Neutral,
+            Page::History | Page::Settings | Page::AgentGuide | Page::ConnectAi | Page::Welcome => {
+                Section::Neutral
+            }
         }
     }
 
@@ -785,6 +814,7 @@ impl CleanApp {
                     Page::Settings => pages::settings::ui(self, ui),
                     Page::AgentGuide => pages::guide::ui(self, ui),
                     Page::ConnectAi => pages::welcome::ui(self, ui),
+                    Page::Welcome => pages::welcome::intro_ui(self, ui),
                 });
             });
     }

@@ -227,7 +227,7 @@ fn poll_phase(app: &mut CleanApp) -> bool {
     }
 }
 
-const SUBTITLE: &str = "One scan across junk, mail downloads, the Trash, threats and your apps.";
+const SUBTITLE: &str = "One scan across junk, mail and duplicate downloads, the Trash, threats, developer clutter and your apps.";
 
 pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     // Files came back since the results were made: they are out of date.
@@ -327,6 +327,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
 
 fn idle(app: &mut CleanApp, ui: &mut Ui) {
     let t = app.t;
+    let mut health_clicked = false;
     let ids = sources(app).ids();
     let looks: Vec<(Icon, Color32, &str)> = ids
         .iter()
@@ -349,10 +350,35 @@ fn idle(app: &mut CleanApp, ui: &mut Ui) {
         |ui| {
             kit::chips(ui, &t, &looks, 760.0);
             ui.add_space(space::S);
+            // Mac Health from the first page (U7-4): its state when it was read, as a link.
+            let line = health_line(app);
+            if kit::link(ui, &t, &line).clicked() {
+                health_clicked = true;
+            }
+            ui.add_space(space::XS);
         },
     ) {
         app.act();
         start_scan(app);
+    }
+    if health_clicked {
+        app.act();
+        app.open_route(&cleancraft_core::route::AppRoute::Health);
+    }
+}
+
+/// "Mac Health: Needs attention (6)", "Mac Health: Good", or before it was read "Mac Health:
+/// see how your Mac is doing".
+pub fn health_line(app: &CleanApp) -> String {
+    if app.health.facts.is_none() {
+        return "Mac Health: see how your Mac is doing".into();
+    }
+    let (state, why) = cleancraft_core::health::summary(&app.health.cards);
+    match state {
+        cleancraft_core::health::State::Good => "Mac Health: Good".into(),
+        cleancraft_core::health::State::NeedsAttention => {
+            format!("Mac Health: Needs attention ({})", why.len())
+        }
     }
 }
 
@@ -665,12 +691,28 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile, w: f32, tile_h: 
                 }
                 return;
             }
-            if kit::secondary(ui, &t, "Review") {
+            // Named per tile for VoiceOver ("Review Duplicate Downloads") (U7-12).
+            let title = sweep::tile_title(tile.id);
+            let r = kit::secondary_resp(ui, &t, "Review");
+            r.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Review {title}"))
+            });
+            if r.clicked() {
                 review = true;
             }
-            if tile.runnable() {
+            // Include only where there is something to clean.
+            if tile.runnable() && !empty {
                 ui.add_space(4.0);
-                kit::check_text(ui, &t, &mut include, "Include");
+                let r = kit::check_text(ui, &t, &mut include, "Include");
+                let on = include;
+                r.widget_info(|| {
+                    egui::WidgetInfo::selected(
+                        egui::WidgetType::Checkbox,
+                        true,
+                        on,
+                        format!("Include {title}"),
+                    )
+                });
             }
             if trash_full {
                 ui.add_space(4.0);
