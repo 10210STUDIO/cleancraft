@@ -115,7 +115,8 @@ fn a5_edited_batch_plan_cannot_take_other_apps_files() {
     m.home_file("Library/Caches/com.example.Editor/c", 50_000);
     let jot = m.home_file("Library/Preferences/org.jot.Jotter.plist", 2_000);
     let pic = m.home_file("Pictures/holiday.jpg", 2_000);
-    let (mut p, apps) = uninstaller::batch_plan(&m.env, &s(), &[ed.clone()]).expect("plan");
+    let (mut p, apps) =
+        uninstaller::batch_plan(&m.env, &s(), std::slice::from_ref(&ed)).expect("plan");
     let cat = p.items[0].category.clone();
     let group = uninstaller::group_key(&ed);
     for x in [jot.clone(), keep.clone(), pic.clone()] {

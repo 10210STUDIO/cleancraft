@@ -31,14 +31,25 @@ Sizes are the whole bundle (`tree_size`, allocated blocks) and the list sorts bi
 - The result screen says why a running app was not removed ("Not removed: it was running. Quit it, then uninstall it.").
 - Renders: docs/screens/v2/apps6/batch-{list,review,confirm,done}-{1060x680,1280x820}.png (CLEANCRAFT_SNAPSHOTS=1 cargo test -p cleancraft-ui-egui --test qa_apps_batch renders).
 
+### SAF6-8 (safety6): an edited uninstall plan could take another app's files
+Fixed in core (uninstaller::own_files_only, called from Uninstaller::validate_set, so nothing moves when it fails): for an uninstall, reset or Trash-leftovers plan, right before anything moves, every selected item must be one of the plan's own apps (one app in a plan for one app; in a batch each app item must be the app its group names; every app must be installed in the Applications folders) or a path find_leftovers returns for those apps now, read again from disk (paths compared canonically). A plan without an app item (app already in the Trash) takes only the leftovers of the apps in ~/.Trash. Anything else: "<path> is not a file of the apps in this plan, so this list was not made by CleanCraft for these apps. Nothing was moved." The feature's own scan (leftovers of removed apps, installers, extensions) is not affected. Tests: safety6's review_safety6_apps::a5_edited_batch_plan_cannot_take_other_apps_files and ::a5b_edited_single_plan_cannot_take_other_apps_files (merged from agent6/safety6, #[ignore] removed, passing), core apps_batch::an_edited_plan_may_only_take_its_apps_own_files; an edited batch plan with its groups stripped is now refused as a whole (apps_batch::an_app_opened_after_the_review_keeps_its_files_and_the_others_go).
+
+Merged main (fix6 + watch6) at the lead's request.
+
 ## Tests
-- core crates/core/tests/apps_batch.rs (10): union of single plans and numbers vs disk, apps of macOS refused (also edited plan), running app locks only its group, app opened after the review (also with groups stripped), one admin dialog plus undo, undo one app then the rest, permission denied and in use per item, shared file once, bundle sizes and sort.
+- core crates/core/tests/apps_batch.rs (11): union of single plans and numbers vs disk, apps of macOS refused (also edited plan), running app locks only its group, app opened after the review (also with groups stripped), one admin dialog plus undo, undo one app then the rest, permission denied and in use per item, shared file once, bundle sizes and sort.
 - ui crates/ui-egui/tests/qa_apps_batch.rs (12, one of them the renders): e2e scan, tick 3, bar size vs disk, review, fold, confirmation lists every file, all gone, results, Undo per app, Undo All, counts recalculated; History per-app and Undo All; Apple apps not selectable (checkbox, Cmd-click, select all count, pushed into the set by hand); keyboard Space, Cmd/Shift-click range, plain click opens, pointing hand on the checkbox, sort order; running apps and Quit All (one quits, one does not, Force Quit confirmation), Force Quit after confirmation; admin apps in one prompt; permission denied and file in use per file; Leave Out and Leftovers select all.
 
 ## Shared-file changes (outside my files)
 - crates/core/src/executor.rs: new `pub fn undo_actions(env, ids)`; undo_plan now collects its ids and calls it (same behaviour: admin moves go back with one dialog). Nothing in the move path changed.
 - crates/ui-egui/src/pages/history.rs: one line in group_card calling `crate::pages::apps::history_batch_rows` (shows nothing for other plans).
 - No kit.rs or app.rs change.
+
+- crates/ui-egui/tests/icons_ui.rs: the two pixel helpers sample the app icon 62 pt into the row (it moved right of the new checkbox); no assertion changed.
+- crates/core/tests/review_safety6_apps.rs (safety6's): the two #[ignore]s removed as asked, one clippy fix (slice::from_ref).
+
+## Gate
+Workspace tests green, run in chunks because of the shared disk: core all 38 targets, ui-egui every test target (8 per chunk) plus lib, mcp and the app; clippy --workspace --all-targets -D warnings and fmt --check clean. target/ deleted.
 
 ## Check on a real Mac
 - Ticking 3 apps and the bar size; Review with one running app (Quit and Force Quit), two package-installed apps giving one password dialog, Undo All from History giving one password dialog.
