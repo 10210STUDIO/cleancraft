@@ -596,7 +596,7 @@ fn map(app: &mut CleanApp, ui: &mut Ui) {
             }
         }
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if kit::secondary(ui, &t, "Map Again") {
+            if kit::secondary(ui, &t, "Scan Again") {
                 app.act();
                 start_map(app, root.clone(), true);
             }

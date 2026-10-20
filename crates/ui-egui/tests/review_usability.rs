@@ -733,7 +733,6 @@ fn open_editor(a: &Apps) -> H {
 }
 
 #[test]
-#[ignore = "U1: running app has no way forward"]
 fn u01_running_app_offers_quit_in_place() {
     let a = apps_mac();
     a.mac.run_app(&a.editor);
@@ -763,7 +762,6 @@ fn u01_running_app_offers_quit_in_place() {
 }
 
 #[test]
-#[ignore = "U2: a running helper is reported as the app itself"]
 fn u02_running_helper_is_named() {
     let a = apps_mac();
     // Editor itself is quit; only its login helper inside the bundle runs.
@@ -840,7 +838,6 @@ fn u05_quarantine_can_be_seen_and_emptied() {
 }
 
 #[test]
-#[ignore = "U6: History lists one row per file, no undo for a whole cleanup"]
 fn u06_history_groups_a_cleanup_into_one_undo() {
     let mac = junk();
     let mut h = open_junk_results(&mac);
@@ -856,7 +853,6 @@ fn u06_history_groups_a_cleanup_into_one_undo() {
 }
 
 #[test]
-#[ignore = "U7: History offers Undo for items already emptied from the Trash"]
 fn u07_history_hides_undo_for_items_no_longer_in_the_trash() {
     let mac = junk();
     let mut h = open_junk_results(&mac);
@@ -977,7 +973,6 @@ fn u11_duplicates_mark_and_choose_the_kept_copy() {
 }
 
 #[test]
-#[ignore = "U12: the ignore list takes typed paths only"]
 fn u12_ignore_list_has_a_folder_picker() {
     let mac = FakeMac::new();
     base(&mac);
@@ -993,7 +988,6 @@ fn u12_ignore_list_has_a_folder_picker() {
 }
 
 #[test]
-#[ignore = "U13: one action, five names"]
 fn u13_one_name_for_scanning_again() {
     let names = [
         "Scan Again",
@@ -1096,7 +1090,6 @@ fn u18_large_old_sorts_by_last_opened() {
 }
 
 #[test]
-#[ignore = "U19: technical error text reaches the user"]
 fn u19_login_item_error_is_in_plain_words() {
     let mac = tp::startup_mac();
     base(&mac);

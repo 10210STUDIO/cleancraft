@@ -1527,7 +1527,7 @@ fn detail(app: &mut CleanApp, ui: &mut Ui) {
                     Err(e) => app.apps.error = Some(format!("{e:#}")),
                 }
             }
-            if kit::pill(ui, &t, "Check Again", kit::Kind::Secondary, None)
+            if kit::pill(ui, &t, "Scan Again", kit::Kind::Secondary, None)
                 .on_hover_text("Look at the app's files again")
                 .clicked()
             {

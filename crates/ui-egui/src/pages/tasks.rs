@@ -181,7 +181,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                 app.act();
                 open_confirm(app);
             }
-            if kit::pill(ui, &t, "Check Again", kit::Kind::Secondary, None)
+            if kit::pill(ui, &t, "Scan Again", kit::Kind::Secondary, None)
                 .on_hover_text("Check again which tasks can run on this Mac")
                 .clicked()
             {

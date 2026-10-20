@@ -110,7 +110,16 @@ pub fn poll(app: &mut CleanApp) -> bool {
 }
 
 fn change_text(e: ChangeError) -> String {
-    e.to_string()
+    plain_error(&e.to_string())
+}
+
+/// Tool errors in plain words: macOS's "not authorized to send Apple events" (-1743) means
+/// CleanCraft lacks the Automation permission, and says where to turn it on.
+pub fn plain_error(raw: &str) -> String {
+    if raw.contains("-1743") || raw.contains("Not authorized to send Apple events") {
+        return "CleanCraft needs permission to control System Events. Turn it on in System Settings > Privacy & Security > Automation, then try again.".into();
+    }
+    raw.to_string()
 }
 
 fn report_text(rep: &Report) -> Result<String, String> {
