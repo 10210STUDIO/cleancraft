@@ -63,7 +63,8 @@ fn slider_row(
             t.text_dim,
         );
         ui.spacing_mut().slider_width = (ui.available_width() - 140.0).clamp(160.0, 360.0);
-        let r = ui.add(
+        let r = kit::slider(
+            ui,
             egui::Slider::new(value, range)
                 .suffix(unit)
                 .trailing_fill(true),
@@ -238,7 +239,8 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                         ui.spacing_mut().slider_width =
                             (ui.available_width() - 160.0).clamp(160.0, 300.0);
                         let mut v = app.settings.sound_volume;
-                        let r = ui.add(
+                        let r = kit::slider(
+                            ui,
                             egui::Slider::new(&mut v, 0.0..=1.0)
                                 .show_value(false)
                                 .trailing_fill(true),

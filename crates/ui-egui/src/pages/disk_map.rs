@@ -709,8 +709,9 @@ fn treemap(app: &mut CleanApp, ui: &mut Ui, node: &Node, area: egui::Rect) {
         let name = format!("Block {label}");
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
         let p = ui.painter();
-        let hov = kit::anim(ui.ctx(), id.with("hov"), resp.hovered(), motion::HOVER);
         let round = (rect.width().min(rect.height()) * 0.18).clamp(2.0, 8.0);
+        let feel = kit::feel_ring(ui, &t, &resp, rect, round);
+        let hov = (feel.hov - 0.4 * feel.down).max(0.0);
         let top = icons::lerp(color, Color32::WHITE, 0.10 + 0.12 * hov);
         let bottom = icons::lerp(color, Color32::BLACK, 0.28 - 0.1 * hov);
         icons::gradient_tile(p, rect, round, top, bottom);
@@ -903,6 +904,7 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                         );
                         if c.is_dir {
                             let resp = ui.interact(name_rect, row.id.with("open"), Sense::click());
+                            kit::feel_ring(ui, &t, &resp, name_rect, 4.0);
                             // A folder name opens it: a link, for VoiceOver and tests.
                             resp.widget_info(|| {
                                 egui::WidgetInfo::labeled(egui::WidgetType::Link, true, &c.name)

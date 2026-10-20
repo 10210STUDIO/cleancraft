@@ -49,12 +49,46 @@ pub struct PlanState {
     pub error: Option<String>,
     /// Set to stop the running scan.
     pub cancel: Arc<AtomicBool>,
+    /// Files came back since this list was made (an Undo): scan again when shown.
+    pub stale: bool,
 }
 
 impl PlanState {
     pub fn is_busy(&self) -> bool {
         matches!(self.phase, Phase::Scanning(_) | Phase::Cleaning(_))
     }
+}
+
+/// Drop from `plan` every item at or inside a path in `gone`; an item that contained one is
+/// measured again. Item ids are renumbered (they are indexes). In a plan of sets
+/// (duplicates, look-alike pictures) a set left with one file is dropped too: one copy is not
+/// a duplicate. Returns true when anything changed.
+pub fn drop_paths(plan: &mut Plan, gone: &[std::path::PathBuf]) -> bool {
+    let before = plan.items.len();
+    let mut resized = false;
+    plan.items
+        .retain(|it| !gone.iter().any(|g| it.path.starts_with(g)));
+    for it in &mut plan.items {
+        if gone.iter().any(|g| g.starts_with(&it.path)) {
+            it.size = cleancraft_core::fsutil::tree_size(&it.path).0;
+            resized = true;
+        }
+    }
+    if plan.items.iter().any(|i| i.group.is_some()) {
+        let mut count: std::collections::HashMap<String, usize> = Default::default();
+        for g in plan.items.iter().filter_map(|i| i.group.clone()) {
+            *count.entry(g).or_default() += 1;
+        }
+        plan.items.retain(|i| {
+            i.group
+                .as_ref()
+                .is_none_or(|g| count.get(g).copied().unwrap_or(0) > 1)
+        });
+    }
+    for (i, it) in plan.items.iter_mut().enumerate() {
+        it.id = i;
+    }
+    plan.items.len() != before || resized
 }
 
 /// Short text about each module, shown before the first scan.
@@ -138,6 +172,7 @@ fn start_clean(app: &mut CleanApp, f: FeatureId) {
 /// Finish jobs. Returns true while something is running.
 pub fn poll(app: &mut CleanApp, f: FeatureId) -> bool {
     let mut cue = None;
+    let mut moved = Vec::new();
     let st = app.plan_state(f);
     let busy = match &mut st.phase {
         Phase::Scanning(job) => {
@@ -175,6 +210,7 @@ pub fn poll(app: &mut CleanApp, f: FeatureId) -> bool {
                         } else {
                             crate::sound::Cue::CleanDone
                         });
+                        moved = CleanApp::moved_paths(&rep);
                         st.phase = Phase::Done(rep);
                     }
                     Err(e) => {
@@ -197,6 +233,8 @@ pub fn poll(app: &mut CleanApp, f: FeatureId) -> bool {
         }
         _ => false,
     };
+    // What moved leaves this list and every other list that showed it.
+    app.files_moved(&moved);
     if let Some(c) = cue {
         crate::sound::play(&app.env, c);
     }
@@ -212,6 +250,16 @@ pub fn stop_scan(app: &mut CleanApp, f: FeatureId) {
 }
 
 pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
+    // Files came back since this list was made: the list is out of date.
+    let st = app.plan_state(f);
+    if st.stale && !st.is_busy() {
+        st.stale = false;
+        match st.phase {
+            Phase::Results | Phase::Confirm => start_scan(app, f),
+            Phase::Idle => st.plan = None,
+            _ => {}
+        }
+    }
     let t = app.t;
     let (icon, _) = kit::feature_look(&t, f);
     let phase = match &app.plan_state(f).phase {
@@ -721,12 +769,8 @@ pub fn category_row(
     resp.widget_info(|| {
         egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, current, label)
     });
-    let hov = kit::anim(
-        ui.ctx(),
-        resp.id.with("hov"),
-        resp.hovered(),
-        crate::theme::motion::HOVER,
-    );
+    let feel = kit::feel_ring(ui, t, &resp, r, 12.0);
+    let hov = feel.hov;
     let p = ui.painter().clone();
     if current {
         p.rect_filled(r, 12.0, color.gamma_multiply(0.16));
@@ -736,8 +780,12 @@ pub fn category_row(
             egui::Stroke::new(1.0, color.gamma_multiply(0.45)),
             egui::StrokeKind::Inside,
         );
-    } else if hov > 0.0 {
-        p.rect_filled(r, 12.0, Color32::from_white_alpha((10.0 * hov) as u8));
+    } else if hov > 0.0 || feel.down > 0.0 {
+        p.rect_filled(
+            r,
+            12.0,
+            Color32::from_white_alpha((10.0 * hov + 8.0 * feel.down) as u8),
+        );
     }
     let mut x = r.left() + 10.0;
     let mut check_changed = None;
@@ -1396,6 +1444,7 @@ fn done(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         {
             app.act();
             let (n, errs) = executor::undo_plan(&app.env, &rep.plan_id);
+            app.files_back(&CleanApp::moved_paths(&rep));
             if errs.is_empty() {
                 app.tell(format!("{} put back.", cleancraft_core::fsutil::items(n)));
             } else {
@@ -1422,9 +1471,15 @@ fn done(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         }
         if kit::primary(ui, &t, "Done") {
             app.act();
+            // Back to the list when something is left in it (what did not move, what was
+            // not selected); the start screen when the list is empty.
             let st = app.plan_state(f);
-            st.phase = Phase::Idle;
-            st.plan = None;
+            if st.plan.as_ref().is_some_and(|p| !p.items.is_empty()) {
+                st.phase = Phase::Results;
+            } else {
+                st.phase = Phase::Idle;
+                st.plan = None;
+            }
         }
     });
 }

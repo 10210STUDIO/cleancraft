@@ -5,14 +5,110 @@
 use std::sync::Arc;
 
 use egui::{
-    Align2, Color32, CornerRadius, FontId, Frame, Galley, Margin, Pos2, Rect, Response, RichText,
-    Sense, Shape, Stroke, Ui, Vec2, WidgetInfo, WidgetType, pos2, vec2,
+    Align2, Color32, CornerRadius, CursorIcon, FontId, Frame, Galley, Margin, Pos2, Rect, Response,
+    RichText, Sense, Shape, Stroke, Ui, Vec2, WidgetInfo, WidgetType, pos2, vec2,
 };
 
 use crate::icons::{self, Icon};
 use crate::theme::{
     self, Section, Tokens, Weight, font, hit, icon as isz, motion, radius, size, space,
 };
+
+// ---------------------------------------------------------------------------------------
+// Interaction: pointer, hover, press and keyboard focus
+// ---------------------------------------------------------------------------------------
+
+/// How a clickable control feels this frame: hover and press, each eased 0..=1
+/// (`motion::tr::HOVER` and `motion::tr::PRESS`, instant with Reduce motion), and whether it
+/// has the keyboard focus. Disabled controls stay at rest.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Feel {
+    pub hov: f32,
+    pub down: f32,
+    pub focus: bool,
+}
+
+impl Feel {
+    /// The press as a scale factor for the control's fill (1 at rest, `PRESS_SCALE` held).
+    pub fn scale(&self) -> f32 {
+        1.0 - (1.0 - motion::PRESS_SCALE) * self.down
+    }
+}
+
+/// Every clickable control in CleanCraft goes through this once per frame (kit widgets and
+/// the few custom rows on pages): it sets the pointer (the pointing hand while an enabled
+/// control is hovered, the arrow left alone when it is disabled) and returns the eased
+/// hover and press. Pair it with [`focus_ring`] when painting.
+pub fn feel(ui: &Ui, resp: &Response) -> Feel {
+    pointer(resp);
+    let enabled = resp.enabled();
+    let ctx = ui.ctx();
+    let hov = crate::motion::animate_bool(
+        ctx,
+        resp.id.with("hov"),
+        resp.hovered() && enabled,
+        crate::motion::tr::HOVER,
+    );
+    let down = crate::motion::animate_bool(
+        ctx,
+        resp.id.with("down"),
+        resp.is_pointer_button_down_on() && enabled,
+        crate::motion::tr::PRESS,
+    );
+    Feel {
+        hov,
+        down,
+        focus: enabled && resp.has_focus(),
+    }
+}
+
+/// The pointing hand over an enabled, hovered control. Disabled controls keep the arrow.
+pub fn pointer(resp: &Response) {
+    if resp.enabled() && resp.hovered() {
+        resp.ctx.set_cursor_icon(CursorIcon::PointingHand);
+    }
+}
+
+/// The colour of the keyboard focus ring: the section colour, lifted so it reads on glass.
+pub fn focus_color(t: &Tokens) -> Color32 {
+    icons::lerp(t.sec_a, Color32::WHITE, 0.35)
+}
+
+/// The keyboard focus ring: 2 pt, 3 pt outside the control's shape `r` (corner `round`),
+/// like macOS draws it. Shown only while the control has the focus (Tab moves it; Space and
+/// Return press the focused control).
+pub fn focus_ring(p: &egui::Painter, t: &Tokens, r: Rect, round: f32) {
+    p.rect_stroke(
+        r.expand(3.0),
+        round + 3.0,
+        Stroke::new(2.0, focus_color(t)),
+        egui::StrokeKind::Middle,
+    );
+}
+
+/// [`feel`] plus the focus ring around `shape` when focused: for controls that paint their
+/// own hover and press.
+pub fn feel_ring(ui: &Ui, t: &Tokens, resp: &Response, shape: Rect, round: f32) -> Feel {
+    let f = feel(ui, resp);
+    if f.focus {
+        focus_ring(ui.painter(), t, shape, round);
+    }
+    f
+}
+
+/// A slider in CleanCraft's style (egui's slider with the pointing hand over it).
+pub fn slider(ui: &mut Ui, s: egui::Slider<'_>) -> Response {
+    let r = ui.add(s);
+    pointer(&r);
+    r
+}
+
+/// An item in a pop-up menu (Select Copies): egui's menu button, with the pointing hand.
+pub fn menu_item(ui: &mut Ui, label: &str) -> Response {
+    let r = ui.button(RichText::new(label).font(font(size::CALLOUT, Weight::Medium)));
+    pointer(&r);
+    r
+}
 
 // ---------------------------------------------------------------------------------------
 // Buttons
@@ -54,21 +150,12 @@ pub fn pill(ui: &mut Ui, t: &Tokens, label: &str, kind: Kind, icon: Option<Icon>
     if !ui.is_rect_visible(rect) {
         return resp;
     }
-    let ctx = ui.ctx().clone();
-    let hov = anim(
-        &ctx,
-        resp.id.with("hov"),
-        resp.hovered() && enabled,
-        motion::HOVER,
-    );
-    let down = anim(
-        &ctx,
-        resp.id.with("down"),
-        resp.is_pointer_button_down_on() && enabled,
-        motion::PRESS,
-    );
-    let scale = 1.0 - (1.0 - motion::PRESS_SCALE) * down;
-    let r = Rect::from_center_size(rect.center(), rect.size() * scale);
+    let f = feel(ui, &resp);
+    let hov = f.hov;
+    let r = Rect::from_center_size(rect.center(), rect.size() * f.scale());
+    if f.focus {
+        focus_ring(ui.painter(), t, rect, rect.height() / 2.0);
+    }
     let p = ui.painter().clone();
     let p = if enabled {
         p
@@ -125,6 +212,10 @@ pub fn pill(ui: &mut Ui, t: &Tokens, label: &str, kind: Kind, icon: Option<Icon>
             icons::lerp(t.text_dim, t.text, hov)
         }
     };
+    // Pressed: the fill shrinks (above) and dims a little.
+    if f.down > 0.0 && kind != Kind::Ghost {
+        p.rect_filled(r, round, Color32::from_black_alpha((34.0 * f.down) as u8));
+    }
     let content_w = galley.size().x + icon_w;
     let mut x = r.center().x - content_w / 2.0;
     if let Some(ic) = icon {
@@ -342,7 +433,8 @@ pub fn segmented(
         let resp = ui.interact(r, id, Sense::click());
         let on = i == selected;
         resp.widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, true, on, *name));
-        let hov = anim(ui.ctx(), id.with("hov"), resp.hovered(), motion::HOVER);
+        let f = feel(ui, &resp);
+        let hov = f.hov;
         let k = anim(ui.ctx(), id.with("on"), on, motion::HOVER * 1.5);
         if k > 0.0 {
             p.rect_filled(
@@ -356,12 +448,15 @@ pub fn segmented(
                 Stroke::new(1.0, t.sec_a.gamma_multiply(0.45 * k)),
                 egui::StrokeKind::Inside,
             );
-        } else if hov > 0.0 {
+        } else if hov > 0.0 || f.down > 0.0 {
             p.rect_filled(
                 r,
                 r.height() / 2.0,
-                Color32::from_white_alpha((10.0 * hov) as u8),
+                Color32::from_white_alpha((10.0 * hov + 8.0 * f.down) as u8),
             );
+        }
+        if f.focus {
+            focus_ring(&p, t, r, r.height() / 2.0);
         }
         let color = icons::lerp(icons::lerp(t.text_dim, t.text, hov), t.text, k);
         let ir = Rect::from_center_size(
@@ -1175,14 +1270,8 @@ pub fn round_action(ui: &mut Ui, t: &Tokens, label: &str, d: f32) -> Response {
     let resp = ui.interact(rect, ui.id().with(("round", label)), Sense::click());
     let enabled = ui.is_enabled();
     resp.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, label));
-    let ctx = ui.ctx().clone();
-    let hov = anim(&ctx, resp.id.with("hov"), resp.hovered(), motion::HOVER);
-    let down = anim(
-        &ctx,
-        resp.id.with("down"),
-        resp.is_pointer_button_down_on(),
-        motion::PRESS,
-    );
+    let f = feel(ui, &resp);
+    let (hov, down) = (f.hov, f.down);
     let time = ui.input(|i| i.time);
     let p = ui.painter();
     let c = rect.center();
@@ -1237,6 +1326,12 @@ pub fn round_action(ui: &mut Ui, t: &Tokens, label: &str, d: f32) -> Response {
         Stroke::new(1.5, Color32::from_white_alpha(70)),
         egui::StrokeKind::Inside,
     );
+    if down > 0.0 {
+        p.rect_filled(r, corner, Color32::from_black_alpha((30.0 * down) as u8));
+    }
+    if f.focus {
+        focus_ring(p, t, r, corner);
+    }
     p.text(
         c,
         Align2::CENTER_CENTER,
@@ -1633,10 +1728,14 @@ pub fn switch(ui: &mut Ui, t: &Tokens, on: bool, name: &str) -> Response {
     resp.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, enabled, on, name));
     let r = Rect::from_center_size(outer.center(), vec2(38.0, 22.0));
     let k = anim(ui.ctx(), resp.id.with("on"), on, motion::HOVER * 1.5);
-    let hov = anim(ui.ctx(), resp.id.with("hov"), resp.hovered(), motion::HOVER);
-    let p = ui.painter();
-    let off_track = Color32::from_white_alpha((34.0 + 14.0 * hov) as u8);
-    let track = icons::lerp(off_track, t.success, k);
+    let f = feel(ui, &resp);
+    let mut p = ui.painter().clone();
+    if !enabled {
+        p.set_opacity(0.4);
+    }
+    let off_track = Color32::from_white_alpha((34.0 + 14.0 * f.hov) as u8);
+    let on_track = icons::lerp(t.success, Color32::WHITE, 0.10 * f.hov);
+    let track = icons::lerp(off_track, on_track, k);
     p.rect_filled(r, 11.0, track);
     p.rect_stroke(
         r,
@@ -1644,9 +1743,20 @@ pub fn switch(ui: &mut Ui, t: &Tokens, on: bool, name: &str) -> Response {
         Stroke::new(1.0, Color32::from_white_alpha(20)),
         egui::StrokeKind::Inside,
     );
-    let c = pos2(r.left() + 11.0 + 16.0 * k, r.center().y);
-    p.circle_filled(c + vec2(0.0, 1.0), 9.5, Color32::from_black_alpha(60));
-    p.circle_filled(c, 9.0, Color32::from_rgb(0xF4, 0xF6, 0xF8));
+    // Pressed, the knob stretches toward the side it will move to (as on macOS).
+    let stretch = 4.0 * f.down;
+    let cx = r.left() + 11.0 + 16.0 * k;
+    let knob = Rect::from_center_size(pos2(cx, r.center().y), vec2(18.0 + stretch, 18.0))
+        .translate(vec2(if on { -stretch / 2.0 } else { stretch / 2.0 }, 0.0));
+    p.rect_filled(
+        knob.translate(vec2(0.0, 1.0)).expand(0.5),
+        9.5,
+        Color32::from_black_alpha(60),
+    );
+    p.rect_filled(knob, 9.0, Color32::from_rgb(0xF4, 0xF6, 0xF8));
+    if f.focus {
+        focus_ring(&p, t, r, 11.0);
+    }
     resp
 }
 
@@ -1730,12 +1840,15 @@ impl Dialog {
                 );
                 let b = ui.interact(x, self.id.with("close-x"), Sense::click());
                 b.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, "Close dialog"));
-                let hov = anim(ui.ctx(), b.id.with("hov"), b.hovered(), motion::HOVER);
+                let rad = hit::MIN / 2.0 - 2.0;
+                let disc = Rect::from_center_size(x.center(), Vec2::splat(rad * 2.0));
+                let f = feel_ring(ui, &t, &b, disc, rad);
+                let hov = f.hov;
                 let p = ui.painter();
                 p.circle_filled(
                     x.center(),
-                    hit::MIN / 2.0 - 2.0,
-                    Color32::from_white_alpha((10.0 + 18.0 * hov) as u8),
+                    rad * f.scale(),
+                    Color32::from_white_alpha((10.0 + 18.0 * hov + 10.0 * f.down) as u8),
                 );
                 icons::paint(
                     p,
@@ -1954,17 +2067,16 @@ pub fn paint_check(ui: &Ui, t: &Tokens, r: Rect, resp: &Response, on: bool, enab
 fn paint_box(ui: &Ui, t: &Tokens, r: Rect, resp: &Response, on: bool, mixed: bool, enabled: bool) {
     let ctx = ui.ctx();
     let k = anim(ctx, resp.id.with("on"), on || mixed, motion::HOVER);
-    let hov = anim(
-        ctx,
-        resp.id.with("hov"),
-        resp.hovered() && enabled,
-        motion::HOVER,
-    );
+    let f = feel(ui, resp);
+    let hov = f.hov;
     let mut p = ui.painter().clone();
     if !enabled {
         p.set_opacity(0.35);
     }
-    let b = Rect::from_center_size(r.center(), Vec2::splat(hit::CHECK));
+    let b = Rect::from_center_size(r.center(), Vec2::splat(hit::CHECK * (1.0 - 0.08 * f.down)));
+    if f.focus {
+        focus_ring(&p, t, b, 5.0);
+    }
     p.rect_filled(b, 5.0, Color32::from_black_alpha(60));
     p.rect_stroke(
         b,
@@ -2076,18 +2188,22 @@ pub fn radio(ui: &mut Ui, t: &Tokens, on: bool, text: &str) -> Response {
     resp.widget_info(|| WidgetInfo::selected(WidgetType::RadioButton, enabled, on, text));
     let ctx = ui.ctx();
     let k = anim(ctx, resp.id.with("on"), on, motion::HOVER);
-    let hov = anim(
-        ctx,
-        resp.id.with("hov"),
-        resp.hovered() && enabled,
-        motion::HOVER,
-    );
+    let f = feel(ui, &resp);
+    let hov = f.hov;
     let mut p = ui.painter().clone();
     if !enabled {
         p.set_opacity(0.4);
     }
     let c = pos2(r.left() + 11.0, r.center().y);
-    let rad = hit::CHECK / 2.0;
+    let rad = hit::CHECK / 2.0 * (1.0 - 0.08 * f.down);
+    if f.focus {
+        focus_ring(
+            &p,
+            t,
+            Rect::from_center_size(c, Vec2::splat(rad * 2.0)),
+            rad,
+        );
+    }
     p.circle_filled(c, rad, Color32::from_black_alpha(60));
     // Ring #8C96A5: 5.0:1 against the card as a colour, still over 3:1 where its 1.5 pt edge
     // is anti-aliased (WCAG 1.4.11); section colour on hover.
@@ -2166,6 +2282,10 @@ pub fn search_field(
         },
     );
     let resp = out.unwrap_or_else(|| ui.interact(r, ui.id().with(hint), Sense::hover()));
+    // The I-beam over the whole field, the magnifier and its rounded ends included.
+    if ui.is_enabled() && ui.rect_contains_pointer(r) {
+        ui.ctx().set_cursor_icon(CursorIcon::Text);
+    }
     if resp.has_focus() {
         ui.painter().rect_stroke(
             r,
@@ -2193,7 +2313,7 @@ pub fn sort_menu<T: Copy + PartialEq>(ui: &mut Ui, id: &str, value: &mut T, choi
         }
         ui.spacing_mut().interact_size.y = hit::FIELD;
         ui.spacing_mut().button_padding = vec2(14.0, 7.0);
-        egui::ComboBox::from_id_salt(id)
+        let r = egui::ComboBox::from_id_salt(id)
             .selected_text(RichText::new(current).font(font(size::CALLOUT, Weight::Medium)))
             .icon(|ui, rect, visuals, _open| {
                 let r = Rect::from_center_size(rect.center(), Vec2::splat(13.0));
@@ -2201,11 +2321,12 @@ pub fn sort_menu<T: Copy + PartialEq>(ui: &mut Ui, id: &str, value: &mut T, choi
             })
             .show_ui(ui, |ui| {
                 for (v, l) in choices {
-                    ui.selectable_value(value, *v, *l);
+                    pointer(&ui.selectable_value(value, *v, *l));
                 }
             })
-            .response
-            .widget_info(|| WidgetInfo::labeled(WidgetType::ComboBox, true, "Sort"));
+            .response;
+        pointer(&r);
+        r.widget_info(|| WidgetInfo::labeled(WidgetType::ComboBox, true, "Sort"));
     });
 }
 
@@ -2225,10 +2346,12 @@ pub fn menu_pill<R>(
         v.inactive.bg_stroke = Stroke::new(1.0, t.glass_edge);
         ui.spacing_mut().interact_size.y = hit::FIELD;
         ui.spacing_mut().button_padding = vec2(16.0, 7.0);
-        ui.menu_button(
+        let r = ui.menu_button(
             RichText::new(label).font(font(size::CALLOUT, Weight::Medium)),
             add,
-        )
+        );
+        pointer(&r.response);
+        r
     })
     .inner
 }

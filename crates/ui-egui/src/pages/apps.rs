@@ -28,7 +28,7 @@ use crate::app::CleanApp;
 use crate::icons::{self, Icon};
 use crate::jobs::Job;
 use crate::kit;
-use crate::theme::{Weight, font, motion, size, space};
+use crate::theme::{Weight, font, size, space};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Group {
@@ -654,13 +654,14 @@ fn apps_list(app: &mut CleanApp, ui: &mut Ui, h: f32) {
                 if resp.clicked() {
                     open = Some(a.path.clone());
                 }
-                let hov = kit::anim(ui.ctx(), resp.id.with("hov"), resp.hovered(), motion::HOVER);
+                let feel = kit::feel_ring(ui, &t, &resp, r.shrink(2.0), 10.0);
+                let hov = feel.hov;
                 let p = ui.painter().clone();
-                if hov > 0.0 {
+                if hov > 0.0 || feel.down > 0.0 {
                     p.rect_filled(
                         r.shrink(2.0),
                         10.0,
-                        Color32::from_white_alpha((10.0 * hov) as u8),
+                        Color32::from_white_alpha((10.0 * hov + 8.0 * feel.down) as u8),
                     );
                 }
                 let tile = Rect::from_center_size(
