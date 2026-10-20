@@ -739,11 +739,26 @@ fn u01_running_app_offers_quit_in_place() {
     a.mac.run_app(&a.editor);
     let mut h = open_editor(&a);
     snap(&mut h, "u01-running-app");
-    assert!(has_text(&h, "Quit Editor first"));
     let b = buttons(&h);
+    let Some(quit) = b.iter().find(|l| l.starts_with("Quit Editor")).cloned() else {
+        panic!("no Quit button while Editor runs; buttons: {b:?}");
+    };
+    // The user quits it from here; once it is gone the page unlocks by itself.
+    h.get_by_label(&quit).click();
+    settle(&mut h);
+    if let Some(q) = buttons(&h).into_iter().find(|l| l.starts_with("Quit")) {
+        // A confirmation dialog, if there is one.
+        h.get_by_label(&q).click();
+        settle(&mut h);
+    }
+    testkit_cleanup::clear_running(&a.mac.env);
+    for _ in 0..40 {
+        h.step();
+    }
+    let enabled = buttons(&h);
     assert!(
-        b.iter().any(|l| l.starts_with("Quit Editor")),
-        "no Quit button next to 'Quit Editor first'; buttons: {b:?}"
+        enabled.iter().any(|l| l == "Uninstall"),
+        "Editor quit, yet Uninstall stays disabled; buttons: {enabled:?}"
     );
 }
 
