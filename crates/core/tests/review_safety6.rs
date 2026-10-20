@@ -599,14 +599,13 @@ mod dev {
 // ----------------------------------------------------------------------------------------
 // files6: Trash Bins "Erase in Mail"
 
-/// SAF6-7 S1: Erase in Mail on an account Mail's files do not name uses Mail's "In All
+/// SAF6-7 S1 (fixed in files6 55dab45): Erase in Mail on an account Mail's files do not name uses Mail's "In All
 /// Accounts", which erases the deleted messages of every account (here also the 2 of On My
 /// Mac and the 3 of iCloud), while the confirmation counts only that group: "Erase 1 deleted
 /// message in Mail (20 KB)?". The person confirms one number and loses more. Expected: the
 /// numbers the dialog shows are what Mail erases (all accounts), or an unnamed account offers
 /// the steps in Mail instead of erasing every account.
 #[test]
-#[ignore = "SAF6-7: Erase in Mail on an unnamed account erases every account while the dialog counts one group"]
 fn saf6_7_erase_scope_matches_the_confirmed_numbers() {
     use cleancraft_core::features::{self, trash};
     use cleancraft_core::testkit_trash::{answer_account_names, mail_trash};
