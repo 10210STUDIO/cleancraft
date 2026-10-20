@@ -178,7 +178,7 @@ impl Section {
         use cleancraft_core::FeatureId as F;
         match f {
             F::SmartCare => Section::Overview,
-            F::SystemJunk | F::MailAttachments | F::TrashBins => Section::Clean,
+            F::SystemJunk | F::MailAttachments | F::TrashBins | F::DevClutter => Section::Clean,
             F::Malware | F::Privacy => Section::Protect,
             F::Maintenance | F::LoginItems => Section::Speed,
             F::Uninstaller | F::Updater => Section::Apps,

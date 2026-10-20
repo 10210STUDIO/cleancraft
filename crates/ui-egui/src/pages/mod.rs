@@ -1,6 +1,7 @@
 //! Pages. Plan-based modules share [`plan_page`]; the others have their own file.
 
 pub mod apps;
+pub mod dev_clutter;
 pub mod disk_map;
 pub mod extras;
 pub mod extras_cleanup;
@@ -77,6 +78,12 @@ pub fn covers(f: FeatureId) -> &'static [&'static str] {
             "Every folder of your home folder, by size",
             "Any folder you pick",
         ],
+        FeatureId::DevClutter => &[
+            "Rust target folders, node_modules and Python environments",
+            "Selected only in projects you have not changed for a while",
+            "Xcode simulators that can no longer start",
+            "What Docker and Homebrew could free with their own commands",
+        ],
         _ => &[],
     }
 }
@@ -89,6 +96,7 @@ pub fn feature_page(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         FeatureId::Maintenance => tasks::ui(app, ui, f),
         FeatureId::SpaceLens => disk_map::ui(app, ui, f),
         FeatureId::Monitor => monitor::ui(app, ui, f),
+        FeatureId::DevClutter => dev_clutter::ui(app, ui, f),
         _ => plan_page::ui(app, ui, f),
     }
 }
