@@ -132,6 +132,9 @@ Checked and found right (passing tests, kept as guards):
 - 19:13 files6 55dab45: SAF6-7 fixed; Disk Map and Duplicate Downloads guards still pass.
 - 19:40 apps6 6d5f550 (side branch): a1-a4 pass, SAF6-8 open.
 - 19:45 tray6 ffd10da: SAF6-6 fixed.
+- 20:10 final, agent6/safety6 with every round 6 branch merged (dev6 1f233a3, tray6 ffd10da,
+  watch6 b9e7d80, health6 8bca29c, files6 55dab45, apps6 03ffffd): review_safety6 22/22,
+  review_safety6_ui 5/5, review_safety6_apps 4 pass and SAF6-8 (2 ignored tests) still open.
 
 ## Real-Mac checks (cannot be proven here)
 

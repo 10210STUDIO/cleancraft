@@ -13,8 +13,12 @@ Threat model, defects and verification log: `docs/review/SAFETY-R6.md`.
 - `crates/ui-egui/tests/review_safety6_ui.rs`: the lead's way-forward rule (every all-locked page
   state offers an action or exact steps: Mail open, Trash Bins, browsers open, Developer Clutter
   in Documents) and Mac Health buttons only look.
-- `crates/core/tests/review_safety6_apps.rs` on branch `agent6/safety6-apps` (built from
-  agent6/apps6, which still conflicts with watch6 in uninstaller.rs): batch uninstall checks.
+- `crates/core/tests/review_safety6_apps.rs` (written on agent6/safety6-apps, now merged in):
+  batch uninstall checks a1-a4 pass; a5/a5b ignored for SAF6-8.
+
+All of the above pass on agent6/safety6 with every round 6 branch merged (core 22/22, UI 5/5,
+apps 4 + 2 ignored). Not a safety item: clippy -D warnings fails on the merged tree in
+health6's pages/welcome.rs:292 (collapsible_match), told to health6.
 
 ## Defects
 
@@ -29,6 +33,12 @@ Threat model, defects and verification log: `docs/review/SAFETY-R6.md`.
 | SAF6-8 edited uninstall plan moves another app | S2 | apps6 | open |
 
 Counts: S1 4 (4 fixed), S2 3 (2 fixed, 1 open: SAF6-8), S3 0.
+
+## Open
+
+- SAF6-8 S2 (apps6): `Uninstaller::validate` accepts any item in an edited uninstall plan that
+  passes the allow-list (another installed app, its settings). Pre-existing since round 4,
+  widened by batches. Needs an item-belongs-to-the-plan's-apps check.
 
 ## Real-Mac checks
 
