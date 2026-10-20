@@ -91,11 +91,23 @@ pub fn results_toolbar(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
 }
 
 fn plan_has(app: &mut CleanApp, f: FeatureId, cats: &[&str]) -> bool {
-    app.plan_state(f).plan.as_ref().is_some_and(|p| {
-        p.items
-            .iter()
-            .any(|i| cats.contains(&i.category.as_str()) && i.size > 0)
-    })
+    app.plan_state(f)
+        .plan
+        .as_ref()
+        .is_some_and(|p| p.items.iter().any(|i| cats.contains(&i.category.as_str())))
+}
+
+/// A Finder Trash in the Trash Bins list holds something (the startup Trash row is listed
+/// even when empty or unreadable, with size 0).
+fn finder_trash_full(app: &mut CleanApp) -> bool {
+    app.plan_state(FeatureId::TrashBins)
+        .plan
+        .as_ref()
+        .is_some_and(|p| {
+            p.items.iter().any(|i| {
+                matches!(i.category.as_str(), "startup_trash" | "external_trash") && i.size > 0
+            })
+        })
 }
 
 /// Trash Bins' bottom bar action: Empty Trash when a Finder Trash holds something, Full Disk
@@ -121,13 +133,7 @@ pub fn trash_bar(app: &mut CleanApp, ui: &mut Ui) {
         }
     }
     let busy = load(ui).empty_job.is_some();
-    if busy
-        || plan_has(
-            app,
-            FeatureId::TrashBins,
-            &["startup_trash", "external_trash"],
-        )
-    {
+    if busy || finder_trash_full(app) {
         empty_trash(app, ui, EMPTY_BUTTON);
     }
 }

@@ -42,3 +42,7 @@ Branch `agent6/files6`. Rows for FEATURES.md: `docs/features-r6/files6.md`.
 - `crates/core/src/lib.rs`: `pub mod space_snapshots;`, `pub mod testkit_trash;`.
 - `crates/core/tests/sweep_run.rs`: `PLAN_MODULES.contains` -> `plan_module_ids().contains`.
 - No change to policy.rs or executor.rs.
+
+## Gate
+
+Disk was under 5 GB free, so the workspace gate ran one test binary at a time (each binary deleted after its run): core lib + 33 core test files, mcp lib, app bins, ui lib + every ui test file. All green after three fixes found by the gate: Privacy's Wi-Fi/Reset buttons hidden by a size check (qa_cleanup_privacy, qa_every_control::results_toolbar_and_rows_fit_the_window), and the Disk Map snapshot file making a home map stale (ux4_flows; the tree now measures the snapshot file again after writing it). `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --all --check` clean. target/ deleted.

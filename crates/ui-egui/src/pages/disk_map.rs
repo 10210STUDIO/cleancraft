@@ -165,10 +165,13 @@ fn start_map(app: &mut CleanApp, root: PathBuf, fresh: bool) {
     crate::sound::play(&app.env, crate::sound::Cue::ScanStart);
     let env = app.env.clone();
     let job = Job::start(app.sync, move |status| {
-        let tree =
+        let mut tree =
             space::build_location(&env, &loc, &cancel, &|n, _| status(&format!("{n} files")));
         // Kept for Mac Health's "what grew" (a stopped measure is not kept).
-        let _ = space_snapshots::record(&env, &loc, &tree);
+        // The snapshot file is in CleanCraft's own folder, which a home map measures too.
+        if let Ok(true) = space_snapshots::record(&env, &loc, &tree) {
+            tree.refresh(&space_snapshots::path(&env));
+        }
         tree
     });
     app.disk_map.phase = Phase::Scanning(job);
