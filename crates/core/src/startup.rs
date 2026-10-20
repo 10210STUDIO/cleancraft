@@ -334,6 +334,56 @@ pub fn disabled_overrides(env: &Env, domain: &str) -> Result<BTreeMap<String, bo
     Ok(parse_print_disabled(&out.stdout))
 }
 
+/// One launch agent or daemon, read from its property list `p` in the folder of `d`.
+/// `overrides` are launchd's turned-off list for that domain ([`disabled_overrides`]).
+pub fn launch_item_at(
+    env: &Env,
+    d: Domain,
+    p: &Path,
+    overrides: &BTreeMap<String, bool>,
+) -> LaunchItem {
+    let fallback_label = p
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let (lp, problem) = match read_launch_plist(p) {
+        Ok(lp) => (lp, None),
+        Err(e) => (
+            LaunchPlist::default(),
+            Some(format!("could not be read: {e}")),
+        ),
+    };
+    let label = lp.label.clone().unwrap_or(fallback_label);
+    let program_exists = lp
+        .program
+        .as_ref()
+        .is_some_and(|pr| pr.starts_with('/') && env.sys_path(pr).exists());
+    let signer = match &lp.program {
+        Some(pr) if program_exists => signer_of(env, pr),
+        Some(_) => Signer::Missing,
+        None => Signer::Unknown {
+            message: "no program named".into(),
+        },
+    };
+    let enabled = match overrides.get(&label) {
+        Some(disabled) => !disabled,
+        None => !lp.disabled,
+    };
+    LaunchItem {
+        domain: d,
+        apple: signer == Signer::Apple,
+        label,
+        plist_shown: env.display(p),
+        plist: p.to_path_buf(),
+        program: lp.program,
+        program_exists,
+        signer,
+        enabled,
+        run_at_load: lp.run_at_load,
+        problem,
+    }
+}
+
 /// Every launch agent and daemon, with notes about what could not be read.
 pub fn list_launch_items(env: &Env, uid: Option<u32>) -> (Vec<LaunchItem>, Vec<String>) {
     let mut notes = Vec::new();
@@ -362,48 +412,9 @@ pub fn list_launch_items(env: &Env, uid: Option<u32>) -> (Vec<LaunchItem>, Vec<S
             notes.push(format!("{} could not be read.", env.display(&dir)));
             continue;
         }
+        let overrides = if d == Domain::Daemon { &system } else { &gui };
         for p in plists_in(&dir) {
-            let fallback_label = p
-                .file_stem()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            let (lp, problem) = match read_launch_plist(&p) {
-                Ok(lp) => (lp, None),
-                Err(e) => (
-                    LaunchPlist::default(),
-                    Some(format!("could not be read: {e}")),
-                ),
-            };
-            let label = lp.label.clone().unwrap_or(fallback_label);
-            let program_exists = lp
-                .program
-                .as_ref()
-                .is_some_and(|pr| pr.starts_with('/') && env.sys_path(pr).exists());
-            let signer = match &lp.program {
-                Some(pr) if program_exists => signer_of(env, pr),
-                Some(_) => Signer::Missing,
-                None => Signer::Unknown {
-                    message: "no program named".into(),
-                },
-            };
-            let overrides = if d == Domain::Daemon { &system } else { &gui };
-            let enabled = match overrides.get(&label) {
-                Some(disabled) => !disabled,
-                None => !lp.disabled,
-            };
-            items.push(LaunchItem {
-                domain: d,
-                apple: signer == Signer::Apple,
-                label,
-                plist_shown: env.display(&p),
-                plist: p,
-                program: lp.program,
-                program_exists,
-                signer,
-                enabled,
-                run_at_load: lp.run_at_load,
-                problem,
-            });
+            items.push(launch_item_at(env, d, &p, overrides));
         }
     }
     (items, notes)

@@ -34,6 +34,7 @@ pub mod testkit_monitor;
 pub mod testkit_perf;
 pub mod testkit_quit;
 pub mod updater;
+pub mod watch;
 
 pub use env::{Env, Fault};
 pub use executor::{ActionKind, ActionRecord, Method, Report, SkipReason};
