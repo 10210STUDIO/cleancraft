@@ -26,31 +26,46 @@ fn att(m: &FakeMac, account: &str, mailbox: &str, msg: &str, file: &str) -> Path
     ))
 }
 
+/// The user ticks every attachment that can be moved, leaving the ones changed after Mail
+/// saved them (what the reason text tells them to keep).
+fn tick_unchanged(p: &mut Plan) {
+    for i in 0..p.items.len() {
+        let it = &p.items[i];
+        let on = it.locked.is_none() && !it.reason.contains("changed after Mail saved it");
+        p.set_selected(i, on);
+    }
+}
+
 #[test]
 fn server_accounts_only_and_modified_kept() {
     let m = mail_mac();
     let p = scan(&m);
-    // M1: opened copies; the one edited after opening is not selected.
+    // Nothing is preselected: the user ticks the attachments to move.
+    assert_eq!(p.selected_count(), 0, "an attachment is preselected");
+    // M1: opened copies; the one edited after opening also says why it should stay.
     let inv = find(&p, "Invoice.pdf").expect("opened attachment");
     assert_eq!(inv.category, "mail_opened");
-    assert!(inv.selected && inv.locked.is_none());
+    assert!(!inv.selected && inv.locked.is_none());
+    assert!(!inv.reason.contains("changed after Mail saved it"));
     let con = find(&p, "Contract.docx").expect("edited opened attachment");
     assert!(!con.selected && con.locked.is_none());
     assert!(con.reason.contains("changed after Mail saved it"));
     // M2: IMAP by folder name.
     let photo = find(&p, "photo.jpg").expect("IMAP attachment");
     assert_eq!(photo.category, "mail_downloaded");
-    assert!(photo.selected);
+    assert!(!photo.selected && photo.locked.is_none());
     assert_eq!(photo.group.as_deref(), Some("me@example.com: INBOX"));
     // M3: edited after download.
     let edited = find(&p, "edited.key").expect("edited IMAP attachment");
     assert!(!edited.selected && edited.locked.is_none());
+    assert!(edited.reason.contains("changed after Mail saved it"));
     // Account known from Mail's Accounts.plist (IMAP, named Work).
     let deck = find(&p, "deck.pdf").expect("Accounts.plist account");
-    assert!(deck.selected);
+    assert!(!deck.selected && deck.locked.is_none());
     assert_eq!(deck.group.as_deref(), Some("Work: Sent Messages"));
     // Account known from the system account store (Exchange).
-    assert!(find(&p, "budget.xlsx").expect("Accounts4 account").selected);
+    let budget = find(&p, "budget.xlsx").expect("Accounts4 account");
+    assert!(!budget.selected && budget.locked.is_none());
     // Unknown type: listed, locked.
     let mystery = find(&p, "mystery.zip").expect("unknown account listed");
     assert_eq!(mystery.locked.as_deref(), Some(mail::LOCK_UNKNOWN_ACCOUNT));
@@ -112,9 +127,12 @@ fn mail_running_locks_everything_and_blocks_cleaning() {
     assert_eq!(p.selected_count(), 0);
     assert!(p.notes.iter().any(|n| n.contains("Quit Mail")));
 
-    // Scanned while Mail was quit, then Mail opened before the cleanup: refused.
+    // Scanned while Mail was quit, the user ticks attachments, then Mail opened before the
+    // cleanup: refused.
     let m = mail_mac();
-    let p = scan(&m);
+    let mut p = scan(&m);
+    tick_unchanged(&mut p);
+    assert!(p.selected_count() > 0);
     kit::set_running(&m.env, "Mail", "/System/Applications/Mail.app");
     let s = Settings::default();
     let err = features::run_plan(&m.env, &s, &p, &p.digest(), &mut |_, _| {}).unwrap_err();
@@ -126,7 +144,8 @@ fn mail_running_locks_everything_and_blocks_cleaning() {
 fn clean_moves_selected_and_errors_are_reported() {
     let m = mail_mac();
     let s = Settings::default();
-    let p = scan(&m);
+    let mut p = scan(&m);
+    tick_unchanged(&mut p);
     let photo = att(&m, "IMAP-me@example.com", "INBOX", "12345", "photo.jpg");
     let deck = att(
         &m,
@@ -153,7 +172,7 @@ fn clean_moves_selected_and_errors_are_reported() {
     assert!(!inv.exists(), "selected opened attachment moved");
     assert!(m.env.user_trash().join("Invoice.pdf").exists());
     let edited = att(&m, "IMAP-me@example.com", "INBOX", "12346", "edited.key");
-    assert!(edited.exists(), "modified attachment is not selected");
+    assert!(edited.exists(), "modified attachment was not ticked");
     assert_eq!(rep.moved.len(), 1);
     assert_eq!(rep.freed, find(&p, "Invoice.pdf").unwrap().size);
     let (n, errs) = executor::undo_plan(&m.env, &p.id);
@@ -172,4 +191,33 @@ fn without_full_disk_access_mail_storage_is_noted() {
         find(&p, "Invoice.pdf").is_some(),
         "opened attachments still listed"
     );
+}
+
+/// Attachments are never preselected; the run moves exactly the ones the user ticked,
+/// a modified one included when ticked by hand.
+#[test]
+fn attachments_move_only_when_ticked() {
+    let m = mail_mac();
+    let s = Settings::default();
+    let mut p = scan(&m);
+    assert!(!p.items.is_empty());
+    assert_eq!(p.selected_count(), 0);
+    // Cleaning the defaults moves nothing.
+    let rep = features::run_plan(&m.env, &s, &p, &p.digest(), &mut |_, _| {}).unwrap();
+    assert!(rep.moved.is_empty());
+    assert!(p.items.iter().all(|i| i.path.exists()));
+    // The user ticks one opened copy and the edited IMAP attachment.
+    let inv = find(&p, "Invoice.pdf").unwrap().path.clone();
+    let edited = att(&m, "IMAP-me@example.com", "INBOX", "12346", "edited.key");
+    for i in 0..p.items.len() {
+        let on = p.items[i].path == inv || p.items[i].path == edited;
+        p.set_selected(i, on);
+    }
+    assert_eq!(p.selected_count(), 2);
+    let rep = features::run_plan(&m.env, &s, &p, &p.digest(), &mut |_, _| {}).unwrap();
+    assert_eq!(rep.moved.len(), 2);
+    assert!(!inv.exists() && !edited.exists());
+    for i in p.items.iter().filter(|i| !i.selected) {
+        assert!(i.path.exists(), "{} moved without a tick", i.path.display());
+    }
 }

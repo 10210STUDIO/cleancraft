@@ -71,9 +71,10 @@ fn tiles_show_each_module_plan() {
     assert!(has(
         &h,
         &format!(
-            "{} of {} items selected",
+            "{} of {} items selected, {} found",
             mail.selected_count(),
-            mail.items.len()
+            mail.items.len(),
+            human_size(mail.total_size())
         )
     ));
     assert_eq!(mail.selected_count(), 2);
