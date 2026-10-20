@@ -383,6 +383,19 @@ pub fn font(size: f32, w: Weight) -> FontId {
     FontId::new(size, family)
 }
 
+/// Commands and code (REVIEW-C C14): JetBrains Mono, so spaces and dashes read; Inter draws
+/// what the subset lacks.
+pub fn mono(size: f32) -> FontId {
+    FontId::new(size, FontFamily::Name("code".into()))
+}
+
+/// JetBrains Mono Regular, subset to Latin (SIL Open Font License, see
+/// assets/fonts/OFL-JetBrainsMono.txt): about 16 KB.
+const MONO_FACE: (&str, &[u8]) = (
+    "jetbrains-mono",
+    include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf"),
+);
+
 /// Inter's four weights (SIL Open Font License, see assets/fonts/OFL-Inter.txt).
 fn inter_faces() -> [(&'static str, &'static [u8]); 4] {
     [
@@ -417,8 +430,16 @@ pub fn inter_only_fonts() -> FontDefinitions {
     }
     defs.families
         .insert(FontFamily::Proportional, vec!["inter-regular".into()]);
+    defs.font_data.insert(
+        MONO_FACE.0.to_string(),
+        std::sync::Arc::new(FontData::from_static(MONO_FACE.1)),
+    );
     defs.families
         .insert(FontFamily::Monospace, vec!["inter-regular".into()]);
+    defs.families.insert(
+        FontFamily::Name("code".into()),
+        vec![MONO_FACE.0.into(), "inter-regular".into()],
+    );
     for (fam, face) in [
         ("medium", "inter-medium"),
         ("semibold", "inter-semibold"),
@@ -457,6 +478,13 @@ pub fn install_fonts(ctx: &egui::Context) {
         .insert(FontFamily::Name("semibold".into()), chain("inter-semibold"));
     defs.families
         .insert(FontFamily::Name("bold".into()), chain("inter-bold"));
+    defs.font_data.insert(
+        MONO_FACE.0.to_string(),
+        std::sync::Arc::new(FontData::from_static(MONO_FACE.1)),
+    );
+    let mut code = vec![MONO_FACE.0.to_string()];
+    code.extend(chain("inter-regular"));
+    defs.families.insert(FontFamily::Name("code".into()), code);
     ctx.set_fonts(defs);
 }
 

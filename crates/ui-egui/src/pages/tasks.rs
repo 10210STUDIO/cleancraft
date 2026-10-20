@@ -286,7 +286,7 @@ fn task_card(app: &mut CleanApp, ui: &mut Ui, info: &tasks::TaskInfo) {
                         ui.add(
                             egui::Label::new(
                                 RichText::new(&command)
-                                    .font(font(size::FOOTNOTE, Weight::Medium))
+                                    .font(crate::theme::mono(size::FOOTNOTE))
                                     .color(t.text),
                             )
                             .wrap(),
@@ -325,11 +325,15 @@ fn task_card(app: &mut CleanApp, ui: &mut Ui, info: &tasks::TaskInfo) {
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 4.0;
                     if let Some(Err(why)) = &ready {
-                        ui.label(
-                            RichText::new(why)
+                        // A plain sentence; the tool's own words in the tooltip (REVIEW-C D4).
+                        let r = ui.label(
+                            RichText::new(plain_reason(why))
                                 .font(font(size::FOOTNOTE, Weight::Medium))
                                 .color(t.warning),
                         );
+                        if plain_reason(why) != *why {
+                            r.on_hover_text(why);
+                        }
                     }
                     // Same rule as Quick Sweep's tune-up count.
                     if let Some(why) = tasks::suggestion(
@@ -466,7 +470,7 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
                     for c in p.commands() {
                         ui.label(
                             RichText::new(c)
-                                .font(font(size::FOOTNOTE, Weight::Medium))
+                                .font(crate::theme::mono(size::FOOTNOTE))
                                 .color(t.text),
                         );
                     }
@@ -516,5 +520,16 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
     } else if close {
         app.act();
         app.tasks.confirm = None;
+    }
+}
+
+/// The first clause of a task's error, as a sentence: "Could not list local snapshots: fake:
+/// no answer for ..." reads "Could not list local snapshots. This task cannot run now."
+pub fn plain_reason(why: &str) -> String {
+    match why.split_once(": ") {
+        Some((head, _)) if !head.is_empty() => {
+            format!("{}. This task cannot run now.", head.trim_end_matches('.'))
+        }
+        _ => super::plan_page::sentence(why),
     }
 }

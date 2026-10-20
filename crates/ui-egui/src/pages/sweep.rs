@@ -45,6 +45,32 @@ pub struct State {
     pub scan_at: usize,
     /// Files came back since the results were made (an Undo): scan again when shown.
     pub stale: bool,
+    /// Tiles to scan again on their own (the Trash after files moved into it, a tile that
+    /// could not scan): REVIEW-U N2, U23.
+    pub refresh: Vec<FeatureId>,
+    /// Those single-tile scans while they run.
+    pub tile_jobs: Vec<(FeatureId, Job<Option<TileData>>)>,
+    /// Tiles emptied by a cleanup made elsewhere since the scan (REVIEW-U N1).
+    pub cleaned: Vec<FeatureId>,
+}
+
+impl State {
+    /// Ask for the tile of `id` to be scanned again (when there are results showing it).
+    pub fn refresh_tile(&mut self, id: FeatureId) {
+        if self
+            .result
+            .as_ref()
+            .is_some_and(|r| r.tile(id).is_some())
+            && !self.refresh.contains(&id)
+        {
+            self.refresh.push(id);
+        }
+    }
+
+    /// Is the tile of `id` being scanned again?
+    pub fn refreshing(&self, id: FeatureId) -> bool {
+        self.refresh.contains(&id) || self.tile_jobs.iter().any(|(f, _)| *f == id)
+    }
 }
 
 fn sources(app: &CleanApp) -> Sources {
@@ -88,13 +114,72 @@ fn start_run(app: &mut CleanApp) {
     app.sweep.phase = Phase::Running(job);
 }
 
+/// Single-tile scans: start the ones asked for, put finished ones in their tile.
+fn poll_tiles(app: &mut CleanApp) -> bool {
+    let idle = matches!(
+        app.sweep.phase,
+        Phase::Results | Phase::Done(_) | Phase::Idle
+    );
+    if app.sweep.result.is_none() {
+        app.sweep.refresh.clear();
+        app.sweep.tile_jobs.clear();
+        return false;
+    }
+    if idle && !app.sweep.refresh.is_empty() {
+        let src = sources(app);
+        for id in std::mem::take(&mut app.sweep.refresh) {
+            if app.sweep.tile_jobs.iter().any(|(f, _)| *f == id) {
+                continue;
+            }
+            let env = app.env.clone();
+            let settings = app.settings.clone();
+            let src = src.clone();
+            let job = Job::start(app.sync, move |status| {
+                sweep::scan_one(&env, &settings, &src, id, &AtomicBool::new(false), status)
+            });
+            app.sweep.tile_jobs.push((id, job));
+        }
+    }
+    let mut busy = false;
+    let mut finished = Vec::new();
+    app.sweep.tile_jobs.retain_mut(|(id, job)| {
+        if let Some(data) = job.poll() {
+            finished.push((*id, data));
+            false
+        } else if job.is_dead() {
+            false
+        } else {
+            busy = true;
+            true
+        }
+    });
+    for (id, data) in finished {
+        let Some(data) = data else { continue };
+        app.sweep.cleaned.retain(|f| *f != id);
+        if let Some(res) = app.sweep.result.as_mut()
+            && let Some(tile) = res.tiles.iter_mut().find(|t| t.id == id)
+        {
+            tile.data = data;
+        }
+    }
+    busy
+}
+
 /// Finish background work. Returns true while something runs.
 pub fn poll(app: &mut CleanApp) -> bool {
+    let tiles_busy = poll_tiles(app);
+    tiles_busy | poll_phase(app)
+}
+
+fn poll_phase(app: &mut CleanApp) -> bool {
     let st = &mut app.sweep;
     match &mut st.phase {
         Phase::Scanning(job) => {
             if let Some(r) = job.poll() {
                 st.result = Some(r);
+                st.cleaned.clear();
+                st.refresh.clear();
+                st.tile_jobs.clear();
                 st.phase = Phase::Results;
                 crate::sound::play(&app.env, crate::sound::Cue::ScanDone);
                 false
@@ -365,6 +450,14 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile, w: f32, tile_h: 
     let mut retry = false;
     let mut include = !skipped;
     let (icon, color) = kit::feature_look(&t, tile.id);
+    let refreshing = app.sweep.refreshing(tile.id);
+    let cleaned = app.sweep.cleaned.contains(&tile.id);
+    let is_trash = tile.id == FeatureId::TrashBins;
+    // A plan tile with nothing left in it (never the Trash, which shows its size).
+    let empty = !is_trash && matches!(&tile.data, TileData::Plan(p) if p.items.is_empty());
+    let trash_full = is_trash
+        && matches!(&tile.data, TileData::Plan(p) if p.items.iter().any(|i| i.category != "mail_trash"));
+    let mut rescan = false;
     let (rect, _) = ui.allocate_exact_size(vec2(w, tile_h), Sense::hover());
     let p = ui.painter().clone();
     // Card with a glow of the module's colour in its corner.
@@ -409,10 +502,32 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile, w: f32, tile_h: 
         });
         ui.add_space(space::M);
         let (big, small, big_color) = match &tile.data {
+            // The Trash is never part of the run: the tile says what it holds and offers
+            // Finder's Empty Trash (REVIEW-U U4, N2).
+            TileData::Plan(p) if tile.id == FeatureId::TrashBins => (
+                human_size(p.total_size()),
+                if p.items.is_empty() || p.total_size() == 0 {
+                    "The Trash is empty.".to_string()
+                } else {
+                    "Waiting in the Trash. Empty it to get the space back.".to_string()
+                },
+                t.text,
+            ),
+            // Nothing left: cleaned from its own page since the scan, or nothing found
+            // (REVIEW-U N1).
+            TileData::Plan(p) if p.items.is_empty() => (
+                "All clean".to_string(),
+                if cleaned {
+                    "Cleaned just now.".to_string()
+                } else {
+                    "Nothing to clean right now.".to_string()
+                },
+                t.text,
+            ),
             TileData::Plan(p) if !tile.runnable() => (
                 human_size(p.total_size()),
                 format!(
-                    "{} in the Trash. Emptied from its own page.",
+                    "{} found. Open the page to act on them.",
                     cleancraft_core::fsutil::items(p.items.len())
                 ),
                 t.text,
@@ -440,16 +555,28 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile, w: f32, tile_h: 
                 t.warning,
             ),
         };
+        let small = if refreshing {
+            "Checking again...".to_string()
+        } else {
+            small
+        };
         let failed = matches!(tile.data, TileData::Failed(_));
         ui.horizontal(|ui| {
             if failed {
                 let (r, _) = ui.allocate_exact_size(egui::Vec2::splat(22.0), Sense::hover());
                 icons::paint(ui.painter(), r, Icon::Warning, big_color);
+            } else if empty {
+                let (r, _) = ui.allocate_exact_size(egui::Vec2::splat(22.0), Sense::hover());
+                icons::paint(ui.painter(), r, Icon::Check, t.success);
             }
             ui.label(
                 RichText::new(big)
                     .font(font(
-                        if failed { size::TITLE2 } else { size::NUMBER },
+                        if failed || empty {
+                            size::TITLE2
+                        } else {
+                            size::NUMBER
+                        },
                         Weight::Bold,
                     ))
                     .color(if failed { t.text } else { big_color }),
@@ -485,12 +612,31 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile, w: f32, tile_h: 
         controls,
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
+            if empty {
+                // Nothing to review: look at this one module again (REVIEW-U N1).
+                let r = kit::secondary_resp(ui, &t, "Scan Again");
+                r.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Button,
+                        !refreshing,
+                        format!("Scan {} again", tile.id.title()),
+                    )
+                });
+                if r.clicked() && !refreshing {
+                    rescan = true;
+                }
+                return;
+            }
             if kit::secondary(ui, &t, "Review") {
                 review = true;
             }
             if tile.runnable() {
                 ui.add_space(4.0);
                 kit::check_text(ui, &t, &mut include, "Include");
+            }
+            if trash_full {
+                ui.add_space(4.0);
+                super::extras_cleanup::empty_trash(app, ui, "Empty Trash...");
             }
             // A module that could not scan offers to scan again (REVIEW-U U23).
             if matches!(tile.data, TileData::Failed(_)) {
@@ -508,9 +654,10 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile, w: f32, tile_h: 
             }
         },
     );
-    if retry {
+    if retry || rescan {
+        // Only this module scans again; the other tiles keep their results.
         app.act();
-        start_scan(app);
+        app.sweep.refresh_tile(tile.id);
         return;
     }
     if review {
@@ -641,6 +788,22 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
     }
 }
 
+/// Did the runs move anything to the Trash, to the quarantine?
+fn moved_to(runs: &[ModuleRun]) -> (bool, bool) {
+    let (mut trash, mut quarantine) = (false, false);
+    for rep in runs.iter().filter_map(|r| r.result.as_ref().ok()) {
+        for m in &rep.moved {
+            if let executor::ActionKind::Moved { method, .. } = &m.kind {
+                match method {
+                    Method::Trash => trash = true,
+                    Method::Quarantine | Method::AdminQuarantine => quarantine = true,
+                }
+            }
+        }
+    }
+    (trash, quarantine)
+}
+
 fn done(app: &mut CleanApp, ui: &mut Ui) {
     let t = app.t;
     let Phase::Done(runs) = &app.sweep.phase else {
@@ -674,15 +837,27 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
                         .font(font(size::LARGE_TITLE, Weight::Bold))
                         .color(t.text),
                 );
-                if runs
-                    .iter()
-                    .filter_map(|r| r.result.as_ref().ok())
-                    .any(|r| !r.moved.is_empty())
-                {
-                    kit::dim(ui, &t, cleancraft_core::features::SPACE_NOTE);
+                // Where the space comes back, by where the items went; Finder's Empty
+                // Trash right here when something went to the Trash (REVIEW-U U4).
+                let (to_trash, to_quarantine) = moved_to(&runs);
+                let note = match (to_trash, to_quarantine) {
+                    (true, false) => Some("The space comes back when the Trash is emptied."),
+                    (false, true) => Some(
+                        "The space comes back when the quarantine is moved to the Trash (Settings) and the Trash is emptied.",
+                    ),
+                    (true, true) => Some(
+                        "The space comes back when the Trash is emptied. Threats wait in the quarantine (Settings).",
+                    ),
+                    (false, false) => None,
+                };
+                if let Some(note) = note {
+                    kit::dim(ui, &t, note);
                 }
                 ui.add_space(space::L);
                 kit::centered_row(ui, egui::Id::new("sweep-done-buttons"), |ui| {
+                    if to_trash {
+                        super::extras_cleanup::empty_trash(app, ui, "Empty Trash...");
+                    }
                     if kit::pill(
                         ui,
                         &t,

@@ -139,10 +139,21 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
         "Everything CleanCraft moved or ran, newest first. Moved items can be put back while they are still in the Trash or quarantine.",
     );
     let groups = group_records(&app.history.records);
+    if groups.is_empty() {
+        // One empty state, said once (REVIEW-C D5, C30).
+        ui.add_space(space::XL);
+        kit::empty_state(
+            ui,
+            &t,
+            Icon::History,
+            "No actions yet",
+            "When CleanCraft moves files or runs a task, it is listed here, with Undo.",
+        );
+        return;
+    }
     ui.horizontal(|ui| {
         ui.label(
             RichText::new(match groups.len() {
-                0 => "No actions yet".to_string(),
                 1 => "1 action".to_string(),
                 n => format!("{n} actions"),
             })
@@ -151,25 +162,6 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
         );
     });
     ui.add_space(space::S);
-    if groups.is_empty() {
-        ui.add_space(space::XL);
-        ui.vertical_centered(|ui| {
-            kit::badge(ui, t.sec_a, Icon::History, 64.0);
-            ui.add_space(space::M);
-            ui.label(
-                RichText::new("Nothing yet.")
-                    .font(font(size::TITLE3, Weight::SemiBold))
-                    .color(t.text),
-            );
-            ui.add_space(space::XS);
-            kit::dim(
-                ui,
-                &t,
-                "When CleanCraft moves files or runs a task, it is listed here, with Undo.",
-            );
-        });
-        return;
-    }
     let now = chrono::Local::now();
     let fade_out = egui::ScrollArea::vertical()
         .auto_shrink([false, false])
@@ -214,8 +206,10 @@ fn group_card(
 ) {
     let t = app.t;
     let first = &g[0];
+    let reloc = executor::is_relocation(first);
     let icon = match (&first.kind, first.feature) {
         (_, Some(f)) => kit::feature_look(&t, f).0,
+        _ if reloc => Icon::Trash,
         (ActionKind::Moved { original, .. }, None) => kit::kind_icon(original),
         (ActionKind::Command { .. }, None) => Icon::Tasks,
         (ActionKind::Toggled { .. }, None) => Icon::Startup,
@@ -231,10 +225,14 @@ fn group_card(
     let size: u64 = g.iter().map(|r| r.size).sum();
     let undoable = g.iter().filter(|r| r.can_undo() && !gone(r)).count();
     let back = g.iter().filter(|r| r.undone.is_some()).count();
-    let title = first
-        .feature
-        .map(|f| f.title().to_string())
-        .unwrap_or_else(|| "CleanCraft".into());
+    let title = if reloc {
+        "Quarantine moved to the Trash".to_string()
+    } else {
+        first
+            .feature
+            .map(|f| f.title().to_string())
+            .unwrap_or_else(|| "CleanCraft".into())
+    };
     let mut what = Vec::new();
     if moves > 0 {
         what.push(format!(
@@ -289,15 +287,41 @@ fn group_card(
                     }
                 });
             });
-            ui.add_space(6.0);
-            // A long action shows its first items and a way to see the rest.
+            // With Undo All on the card, the items (each with its own Undo) wait behind a
+            // disclosure; a one-item action shows its item.
             let open = app.history.expanded.contains(&first.plan_id);
-            let shown = if g.len() > COLLAPSE_OVER && !open {
-                COLLAPSE_TO
-            } else {
-                g.len()
-            };
-            for (k, r) in g.iter().take(shown).enumerate() {
+            let folded = g.len() > 1 && undoable > 1;
+            if folded {
+                ui.horizontal(|ui| {
+                    ui.add_space(36.0);
+                    let label = if open {
+                        "Hide Items".to_string()
+                    } else {
+                        format!("Show {}", cleancraft_core::fsutil::items(g.len()))
+                    };
+                    let r = kit::ghost(ui, &t, &label, Some(Icon::Chevron));
+                    r.widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::WidgetType::Button,
+                            true,
+                            format!("{label} of {title}"),
+                        )
+                    });
+                    if r.clicked() {
+                        app.act();
+                        if open {
+                            app.history.expanded.remove(&first.plan_id);
+                        } else {
+                            app.history.expanded.insert(first.plan_id.clone());
+                        }
+                    }
+                });
+                if !open {
+                    return;
+                }
+            }
+            ui.add_space(6.0);
+            for (k, r) in g.iter().enumerate() {
                 if k > 0 {
                     let y = ui.cursor().min.y;
                     ui.painter().hline(
@@ -308,30 +332,8 @@ fn group_card(
                 }
                 record_row(app, ui, r, now);
             }
-            if g.len() > COLLAPSE_OVER {
-                ui.horizontal(|ui| {
-                    ui.add_space(36.0);
-                    let label = if open {
-                        "Show Fewer".to_string()
-                    } else {
-                        format!("Show All {} Items", g.len())
-                    };
-                    if kit::ghost(ui, &t, &label, None).clicked() {
-                        app.act();
-                        if open {
-                            app.history.expanded.remove(&first.plan_id);
-                        } else {
-                            app.history.expanded.insert(first.plan_id.clone());
-                        }
-                    }
-                });
-            }
         });
 }
-
-/// An action with more items than this shows only the first [`COLLAPSE_TO`] at first.
-const COLLAPSE_OVER: usize = 8;
-const COLLAPSE_TO: usize = 5;
 
 /// One record: its name and where it was (or the command), and Undo or "Put back".
 fn record_row(

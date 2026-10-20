@@ -69,7 +69,7 @@ pub trait Feature: Send + Sync {
     }
     /// Check one selected item again, right before anything moves, with the same rules the
     /// scan used to propose it. A saved plan is a plain file that a person or an agent can
-    /// edit, so neither its categories, its locks nor its groups are trusted: only what this
+    /// edit, so its categories, its locks and its groups are not trusted: only what this
     /// function finds on disk now. `Err` says why the item is refused (it is skipped, the
     /// rest goes on). The allow-list and [`policy::check_move`] run after this anyway.
     fn validate(
@@ -245,7 +245,7 @@ pub fn moved_text<'a>(reports: impl IntoIterator<Item = &'a Report>) -> String {
 
 /// The line under [`moved_text`]: when the space really comes back.
 pub const SPACE_NOTE: &str =
-    "The space is freed when the Trash is emptied or the quarantine is cleared.";
+    "The space comes back when the Trash is emptied (the quarantine goes to the Trash from Settings).";
 
 /// Every plan-based feature, in sidebar order.
 pub fn registry() -> Vec<Box<dyn Feature>> {

@@ -1,6 +1,6 @@
 //! Settings: where removed items go, the ignore list, thresholds, agents, menu bar.
 
-use cleancraft_core::executor::Method;
+use cleancraft_core::executor::{self, Method};
 use cleancraft_core::fsutil::human_size;
 use egui::{RichText, Sense, Ui, vec2};
 
@@ -92,17 +92,15 @@ fn slider_row(
     .inner
 }
 
-/// What the quarantine holds now, and a way to see it in Finder. (Emptying it would delete
-/// for good, which CleanCraft never does: Finder's Move to Trash is the way.)
+/// What the quarantine holds now, a way to see it in Finder, and "Move Quarantine to
+/// Trash..." (REVIEW-U U5): every item moves to the Trash, journaled, with Undo. Nothing is
+/// deleted here; Finder's Empty Trash is what frees the space.
 fn quarantine_line(app: &mut CleanApp, ui: &mut Ui) {
     let t = app.t;
     let changed = app.settings_page.watch.changes(&app.env).is_some();
     if app.settings_page.quarantine.is_none() || changed {
         app.settings_page.watch.prime(&app.env);
-        let dir = app.env.quarantine_dir();
-        let items = std::fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0);
-        let bytes = cleancraft_core::fsutil::tree_size(&dir).0;
-        app.settings_page.quarantine = Some((if items == 0 { 0 } else { bytes }, items));
+        app.settings_page.quarantine = Some(executor::quarantine_size(&app.env));
     }
     let (bytes, items) = app.settings_page.quarantine.unwrap_or((0, 0));
     ui.add_space(space::XS);
@@ -112,7 +110,7 @@ fn quarantine_line(app: &mut CleanApp, ui: &mut Ui) {
             "The quarantine is empty.".to_string()
         } else {
             format!(
-                "The quarantine holds {} ({}). Items stay there until you put them back from History or move them to the Trash in Finder.",
+                "The quarantine holds {} ({}). Items stay there until you put them back from History or move them to the Trash.",
                 human_size(bytes),
                 cleancraft_core::fsutil::items(items)
             )
@@ -126,27 +124,126 @@ fn quarantine_line(app: &mut CleanApp, ui: &mut Ui) {
             .wrap(),
         );
     });
-    if items > 0 {
-        ui.horizontal(|ui| {
-            ui.add_space(28.0);
-            if kit::pill(
-                ui,
-                &t,
-                "Show Quarantine in Finder",
-                kit::Kind::Secondary,
-                Some(Icon::Reveal),
-            )
+    if items == 0 {
+        return;
+    }
+    ui.add_space(space::XS);
+    ui.horizontal(|ui| {
+        ui.add_space(28.0);
+        if kit::pill(
+            ui,
+            &t,
+            "Show Quarantine in Finder",
+            kit::Kind::Secondary,
+            Some(Icon::Reveal),
+        )
+        .clicked()
+        {
+            app.act();
+            let dir = app.env.quarantine_dir().to_string_lossy().into_owned();
+            match app.env.sys.run("/usr/bin/open", &[&dir]) {
+                Ok(out) if out.ok() => {}
+                Ok(out) => app.warn(format!("Could not open Finder: {}", out.stderr.trim())),
+                Err(e) => app.warn(format!("Could not open Finder: {e}")),
+            }
+        }
+        if kit::pill(ui, &t, MOVE_QUARANTINE, kit::Kind::Secondary, Some(Icon::Trash))
+            .on_hover_text("Move everything in the quarantine to the Trash. You can put it back from History.")
             .clicked()
-            {
-                app.act();
-                let dir = app.env.quarantine_dir().to_string_lossy().into_owned();
-                match app.env.sys.run("/usr/bin/open", &[&dir]) {
-                    Ok(out) if out.ok() => {}
-                    Ok(out) => app.warn(format!("Could not open Finder: {}", out.stderr.trim())),
-                    Err(e) => app.warn(format!("Could not open Finder: {e}")),
+        {
+            app.act();
+            app.settings_page.confirm_quarantine = true;
+        }
+    });
+    if app.settings_page.confirm_quarantine {
+        confirm_quarantine(app, ui, bytes, items);
+    }
+}
+
+pub const MOVE_QUARANTINE: &str = "Move Quarantine to Trash...";
+
+/// The confirmation, then the move, with Undo in the notice and in History.
+fn confirm_quarantine(app: &mut CleanApp, ui: &mut Ui, bytes: u64, items: usize) {
+    let t = app.t;
+    let mut go = false;
+    let mut cancel = false;
+    let dlg = kit::modal(egui::Id::new("confirm-quarantine-trash"), &t).show(ui.ctx(), |ui| {
+        ui.set_width(520.0);
+        kit::dialog_head(
+            ui,
+            &t,
+            Icon::Trash,
+            t.warning,
+            &format!(
+                "Move the quarantine to the Trash ({}, {})?",
+                human_size(bytes),
+                cleancraft_core::fsutil::items(items)
+            ),
+            "Every item in the CleanCraft quarantine moves to the Trash. Nothing is deleted: you can put them back from History until the Trash is emptied.",
+        );
+        ui.add_space(16.0);
+        let (ok, no) = kit::dialog_actions(ui, &t, "Move to Trash", kit::Kind::Danger);
+        go |= ok;
+        cancel |= no;
+    });
+    if dlg.should_close() {
+        cancel = true;
+    }
+    if cancel {
+        app.act();
+        app.settings_page.confirm_quarantine = false;
+    } else if go {
+        app.act();
+        app.settings_page.confirm_quarantine = false;
+        match executor::move_quarantine_to_trash(&app.env, &mut |_, _| {}) {
+            Ok(rep) => {
+                app.settings_page.quarantine = None;
+                let moved: Vec<std::path::PathBuf> = CleanApp::moved_paths(&rep);
+                app.files_moved(&moved);
+                if rep.moved.is_empty() {
+                    app.warn(format!(
+                        "Nothing moved: {}",
+                        rep.skipped
+                            .first()
+                            .map(|(_, w)| w.to_string())
+                            .unwrap_or_else(|| "the quarantine is empty".into())
+                    ));
+                } else {
+                    let plan_id = rep.plan_id.clone();
+                    let mut msg = format!(
+                        "{} ({}) moved from the quarantine to the Trash.",
+                        cleancraft_core::fsutil::items(rep.moved.len()),
+                        human_size(rep.freed)
+                    );
+                    if !rep.skipped.is_empty() {
+                        msg.push_str(&format!(
+                            " {} stayed: {}.",
+                            cleancraft_core::fsutil::items(rep.skipped.len()),
+                            rep.skipped[0].1
+                        ));
+                    }
+                    app.tell_undo(msg, "Move to Trash", move |app| {
+                        let (n, errs) = executor::undo_plan(&app.env, &plan_id);
+                        app.files_back(&[]);
+                        app.settings_page.quarantine = None;
+                        if errs.is_empty() {
+                            app.tell(format!(
+                                "{} back in the quarantine.",
+                                cleancraft_core::fsutil::items(n)
+                            ));
+                        } else {
+                            app.warn(format!(
+                                "{} back in the quarantine, {} could not be: {}",
+                                cleancraft_core::fsutil::items(n),
+                                errs.len(),
+                                errs[0].1
+                            ));
+                        }
+                    });
                 }
             }
-        });
+            Err(e) => app.warn(format!("Nothing moved: {e}")),
+        }
     }
 }
 
@@ -156,6 +253,8 @@ pub struct State {
     pub new_ignore: String,
     /// What the quarantine holds (bytes, items), read again after each move or undo.
     quarantine: Option<(u64, usize)>,
+    /// "Move Quarantine to Trash..." asks first.
+    confirm_quarantine: bool,
     watch: super::history::JournalWatch,
     /// The macOS folder dialog, while it is open.
     pick: Option<crate::jobs::Job<Result<Option<std::path::PathBuf>, String>>>,

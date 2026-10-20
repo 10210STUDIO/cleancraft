@@ -169,6 +169,7 @@ fn finish_empty(app: &mut CleanApp, out: trash::EmptyOutcome) {
         app.warn(out.message);
     }
     plan_page::start_scan(app, FeatureId::TrashBins);
+    app.sweep.refresh_tile(FeatureId::TrashBins);
 }
 
 fn privacy_toolbar(app: &mut CleanApp, ui: &mut Ui) {

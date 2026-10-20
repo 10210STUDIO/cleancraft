@@ -147,38 +147,50 @@ pub fn scan(
     progress: &(dyn Fn(&str) + Sync),
 ) -> SweepResult {
     let mut tiles = Vec::new();
-    for f in &sources.plans {
+    for id in sources.ids() {
         if cancel.load(Ordering::Relaxed) {
             return SweepResult { tiles };
         }
-        progress(f.id().title());
+        progress(id.title());
+        if let Some(data) = scan_one(env, settings, sources, id, cancel, progress) {
+            tiles.push(Tile { id, data });
+        }
+    }
+    SweepResult { tiles }
+}
+
+/// Scan one module of `sources` again (look only): the data of its tile, `None` when the
+/// module is not among the sources. Quick Sweep uses it to bring one tile up to date (the
+/// Trash after a cleanup moved files into it, a tile that could not scan) without scanning
+/// every module again.
+pub fn scan_one(
+    env: &Env,
+    settings: &Settings,
+    sources: &Sources,
+    id: FeatureId,
+    cancel: &AtomicBool,
+    progress: &(dyn Fn(&str) + Sync),
+) -> Option<TileData> {
+    if let Some(f) = sources.feature(id) {
         let ctx = ScanCtx {
             env,
             settings,
             cancel,
             progress,
         };
-        let data = match features::scan_with(f.as_ref(), &ctx) {
+        return Some(match features::scan_with(f.as_ref(), &ctx) {
             Ok(p) => TileData::Plan(p),
             Err(e) => TileData::Failed(format!("{e:#}")),
-        };
-        tiles.push(Tile { id: f.id(), data });
+        });
     }
-    for c in &sources.counts {
-        if cancel.load(Ordering::Relaxed) {
-            return SweepResult { tiles };
-        }
-        progress(c.id.title());
-        let data = match (c.count)(env, settings) {
-            Ok(n) => TileData::Count {
-                count: n,
-                noun: c.noun,
-            },
-            Err(e) => TileData::Failed(format!("{e:#}")),
-        };
-        tiles.push(Tile { id: c.id, data });
-    }
-    SweepResult { tiles }
+    let c = sources.counts.iter().find(|c| c.id == id)?;
+    Some(match (c.count)(env, settings) {
+        Ok(n) => TileData::Count {
+            count: n,
+            noun: c.noun,
+        },
+        Err(e) => TileData::Failed(format!("{e:#}")),
+    })
 }
 
 #[derive(Clone, Debug)]

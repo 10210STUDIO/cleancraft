@@ -515,18 +515,30 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
                     ui.set_min_height(44.0);
+                    // Trash Bins: nothing can be ticked there, so the bar shows what the
+                    // Trash holds, not "0 items selected" (REVIEW-C D1, REVIEW-U U3).
+                    let trash_only = f == FeatureId::TrashBins && !any_selectable;
+                    let (figure, line, full) = if trash_only {
+                        (
+                            human_size(plan.total_size()),
+                            "in the Trash".to_string(),
+                            format!("{} in the Trash", human_size(plan.total_size())),
+                        )
+                    } else {
+                        (
+                            human_size(sel_size),
+                            format!("{} selected", cleancraft_core::fsutil::items(sel_count)),
+                            format!("{sel_count} selected, {}", human_size(sel_size)),
+                        )
+                    };
                     ui.label(
-                        RichText::new(human_size(sel_size))
+                        RichText::new(figure)
                             .font(font(size::NUMBER_S, Weight::Bold))
                             .color(t.text),
                     );
                     ui.add_space(space::XS);
-                    kit::quiet_label(
-                        ui,
-                        &t,
-                        &format!("{} selected", cleancraft_core::fsutil::items(sel_count)),
-                        &format!("{sel_count} selected, {}", human_size(sel_size)),
-                    );
+                    kit::quiet_label(ui, &t, &line, &full);
+                    ui.add_space(space::M);
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if sel_count > 0 && kit::primary(ui, &t, "Review and Clean") {
                             app.act();
@@ -537,11 +549,18 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                             // The page's one action sits where every other page has its
                             // main button (REVIEW-U U3).
                             super::extras_cleanup::trash_bar(app, ui);
-                            kit::dim(
-                                ui,
-                                &t,
-                                "Finder empties the Trash. CleanCraft cannot put those items back.",
-                            );
+                            // The hint gets only the room left between the figure and the
+                            // button, shortened at its end (never under the figure).
+                            let hint = "Finder empties the Trash. CleanCraft cannot put those items back.";
+                            let fid = font(size::FOOTNOTE, Weight::Regular);
+                            let room = ui.available_width() - space::S;
+                            if room > 120.0 {
+                                let shown = kit::truncate_end(ui.ctx(), hint, &fid, room);
+                                let r = ui.label(RichText::new(&shown).font(fid).color(t.text_faint));
+                                if shown != hint {
+                                    r.on_hover_text(hint);
+                                }
+                            }
                         }
                     });
                 });
@@ -1225,7 +1244,7 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
     // again to end before them (a middle ellipsis, never a word cut by the buttons).
     let actions_w = if keeps_a_copy(f) { 262.0 } else { 150.0 };
     let actions_left = size_r.left() - 12.0 - actions_w;
-    let path_end = if row_hovered || hov > 0.0 {
+    let path_end = if row_hovered || hov > 0.0 || cb.has_focus() {
         (x0 + text_w).min(actions_left - 20.0)
     } else {
         x0 + text_w
@@ -1265,7 +1284,20 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
         .map(str::to_string)
         .unwrap_or(reason);
     let tag_font = font(size::FOOTNOTE, Weight::Medium);
-    let tag_s = kit::truncate_end(ui.ctx(), &reason, &tag_font, tag_room - 16.0);
+    // The row's actions show over its end while it is hovered or has the keyboard: the tag
+    // then ends before them instead of running under them (REVIEW-C D2).
+    let actions_focus_id = egui::Id::new(("row-actions-focus", f.as_str(), id));
+    let actions_focused: bool = ui.data(|d| d.get_temp(actions_focus_id)).unwrap_or(false);
+    let keyboard_here = cb.has_focus() || actions_focused;
+    let covered = row_hovered || hov > 0.0 || keyboard_here;
+    let tag_room = if covered {
+        (actions_left - 10.0 - 8.0 - x0).max(40.0)
+    } else {
+        tag_room
+    };
+    // A long reason drops its asides in brackets ("(Default profile)") before it is cut
+    // (REVIEW-C C17); the tooltip keeps every word.
+    let tag_s = fit_tag(ui.ctx(), &reason, &tag_font, tag_room - 16.0);
     let color = if locked {
         t.text_dim
     } else {
@@ -1320,7 +1352,12 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
         let lf = font(size::FOOTNOTE, Weight::Regular);
         let lg = kit::galley(ui, l, lf.clone(), t.text_faint);
         let lx = tag_r.right() + 8.0;
-        if lx + lg.size().x <= r.right() - 12.0 {
+        let end = if covered {
+            actions_left - 18.0
+        } else {
+            r.right() - 12.0
+        };
+        if lx + lg.size().x <= end {
             p.galley(
                 pos2(lx, tag_r.center().y - lg.size().y / 2.0),
                 lg,
@@ -1335,9 +1372,6 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
     );
     // Shown while the row is hovered, and while the keyboard is on the row (its checkbox
     // or one of the actions), so a Tab never lands on an invisible button.
-    let actions_focus_id = egui::Id::new(("row-actions-focus", f.as_str(), id));
-    let actions_focused: bool = ui.data(|d| d.get_temp(actions_focus_id)).unwrap_or(false);
-    let keyboard_here = cb.has_focus() || actions_focused;
     let show = hov.max(if row_hovered || keyboard_here {
         1.0
     } else {
@@ -1358,7 +1392,7 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
     kit::place_with(ui, actions, Layout::right_to_left(Align::Center), |ui| {
         ui.multiply_opacity(show);
         ui.spacing_mut().item_spacing.x = 4.0;
-        // Row actions fit the module (REVIEW-U U27): a whole Trash is neither ignored nor
+        // Row actions fit the module (REVIEW-U U27): a whole Trash is not ignored or
         // revealed here, and labels inside a file (Wi-Fi networks, permissions) cannot be
         // shown in Finder.
         let on_disk = std::fs::symlink_metadata(&it.path).is_ok();
@@ -1406,9 +1440,25 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
                     p.set_selected(id, false);
                     p.items[id].locked = Some("on your ignore list".into());
                 }
-                app.tell(format!(
-                    "{name} is on the ignore list now. Stop Ignoring on its row puts it back."
-                ));
+                // Undo right in the notice (REVIEW-U N3): off the list, ticked as before.
+                let path = it.path.clone();
+                let was = selected_now;
+                let shown = name.clone();
+                app.tell_undo(
+                    format!("{name} is on the ignore list now."),
+                    "Ignore",
+                    move |app| {
+                        app.settings.ignore.retain(|p| *p != path);
+                        app.save_settings();
+                        if let Some(p) = app.plan_state(f).plan.as_mut()
+                            && p.items.get(id).is_some_and(|i| i.path == path)
+                        {
+                            p.items[id].locked = None;
+                            p.set_selected(id, was);
+                        }
+                        app.tell(format!("{shown} is no longer ignored."));
+                    },
+                );
             }
         }
         // Only files and folders on disk can be shown in Finder (Wi-Fi networks and
@@ -1428,6 +1478,29 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
             }
         }
     });
+}
+
+/// A reason tag's text for `max_w`: whole when it fits, else without its asides in brackets
+/// ("Google Chrome (Default profile) browsing history" reads "Google Chrome browsing
+/// history"), and only then cut at the end.
+pub fn fit_tag(ctx: &egui::Context, text: &str, fid: &egui::FontId, max_w: f32) -> String {
+    let width = |s: &str| ctx.fonts_mut(|f| s.chars().map(|c| f.glyph_width(fid, c)).sum::<f32>());
+    if width(text) <= max_w {
+        return text.to_string();
+    }
+    let mut plain = String::new();
+    let mut depth = 0usize;
+    for c in text.chars() {
+        match c {
+            '(' => depth += 1,
+            ')' if depth > 0 => depth -= 1,
+            _ if depth == 0 => plain.push(c),
+            _ => {}
+        }
+    }
+    let plain = plain.split_whitespace().collect::<Vec<_>>().join(" ");
+    let plain = plain.replace(" ,", ",").replace(" :", ":");
+    kit::truncate_end(ctx, &plain, fid, max_w)
 }
 
 /// The name a row shows. A Trash is named after its disk ("Trash of USB"), not after the
@@ -1592,6 +1665,7 @@ pub fn skip_hint(why: &executor::SkipReason) -> Option<String> {
     use executor::SkipReason as S;
     Some(match why {
         S::InUse => "Quit the app that uses it, then Try Again.".into(),
+        S::InUseBy(a) => format!("Quit {a}, then Try Again."),
         S::AppRunning(a) => format!("Quit {a}, then Try Again."),
         S::PermissionDenied => "Turn on Full Disk Access for CleanCraft, then Try Again.".into(),
         S::DiskFull => "Empty the Trash, then Try Again.".into(),
@@ -1694,7 +1768,7 @@ fn space_note(rep: &Report) -> Option<&'static str> {
     Some(match method {
         executor::Method::Trash => "The space comes back when the Trash is emptied.",
         executor::Method::Quarantine | executor::Method::AdminQuarantine => {
-            "The space comes back when the CleanCraft quarantine is emptied (Settings)."
+            "The space comes back when the quarantine is moved to the Trash (Settings) and the Trash is emptied."
         }
     })
 }

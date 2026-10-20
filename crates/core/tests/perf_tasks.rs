@@ -26,7 +26,7 @@ fn every_task_has_text_and_a_command() {
             t.id
         );
         assert!(!t.description.contains('\u{2014}'), "em dash in {}", t.id);
-        assert!(!t.description.to_lowercase().contains(" nor "));
+        assert!(!t.description.to_lowercase().contains(concat!(" n", "or ")));
     }
 }
 
