@@ -262,7 +262,7 @@ fn large_and_old_kind_location_and_last_opened() {
     let mut h = open(&mac, f);
     assert_eq!(shown(&h, f).len(), 4);
     filter(&mut h, "Archives (1)");
-    assert_eq!(shown(&h, f), [zip.clone()]);
+    assert_eq!(shown(&h, f), std::slice::from_ref(&zip));
     click(&mut h, "Clear Filters");
     filter(&mut h, "~/Downloads (2)");
     let mut d = shown(&h, f);
@@ -310,7 +310,7 @@ fn duplicates_filter_by_location() {
     let mut h = open(&mac, f);
     assert_eq!(shown(&h, f).len(), 3);
     filter(&mut h, "~/Music (1)");
-    assert_eq!(shown(&h, f), [b.clone()]);
+    assert_eq!(shown(&h, f), std::slice::from_ref(&b));
     assert!(has(&h, "Showing 1 of 3 items"));
     click(&mut h, "Clear Filters");
     assert_eq!(shown(&h, f).len(), 3);

@@ -712,6 +712,19 @@ fn proc_rows(
     let mut sort = None;
     let mut quit = false;
     let mut toggle = false;
+    // The order of the top list, at its top right (its own row: cards are narrow).
+    if groups.len() > 1 {
+        ui.allocate_ui_with_layout(
+            vec2(ui.available_width(), crate::theme::hit::FIELD),
+            egui::Layout::right_to_left(egui::Align::Center),
+            |ui| {
+                if kit_list::sort_menu(ui, list, sorts, &mut prefs) {
+                    sort = Some((list, prefs.clone()));
+                }
+            },
+        );
+        ui.add_space(2.0);
+    }
     for (i, g) in groups.iter().enumerate() {
         let value = if by_cpu {
             pct(g.cpu)
@@ -784,26 +797,17 @@ fn proc_rows(
             "Per process: percent of one core, as Activity Monitor shows it. 100% is one core busy, so a row can be higher than the CPU total.",
         );
     }
-    ui.horizontal(|ui| {
-        if !s.processes.is_empty() {
-            let label = if app.monitor.by_process {
-                "Group by App"
-            } else {
-                "Show Each Process"
-            };
-            ui.push_id(("proc-mode", by_cpu), |ui| {
-                if kit::ghost(ui, &t, label, None).clicked() {
-                    toggle = true;
-                }
-            });
-        }
-        if groups.len() > 1 {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if kit_list::sort_menu(ui, list, sorts, &mut prefs) {
-                    sort = Some((list, prefs.clone()));
-                }
-            });
-        }
-    });
+    if !s.processes.is_empty() {
+        let label = if app.monitor.by_process {
+            "Group by App"
+        } else {
+            "Show Each Process"
+        };
+        ui.push_id(("proc-mode", by_cpu), |ui| {
+            if kit::ghost(ui, &t, label, None).clicked() {
+                toggle = true;
+            }
+        });
+    }
     ProcAction { toggle, quit, sort }
 }

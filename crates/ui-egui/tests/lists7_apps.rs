@@ -194,7 +194,7 @@ fn every_filter_narrows_with_its_count_and_is_remembered() {
     for (entry, want) in cases {
         filter(&mut h, entry);
         assert_eq!(rows(&h), want, "{entry}");
-        assert!(has(&h, &format!("Showing 1 of 3 apps")), "{entry}");
+        assert!(has(&h, "Showing 1 of 3 apps"), "{entry}");
         assert!(
             h.get_by_label("Filter")
                 .value()

@@ -281,7 +281,7 @@ fn scenes() -> Vec<Scene> {
                 remover(h);
                 click(h, "App Updates");
                 click(h, "Check for Updates");
-                type_into(h, "Search updates", "a");
+                type_into(h, "Search updates", "gam");
             },
         },
         Scene {
@@ -301,17 +301,12 @@ fn scenes() -> Vec<Scene> {
                 click(h, "System Junk");
                 click(h, "Scan");
                 type_into(h, "Search", "example");
-                let unsel = h.state().plans[&FeatureId::SystemJunk]
+                let sel = h.state().plans[&FeatureId::SystemJunk]
                     .plan
                     .as_ref()
-                    .map(|p| {
-                        p.items
-                            .iter()
-                            .filter(|i| !i.selected && i.locked.is_none())
-                            .count()
-                    })
+                    .map(|p| p.selected_count())
                     .unwrap_or(0);
-                filter(h, &format!("Not selected ({unsel})"));
+                filter(h, &format!("Selected ({sel})"));
             },
         },
         Scene {

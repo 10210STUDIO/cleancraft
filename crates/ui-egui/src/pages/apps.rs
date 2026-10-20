@@ -1220,6 +1220,51 @@ fn visible_apps(st: &State, settings: &cleancraft_core::Settings) -> Vec<AppInfo
     v
 }
 
+fn hit_field() -> f32 {
+    crate::theme::hit::FIELD
+}
+
+fn macos_line(n_mac: usize, showing: bool) -> String {
+    let apps = if n_mac == 1 { "app" } else { "apps" };
+    if showing {
+        format!("{n_mac} {apps} of macOS shown, locked.")
+    } else {
+        format!("{n_mac} macOS {apps} hidden")
+    }
+}
+
+const SHOW_MACOS_LABEL: &str = "Show apps that are part of macOS";
+
+/// The room the macOS apps line and its switch take.
+fn macos_toggle_width(ui: &Ui, n_mac: usize, showing: bool) -> f32 {
+    let t = kit::tokens(ui.ctx());
+    let line = kit::galley(
+        ui,
+        &macos_line(n_mac, showing),
+        font(size::FOOTNOTE, Weight::Regular),
+        t.text,
+    )
+    .size()
+    .x;
+    let check = kit::galley(
+        ui,
+        SHOW_MACOS_LABEL,
+        font(size::CALLOUT, Weight::Medium),
+        t.text,
+    )
+    .size()
+    .x;
+    line + space::S + check + 32.0
+}
+
+/// "2 macOS apps hidden" and the switch to show them. True when it was switched.
+fn macos_toggle(ui: &mut Ui, t: &crate::theme::Tokens, n_mac: usize, showing: bool) -> bool {
+    ui.spacing_mut().item_spacing.x = space::S;
+    kit::dim(ui, t, &macos_line(n_mac, showing));
+    let mut on = showing;
+    kit::check_text(ui, t, &mut on, SHOW_MACOS_LABEL).changed()
+}
+
 /// Apps that are part of macOS are listed only when the person asked for them.
 fn listed(st: &State, a: &AppInfo) -> bool {
     !a.apple || show_macos(st)
@@ -1641,6 +1686,18 @@ fn browse(app: &mut CleanApp, ui: &mut Ui) {
         app.apps.prefs.clone()
     };
     let mut prefs_changed = false;
+    // Apps of macOS in the open group (hidden unless asked for).
+    let n_mac = if file_group {
+        0
+    } else {
+        app.apps
+            .list
+            .iter()
+            .flatten()
+            .filter(|a| a.apple && app.apps.group.has(a, now()))
+            .count()
+    };
+    let mut mac_inline = false;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = space::S;
         let (r, changed) = kit_list::search(
@@ -1667,6 +1724,29 @@ fn browse(app: &mut CleanApp, ui: &mut Ui) {
         if kit_list::menus(ui, &t, list, &filters, sorts, &mut prefs) {
             app.act();
             prefs_changed = true;
+        }
+        // The macOS apps switch at the end of the toolbar when it fits, else on its own
+        // line under it.
+        if n_mac > 0 {
+            let showing = kit_list::on(&prefs, SHOW_MACOS);
+            let need = macos_toggle_width(ui, n_mac, showing) + space::L;
+            if ui.available_width() >= need {
+                mac_inline = true;
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    // Laid out right to left: drawn in reading order by a child.
+                    ui.allocate_ui_with_layout(
+                        vec2(need - space::L, hit_field()),
+                        Layout::left_to_right(Align::Center),
+                        |ui| {
+                            if macos_toggle(ui, &t, n_mac, showing) {
+                                app.act();
+                                kit_list::toggle(&mut prefs, SHOW_MACOS);
+                                prefs_changed = true;
+                            }
+                        },
+                    );
+                });
+            }
         }
     });
     if app.apps.selected.is_some() {
@@ -1708,39 +1788,14 @@ fn browse(app: &mut CleanApp, ui: &mut Ui) {
         app.act();
         prefs_changed |= st.prefs;
     }
-    if !file_group {
-        let n_mac = app
-            .apps
-            .list
-            .iter()
-            .flatten()
-            .filter(|a| a.apple && app.apps.group.has(a, now()))
-            .count();
-        if n_mac > 0 {
-            let showing = kit_list::on(&prefs, SHOW_MACOS);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = space::S;
-                let line = if showing {
-                    format!(
-                        "{n_mac} {} of macOS shown. They cannot be removed.",
-                        if n_mac == 1 { "app" } else { "apps" }
-                    )
-                } else {
-                    format!(
-                        "{n_mac} macOS {} hidden",
-                        if n_mac == 1 { "app" } else { "apps" }
-                    )
-                };
-                kit::dim(ui, &t, &line);
-                let mut on = showing;
-                let r = kit::check_text(ui, &t, &mut on, "Show apps that are part of macOS");
-                if r.changed() {
-                    app.act();
-                    kit_list::toggle(&mut prefs, SHOW_MACOS);
-                    prefs_changed = true;
-                }
-            });
-        }
+    if !file_group && n_mac > 0 && !mac_inline {
+        ui.horizontal(|ui| {
+            if macos_toggle(ui, &t, n_mac, kit_list::on(&prefs, SHOW_MACOS)) {
+                app.act();
+                kit_list::toggle(&mut prefs, SHOW_MACOS);
+                prefs_changed = true;
+            }
+        });
     }
     if prefs_changed {
         if kit_list::store(&mut app.settings, list, prefs.clone()) {

@@ -239,6 +239,8 @@ fn scenes() -> Vec<Scene> {
             mac: remover_mac,
             go: |h| {
                 nav(h, "uninstaller");
+                // Apps of macOS are listed on request (lists7).
+                click(h, "Show apps that are part of macOS");
                 click(h, "Safari");
             },
         },
