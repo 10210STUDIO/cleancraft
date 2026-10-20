@@ -444,33 +444,25 @@ fn task_01_first_launch_welcome_and_ai_step_not_now() {
     let mut h = harness_fda(&mac, Access::Missing);
     h.state_mut().launch_checks();
     settle(&mut h);
-    let mut t = Task::new("first launch: welcome, AI apps step, Not Now");
+    let mut t = Task::new("first launch: welcome, Full Disk Access, AI apps step, Not Now");
     dump(&h, "first screen");
     if h.state().page == Page::ConnectAi {
-        t.doubt("U7-5", "the first thing a new user sees is an AI connection page with a JSON path and a command line; no welcome, no safety promise, no Full Disk Access step");
+        t.doubt("U7-5", "the first thing a new user sees is an AI connection page");
+    }
+    t.see(&h, "Welcome to CleanCraft");
+    t.click(&mut h, "Continue");
+    dump(&h, "second screen");
+    if t.see(&h, "Let CleanCraft see all of your Mac") {
+        t.click(&mut h, "Skip");
     }
     if !has(&h, "Use CleanCraft from your AI apps?") {
-        t.doubt(
-            "U7-9",
-            "the page title is painted only: VoiceOver does not read it",
-        );
+        t.doubt("U7-9", "the AI page title is not announced");
     }
     if has(&h, "Done") && has(&h, "Not Now") {
-        t.doubt(
-            "U7-9",
-            "Done and Not Now both close the step with nothing connected: which one?",
-        );
+        t.doubt("U7-9", "Done and Not Now both close the step with nothing connected");
     }
-    eprintln!("      page: {:?}", h.state().page);
-    t.see(&h, "Use CleanCraft from your AI apps?");
     t.click(&mut h, "Not Now");
     dump(&h, "after Not Now");
-    if t.see(&h, "Full Disk Access") {
-        t.doubt(
-            "U7-5",
-            "Full Disk Access arrives afterwards as a banner, with a second Not Now",
-        );
-    }
     eprintln!("      page: {:?}", h.state().page);
     let done = h.state().page == Page::Feature(FeatureId::SmartCare);
     t.end(done);
@@ -677,7 +669,9 @@ fn task_07_read_mac_health_and_follow_two_recommendations() {
     base(&mac);
     let mut h = harness(&mac);
     let mut t = Task::new("read Mac Health, follow two recommendations");
-    t.doubt("U7-4", "no Mac Health in the sidebar or on Quick Sweep; found by opening Live Monitor and spotting the second segment");
+    if !has_text(&h, "Mac Health") {
+        t.doubt("U7-4", "no Mac Health in the sidebar or on Quick Sweep");
+    }
     dump(&h, "start");
     t.click(&mut h, "Live Monitor");
     t.click(&mut h, "Mac Health");
@@ -713,8 +707,14 @@ fn task_07_read_mac_health_and_follow_two_recommendations() {
             "'Review in System Junk' (2.30 GB found 4 days ago) lands on the start screen too",
         );
     }
-    t.click(&mut h, "Scan");
-    t.end(true);
+    // fix7: the scan started by itself; its list is on screen.
+    t.end(
+        h.state()
+            .plans
+            .get(&FeatureId::SystemJunk)
+            .and_then(|s| s.plan.as_ref())
+            .is_some(),
+    );
 }
 
 #[test]
@@ -724,6 +724,9 @@ fn task_08_find_what_grew() {
     base(&mac);
     mac.home_file("Movies/film.mov", 2_000_000);
     let mut h = harness(&mac);
+    // The real app's launch work (tests do not run it by themselves).
+    h.state_mut().launch_checks();
+    settle(&mut h);
     let mut t = Task::new("find what grew on the disk");
     t.click(&mut h, "Live Monitor");
     t.click(&mut h, "Mac Health");
@@ -732,11 +735,13 @@ fn task_08_find_what_grew() {
     if t.see(&h, "Map Home Folder") {
         t.doubt("U7-1", "Open Disk Map lands on the start screen; mapping now cannot say what grew in the last 7 days: Health needs two maps days apart");
     }
-    t.click(&mut h, "Map Home Folder");
+    let mapped = h.state().disk_map.tree().is_some();
+    eprintln!("      Disk Map measured the home folder at once: {mapped}");
     t.click(&mut h, "Live Monitor");
-    t.see(&h, "Map a folder in Disk Map twice");
+    // fix7: a light home measure is taken at launch; tomorrow's gives the comparison.
+    let first = t.see(&h, "Come back tomorrow") || t.see(&h, "First measure");
     eprintln!("      page: {:?}", h.state().page);
-    t.end(false);
+    t.end(mapped && (first || h.state().health.growth.is_some()));
 }
 
 #[test]
