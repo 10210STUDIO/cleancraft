@@ -71,6 +71,8 @@ pub fn osascript_args(n: &Notification) -> Vec<String> {
         line.into(),
         "-e".into(),
         "end run".into(),
+        // getopt stops here: a text that starts with "-e" stays a text (safety6 SAF6-6).
+        "--".into(),
         clean_text(&n.title),
         clean_text(&n.body),
     ];
@@ -270,6 +272,7 @@ mod tests {
                 "display notification (item 2 of argv) with title (item 1 of argv)",
                 "-e",
                 "end run",
+                "--",
                 r#"x" & do shell script "touch /tmp/p" & ""#,
                 "two lines",
             ]
