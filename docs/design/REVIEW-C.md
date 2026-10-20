@@ -129,3 +129,66 @@ Test change on this branch: `review_c1` now hovers only what is painted on scree
 | C39 | S3 | Open | |
 
 Round D totals: 8 fixed (C1, C2, C3, C6, C8, C9, C13, C16; both S1 items among them), 3 partly (C5, C10, C34), 28 open (9 of them ux4's: C7, C11, C14, C25 to C29, C36; C19 and C20 are shared).
+
+## Round D verification on main (final)
+
+Checked on `main` at d50de53 (design4 374a583, ux4 919987b, apps4, review and usability tests), merged into this branch. Evidence:
+
+- `cargo test -p cleancraft-ui-egui --test review_design_c -- --include-ignored`: all 13 pass (none is `#[ignore]` on main any more).
+- The committed renders `docs/screens/v2` and `docs/screens/v2/ux4` (1060 x 680, 1280 x 820, 1600 x 1000, 1x and 2x), by eye and with sampled pixels.
+- A probe (not committed): the first results frame after Scan, the Tab sequence on System Junk results, the open Sort menu, accessibility roles of segments, switches and result checkboxes.
+
+| # | Sev | Status | Evidence |
+|---|---|---|---|
+| C1 | S1 | Fixed | `review_c1` passes (all enabled controls on 9 screens, at least 150 hovered, show the pointing hand). |
+| C2 | S1 | Fixed | `review_c2` passes; system-junk-confirm shows the ring on Cancel. |
+| C3 | S2 | Fixed | `review_c3` passes. |
+| C4 | S2 | Fixed | `review_c4` passes; category names are whole at 1060 (size moved to the count line), App Remover "App Store", "Other Sources". Row names are now cut instead, see D6. |
+| C5 | S2 | Fixed | `review_c5` passes; the dialog opens with Cancel focused (ring in system-junk-confirm-1060x680). |
+| C6 | S2 | Fixed | `review_c6` passes. |
+| C7 | S2 | Fixed | `review_c7` passes. |
+| C8 | S2 | Fixed | `review_c8` passes. |
+| C9 | S2 | Fixed | `review_c9` passes. |
+| C10 | S2 | Partly | `review_c10` passes (total right on the first frame). On that frame the list card is still empty except one stray checkbox at its lower left. |
+| C11 | S2 | Fixed | `review_c11` passes; Thresholds use kit sliders with the section colour and named values (ux4/settings). |
+| C12 | S2 | Fixed | Dialog 910 pt wide at 1060, whole paths, count line "27 items in all. Scroll the list to see every one." |
+| C13 | S2 | Fixed | `review_c13` passes. See D2 for the reason tag under the same buttons on Privacy. |
+| C14 | S2 | Partly | Cards are compact (description left, command right, about 70 pt each, 5 tasks on screen at 1280); commands are still Inter Medium, not monospace (ux4/tune-up-tasks @2x). |
+| C15 | S2 | Partly | One header (tile + title) in every phase and a 3 + 2 grid with no empty cell; the scanning chips still list Tune-up Tasks, which idle and results do not. |
+| C16 | S3 | Fixed | `review_c16` passes. |
+| C17 | S2 | Partly | Privacy toolbar is one row with a "More" menu; reason tags are still cut ("... browsing history and dow..."). |
+| C18 | S2 | Fixed | Ordinary reasons are neutral grey, Privacy and Duplicates tags amber, red only for real warnings (ad hoc signature); the kept duplicate has a green "Kept" tag. |
+| C19 | S2 | Partly | Disk Map's second "Selected" figure is gone; App Remover detail still uses its single 15 pt line ("4 selected, 4.33 MB"); Trash Bins' bar now overlaps (D1). |
+| C20 | S2 | Partly | Quick Sweep has one header in all phases, App Updates is a plain 24 pt line like Startup; the App Remover list still has no headline. |
+| C21 | S2 | Partly | Select All now comes before Select None; Review and Clean still comes before Search and Sort, and each category is still two stops (row and checkbox). |
+| C22 | S2 | Fixed | system-junk-error: "Open Privacy Settings" sits inside the banner. |
+| C23 | S3 | Partly | Heroes are larger at 1600 x 1000, the block is still under half the window height. |
+| C24 | S3 | Partly | Ink between 259 pt² (Speed) and 404 (History), 1.56 x (was 3.3 x); target 1.25 x. |
+| C25 | S3 | Partly | The CPU chart is hidden until there are readings ("The load over time shows after a few readings."); card columns still end at different heights. |
+| C26 | S3 | Fixed | "7.78 GB" and "of 16.0 GB" share a baseline (ux4/live-monitor @2x). |
+| C27 | S3 | Partly | Copy fixed ("Background helpers your apps installed for you", login items text); Remove is still always shown on agent rows. |
+| C28 | S3 | Partly | Locked rows read "Protected: the contents of Documents"; rows still use 16 pt glyphs, not kind tiles. |
+| C29 | S3 | Open | Disk Map start screen: "Map Folder" still a faint ghost next to the 32 pt field (a "Choose Folder..." pill was added beside it). |
+| C30 | S3 | Open | Three empty-state styles remain; "Nothing to clean here." keeps its period; History empty now says "No actions yet" and "Nothing yet." (D5). |
+| C31 | S3 | Fixed | Done screens no longer mention 0 skipped ("27 items moved."). |
+| C32 | S3 | Fixed | Sort menu: entries "Size", "Name" with a check mark on the current one. |
+| C33 | S3 | Partly | Segments are radio buttons now; switches still announce as checkboxes; result checkboxes have no description (size, reason). |
+| C34 | S3 | Fixed | `kit::feel` press tint on sidebar rows, segments, checkboxes, radios, category and result rows, Disk Map blocks and app rows. |
+| C35 | S3 | Partly | `ScrollStyle::floating()` is on, but a dormant bar is still drawn at rest in list cards (system-junk-results). |
+| C36 | S3 | Open | App Updates: "Up to date" and macOS cards still of different heights. |
+| C37 | S3 | Partly | "Rules could not be loaded." is sentence case; Disk Map scanning still reads "Measuring ..." (`format!("Measuring {what}...")` with an empty `what`). |
+| C38 | S3 | Open | Large & Old Files start screen still has no 3D object. |
+| C39 | S3 | Open | Duplicates headline still "909 KB found in 3 items" (606 KB can be freed). |
+
+Final totals: **19 fixed** (C1 to C9, C11, C12, C13, C16, C18, C22, C26, C31, C32, C34), **15 partly** (C10, C14, C15, C17, C19, C20, C21, C23, C24, C25, C27, C28, C33, C35, C37), **5 open** (C29, C30, C36, C38, C39). Both S1 items are fixed; of the 19 S2 items, 12 are fixed and 7 partly.
+
+### New in the round D renders
+
+| # | Sev | Owner | Page / element | What is wrong | Measured / crop | Target |
+|---|---|---|---|---|---|---|
+| D1 | S1 | design4 | Trash Bins bottom bar, 1060 x 680 | The count "0 items selected" runs into the new hint: "0 items selected" and "Finder empties the Trash..." overlap (the F is under the d). Fine at 1280 and 1600. | `review-c/d1-trash-bar-overlap@2x.png` (trash-bins-results-1060x680@2x). | No overlap: on Trash Bins drop the 0 KB / 0 items figure (nothing can be ticked there, usability4 U3) or let the hint wrap or shorten at narrow widths. |
+| D2 | S2 | design4 | Privacy Traces, hovered row, 1060 x 680 | Reveal and Ignore sit over the middle of the two-line row, so the reason tag is split into "Google Chrome (Profi" and "and do..." on either side of the buttons, and the path shrinks to "/U...tory". | `review-c/d2-privacy-hover-splits-tag@2x.png`. | Row actions on line 1 only (the tag keeps its width), or the tag shortened to end before them. |
+| D3 | S3 | ux4 | App Remover Done | Button order "Undo, Show History, Done, Empty Trash..." while module Done screens read "Empty Trash..., Undo, Show History, Done" (primary last). | `review-c/d3-done-button-order-app-remover.png`, system-junk-done. | The module order everywhere. |
+| D4 | S3 | ux4 | Tune-up Tasks | A task that cannot run shows raw command text in amber ("Could not list local snapshots: fake: no answer for `/usr/bin/tmutil listlocalsnapshots /`"); with a real Mac this is the OS error string. | ux4/tune-up-tasks-1280x820. | A plain sentence, the raw text in the tooltip. |
+| D5 | S3 | ux4 | History, empty | "No actions yet" headline and "Nothing yet." under the icon say the same twice. | ux4/history-empty-1060x680. | One headline plus the help line. |
+| D6 | S3 | design4 | Result row names at 1060 | Now that the size moved to the right of line 1, names are cut in the middle: "iPhone_1...Restore.ipsw", Trash Bins "Trash of ... startup disk", "Mail tras...xample.com)". | system-junk-results-1060x680, trash-bins-results-1060x680. | Display names (Trash of the startup disk) whole; file names cut only after the path has shrunk to its minimum. |
