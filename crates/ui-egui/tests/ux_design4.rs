@@ -315,7 +315,9 @@ fn section_icons_have_even_weight_and_sit_centred() {
     for (icon, n) in &ink {
         let k = n / median;
         if !(0.75..=1.25).contains(&k) {
-            bad.push(format!("{icon:?}: {n} px of ink, {k:.2} x the median {median}"));
+            bad.push(format!(
+                "{icon:?}: {n} px of ink, {k:.2} x the median {median}"
+            ));
         }
     }
     assert!(bad.is_empty(), "{}\nall: {ink:?}", bad.join("\n"));

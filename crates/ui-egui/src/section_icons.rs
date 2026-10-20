@@ -124,13 +124,14 @@ fn parts() -> &'static Parts {
     static P: OnceLock<Parts> = OnceLock::new();
     P.get_or_init(|| {
         let puck = |r: f32, h: f32, b: f32, seg: usize| facing(Mesh3::puck(r, h, b, seg));
+        // A chunky bolt: the thin one weighed a third of its neighbours (REVIEW-C C24).
         let bolt = ccw([
-            [0.3, 1.0],
-            [-0.7, -0.1],
-            [-0.08, -0.1],
-            [-0.3, -1.0],
-            [0.72, 0.16],
-            [0.1, 0.16],
+            [0.0, 0.9],
+            [-0.86, -0.2],
+            [-0.18, -0.2],
+            [-0.18, -0.9],
+            [0.86, 0.25],
+            [0.18, 0.25],
         ]
         .to_vec());
         let folder = ccw(vec![
@@ -160,7 +161,7 @@ fn parts() -> &'static Parts {
             bubble: Mesh3::icosphere(3),
             shield: Mesh3::extrude(&shield_outline(1.0), 0.32, 0.12, 3),
             check: Mesh3::extrude(&check, 0.12, 0.045, 2),
-            bolt: Mesh3::extrude(&bolt, 0.3, 0.09, 3),
+            bolt: Mesh3::extrude(&bolt, 0.42, 0.09, 3),
             tile: retint(Mesh3::extrude(&ccw(squircle(0.9, 4.5, 72)), 0.26, 0.09, 3)),
             cell: Mesh3::rounded_box(v3(0.17, 0.17, 0.05), 0.05, 3),
             folder_back: Mesh3::extrude(&folder, 0.16, 0.06, 2),
@@ -231,7 +232,10 @@ fn scene(icon: SectionIcon) -> Scene<'static> {
             // The bolt is thin: larger, so it weighs like its neighbours (REVIEW-C C24).
             sc.add(
                 &p.bolt,
-                Xf::scale(1.5).rot_z(-0.1).at(v3(-0.09, 0.0, 0.0)).then(root),
+                Xf::scale(1.24)
+                    .rot_z(-0.1)
+                    .at(v3(-0.06, -0.1, 0.0))
+                    .then(root),
                 body,
             );
         }

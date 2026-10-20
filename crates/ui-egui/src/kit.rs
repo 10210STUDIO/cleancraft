@@ -64,6 +64,17 @@ pub fn feel(ui: &Ui, resp: &Response) -> Feel {
 
 const TAP_KEY: &str = "cleancraft-tap";
 
+/// The page's tokens (its section colours) for kit pieces drawn where no `Tokens` is passed
+/// (pop-up menus). The shell sets them every frame.
+pub fn set_tokens(ctx: &egui::Context, t: &Tokens) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("cleancraft-tokens"), *t));
+}
+
+pub fn tokens(ctx: &egui::Context) -> Tokens {
+    ctx.data(|d| d.get_temp::<Tokens>(egui::Id::new("cleancraft-tokens")))
+        .unwrap_or_else(Tokens::dark)
+}
+
 /// A switch or checkbox was toggled this frame: the shell plays the Tap cue once (only when
 /// "Click sounds on switches" is on, see `sound::play`). Kit widgets have no `Env`.
 pub fn note_tap(ctx: &egui::Context) {
@@ -232,6 +243,16 @@ pub fn dialog_actions(ui: &mut Ui, t: &Tokens, action: &str, kind: Kind) -> (boo
         out.1 = secondary(ui, t, "Cancel");
         out.0 = pill(ui, t, action, kind, icon.then_some(Icon::Trash)).clicked();
     });
+    // Return presses the action, the dialog's default button (REVIEW-U U10), unless the
+    // keyboard is on another control (then Return presses that one).
+    let top = ui.ctx().memory(|m| m.top_modal_layer()) == Some(ui.layer_id());
+    if top
+        && ui.is_enabled()
+        && ui.ctx().memory(|m| m.focused()).is_none()
+        && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter))
+    {
+        out.0 = true;
+    }
     out
 }
 
@@ -2585,13 +2606,65 @@ pub fn sort_menu<T: Copy + PartialEq>(ui: &mut Ui, id: &str, value: &mut T, choi
             })
             .show_ui(ui, |ui| {
                 for (v, l) in choices {
-                    pointer(&ui.selectable_value(value, *v, *l));
+                    if menu_choice(ui, l, *v == *value) {
+                        *value = *v;
+                        ui.close();
+                    }
                 }
             })
             .response;
         pointer(&r);
         r.widget_info(|| WidgetInfo::labeled(WidgetType::ComboBox, true, "Sort"));
     });
+}
+
+/// One entry of a CleanCraft pop-up menu, macOS style: a check mark before the current
+/// choice, a soft highlight under the pointer, no "Sort by" repeated (REVIEW-C C32). The
+/// entry is announced with its full label (`Sort by name`). Returns true when picked.
+pub fn menu_choice(ui: &mut Ui, full: &str, current: bool) -> bool {
+    let t = tokens(ui.ctx());
+    let shown = full
+        .strip_prefix("Sort by ")
+        .map(|r| {
+            let mut c = r.chars();
+            c.next()
+                .map(|f| f.to_uppercase().chain(c).collect::<String>())
+                .unwrap_or_default()
+        })
+        .unwrap_or_else(|| full.to_string());
+    let fid = font(size::CALLOUT, Weight::Medium);
+    let w = ui
+        .available_width()
+        .max(galley(ui, &shown, fid.clone(), t.text).size().x + 48.0)
+        .max(140.0);
+    let (r, resp) = ui.allocate_exact_size(vec2(w, 28.0), Sense::click());
+    resp.widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, true, current, full));
+    let f = feel(ui, &resp);
+    let p = ui.painter();
+    if f.hov > 0.0 {
+        p.rect_filled(
+            r,
+            6.0,
+            icons::lerp(t.sec_a, Color32::BLACK, 0.25 + 0.15 * f.down).gamma_multiply(f.hov),
+        );
+    }
+    if current {
+        icons::paint_with(
+            p,
+            Rect::from_center_size(pos2(r.left() + 16.0, r.center().y), Vec2::splat(12.0)),
+            Icon::Check,
+            t.text,
+            1.8,
+        );
+    }
+    p.text(
+        pos2(r.left() + 32.0, r.center().y),
+        Align2::LEFT_CENTER,
+        shown,
+        fid,
+        t.text,
+    );
+    resp.clicked()
 }
 
 /// A pop-up menu behind a secondary pill (`FIELD` tall, glass, rounded ends).
