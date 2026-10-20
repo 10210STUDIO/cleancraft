@@ -154,11 +154,15 @@ fn removal_plan_refuses_locked_items() {
     plan.items[0].locked = None;
     plan.items[0].selected = true;
     let s = Settings::default();
-    let err = features::run_plan(env, &s, &plan, &plan.digest(), &mut |_, _| {})
-        .unwrap_err()
-        .to_string();
-    assert!(err.contains("cannot be removed"), "{err}");
-    assert!(docs.exists() && target.exists());
+    // (files6 r6: SpaceLens::validate refuses it item by item, so it is reported as skipped
+    // with the reason; the rest of the plan still runs.)
+    match features::run_plan(env, &s, &plan, &plan.digest(), &mut |_, _| {}) {
+        Err(e) => assert!(e.to_string().contains("cannot be removed"), "{e}"),
+        Ok(rep) => {
+            assert!(rep.skipped.iter().any(|(p, _)| *p == docs), "{rep:?}");
+        }
+    }
+    assert!(docs.exists());
     // The registered scan lists the home folder's top level, nothing selected.
     let p = features::scan(env, &s, FeatureId::SpaceLens).unwrap();
     assert_eq!(p.selected_count(), 0);

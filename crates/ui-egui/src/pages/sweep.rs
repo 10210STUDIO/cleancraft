@@ -249,7 +249,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             // Which module the scan is in: its title is the status when it starts (a module
             // then reports its own places, which leave the index where it is).
             let ids = sources(app).ids();
-            if let Some(i) = ids.iter().position(|id| id.title() == s)
+            if let Some(i) = ids.iter().position(|id| sweep::tile_title(*id) == s)
                 && i > app.sweep.scan_at
             {
                 app.sweep.scan_at = i;
@@ -264,7 +264,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                 .iter()
                 .map(|id| {
                     let (i, c) = kit::feature_look(&t, *id);
-                    (i, c, id.title())
+                    (i, c, sweep::tile_title(*id))
                 })
                 .collect();
             let states: Vec<kit::ChipState> = (0..ids.len())
@@ -324,7 +324,7 @@ fn idle(app: &mut CleanApp, ui: &mut Ui) {
         .iter()
         .map(|id| {
             let (i, c) = kit::feature_look(&t, *id);
-            (i, c, id.title())
+            (i, c, sweep::tile_title(*id))
         })
         .collect();
     if kit::hero(
@@ -464,7 +464,7 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile, w: f32, tile_h: 
     // A plan tile with nothing left in it (never the Trash, which shows its size).
     let empty = !is_trash && matches!(&tile.data, TileData::Plan(p) if p.items.is_empty());
     let trash_full = is_trash
-        && matches!(&tile.data, TileData::Plan(p) if p.items.iter().any(|i| i.category != "mail_trash"));
+        && matches!(&tile.data, TileData::Plan(p) if p.items.iter().any(|i| i.category != "mail_trash" && i.size > 0));
     let mut rescan = false;
     let (rect, _) = ui.allocate_exact_size(vec2(w, tile_h), Sense::hover());
     let p = ui.painter().clone();
@@ -501,7 +501,7 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile, w: f32, tile_h: 
             ui.add_space(space::XS);
             ui.add(
                 egui::Label::new(
-                    RichText::new(tile.id.title())
+                    RichText::new(sweep::tile_title(tile.id))
                         .font(font(size::TITLE3, Weight::SemiBold))
                         .color(t.text),
                 )
@@ -540,6 +540,34 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile, w: f32, tile_h: 
                 ),
                 t.text,
             ),
+            // Developer Clutter: what was found, and the module's own preselection under it.
+            TileData::Plan(p) if sweep::shows_found_size(tile.id) => {
+                share = Some(p.selected_size() as f32 / p.total_size().max(1) as f32);
+                (
+                    human_size(p.total_size()),
+                    format!(
+                        "found in {}, {} selected",
+                        cleancraft_core::fsutil::items(p.items.len()),
+                        human_size(p.selected_size())
+                    ),
+                    t.text,
+                )
+            }
+            // Duplicate Downloads: the extra copies; one of each set always stays.
+            TileData::Plan(p) if tile.id == FeatureId::Duplicates => {
+                let (bytes, copies) = plan_page::duplicate_copies(p);
+                share = Some(p.selected_size() as f32 / bytes.max(1) as f32);
+                (
+                    human_size(p.selected_size()),
+                    format!(
+                        "{} of {} extra {} selected. One of each set stays.",
+                        p.selected_count(),
+                        copies,
+                        if copies == 1 { "copy" } else { "copies" }
+                    ),
+                    t.text,
+                )
+            }
             // The big number is what Run would move (the selection); what was found is said
             // under it, so a module with nothing preselected (Mail Downloads) still shows it.
             TileData::Plan(p) => {
@@ -621,7 +649,7 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile, w: f32, tile_h: 
                     egui::WidgetInfo::labeled(
                         egui::WidgetType::Button,
                         !refreshing,
-                        format!("Scan {} again", tile.id.title()),
+                        format!("Scan {} again", sweep::tile_title(tile.id)),
                     )
                 });
                 if r.clicked() && !refreshing {
@@ -647,7 +675,7 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile, w: f32, tile_h: 
                     egui::WidgetInfo::labeled(
                         egui::WidgetType::Button,
                         true,
-                        format!("Scan {} again", tile.id.title()),
+                        format!("Scan {} again", sweep::tile_title(tile.id)),
                     )
                 });
                 if r.clicked() {
@@ -746,7 +774,7 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
                             ui.label(
                                 RichText::new(format!(
                                     "{}: {}, {}",
-                                    fid.title(),
+                                    sweep::tile_title(fid),
                                     cleancraft_core::fsutil::items(p.selected_count()),
                                     human_size(p.selected_size())
                                 ))
@@ -895,7 +923,7 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
                                         kit::badge(ui, color, icon, isz::CARD);
                                         ui.add_space(space::XS);
                                         ui.label(
-                                            RichText::new(r.id.title())
+                                            RichText::new(sweep::tile_title(r.id))
                                                 .font(font(size::TITLE3, Weight::SemiBold))
                                                 .color(t.text),
                                         );
@@ -976,13 +1004,13 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
         if errs.is_empty() {
             app.tell(format!(
                 "{}: {} put back.",
-                id.title(),
+                sweep::tile_title(id),
                 cleancraft_core::fsutil::items(n)
             ));
         } else {
             app.warn(format!(
                 "{}: {} put back, {} could not be: {}",
-                id.title(),
+                sweep::tile_title(id),
                 cleancraft_core::fsutil::items(n),
                 errs.len(),
                 errs[0].1

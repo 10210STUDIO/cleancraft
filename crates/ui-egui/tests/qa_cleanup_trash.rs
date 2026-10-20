@@ -67,10 +67,7 @@ fn sizes_locked_items_and_empty_in_finder() {
         &h,
         "use Empty Trash in Finder to remove it for good"
     ));
-    assert!(has_text(
-        &h,
-        "erase it in Mail with Mailbox > Erase Deleted Items"
-    ));
+    assert!(has_text(&h, "Only Mail can erase deleted mail"));
     assert!(
         !has(&h, "Review and Clean"),
         "Trash items cannot be moved again"
@@ -153,6 +150,8 @@ fn empty_trash_button_only_when_finder_has_something() {
     assert!(!has(&h, "Empty Trash in Finder"));
     let mac = FakeMac::new();
     let h = open(&mac);
-    assert!(has(&h, "Nothing to clean here"));
+    // An empty Trash is a row that says so (files6, user report), never a blank page.
+    assert!(has_text(&h, trash::REASON_EMPTY));
+    assert!(has_text(&h, "Nothing is waiting in the Trash."));
     assert!(!has(&h, "Empty Trash in Finder"));
 }

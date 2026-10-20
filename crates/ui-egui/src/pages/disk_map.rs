@@ -1,4 +1,6 @@
-//! Disk Map: what takes space in the home folder (or a folder in it). A storage bar, a block
+//! Disk Map: what takes space in the home folder, the whole startup disk, an external drive or
+//! a folder. A location picker (home folder, Startup Disk, each mounted external volume with
+//! its name and capacity), a storage bar, a block
 //! map of the current folder's contents (area = size), the same items as a list sorted by size,
 //! drill down by clicking, Back and breadcrumbs, checkboxes, and "Review and Remove", which
 //! lists the exact items before they move to the Trash (with Undo).
@@ -6,6 +8,12 @@
 //! Measuring runs in the background with a Stop button. Each mapped folder's tree is kept, so
 //! drilling down and coming back needs no new scan; after a removal or an undo only the
 //! changed folders are measured again.
+//!
+//! Folders that could not be read say so ("Unknown", "Could not be read") and are totalled
+//! above the map; for a whole disk the part of the used space that was not measured is shown.
+//! Removal stays inside the allow-list ([`space::lock_reason`]); everything else is shown
+//! locked with its reason. A finished measure is kept as a snapshot for Mac Health
+//! ([`space_snapshots`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -16,8 +24,9 @@ use cleancraft_core::executor::{self, Method, Report};
 use cleancraft_core::features::{self, space_lens};
 use cleancraft_core::fsutil::human_size;
 use cleancraft_core::space::{
-    self, DiskUse, Node, Tree, lock_reason_deep, node_lock_reason, outermost,
+    self, DiskUse, MapLocation, Node, Tree, Volume, lock_reason_deep, node_lock_reason, outermost,
 };
+use cleancraft_core::space_snapshots;
 use egui::{Align, Color32, CornerRadius, Layout, RichText, Sense, Stroke, Ui, vec2};
 
 use crate::app::CleanApp;
@@ -65,6 +74,12 @@ pub struct State {
     pick: Option<Job<Result<Option<PathBuf>, String>>>,
     /// The action log as the trees reflect it: moves made on other pages update the map.
     watch: super::history::JournalWatch,
+    /// The location picked on the start screen.
+    pub location: MapLocation,
+    /// The mounted external volumes, read when the start screen shows (None: read again).
+    pub vols: Option<Vec<Volume>>,
+    /// The location of the mapped folder (`root`).
+    pub map_loc: Option<MapLocation>,
 }
 
 impl State {
@@ -94,8 +109,30 @@ impl State {
     }
 }
 
+/// The external volumes (read once per visit of the start screen).
+fn volumes(app: &mut CleanApp) -> Vec<Volume> {
+    if app.disk_map.vols.is_none() {
+        app.disk_map.vols = Some(space::external_volumes(&app.env));
+    }
+    app.disk_map.vols.clone().unwrap_or_default()
+}
+
+/// Map a location from the picker.
+fn start_location(app: &mut CleanApp, loc: MapLocation, fresh: bool) {
+    let root = loc.root(&app.env);
+    app.disk_map.map_loc = Some(loc);
+    start_map(app, root, fresh);
+}
+
 fn start_map(app: &mut CleanApp, root: PathBuf, fresh: bool) {
+    let vols = volumes(app);
     let st = &mut app.disk_map;
+    let loc = match &st.map_loc {
+        Some(l) if l.root(&app.env) == root => l.clone(),
+        _ => space::location_of(&app.env, &root, &vols),
+    };
+    st.map_loc = Some(loc.clone());
+    st.disk = None;
     st.error = None;
     st.selected.clear();
     if !fresh {
@@ -126,8 +163,16 @@ fn start_map(app: &mut CleanApp, root: PathBuf, fresh: bool) {
     // Before measuring: the first play writes the sound into CleanCraft's cache folder
     // (in Library), which the map would otherwise miss.
     crate::sound::play(&app.env, crate::sound::Cue::ScanStart);
+    let env = app.env.clone();
     let job = Job::start(app.sync, move |status| {
-        space::build(&root, &cancel, &|n, _| status(&format!("{n} files")))
+        let mut tree =
+            space::build_location(&env, &loc, &cancel, &|n, _| status(&format!("{n} files")));
+        // Kept for Mac Health's "what grew" (a stopped measure is not kept).
+        // The snapshot file is in CleanCraft's own folder, which a home map measures too.
+        if let Ok(true) = space_snapshots::record(&env, &loc, &tree) {
+            tree.refresh(&space_snapshots::path(&env));
+        }
+        tree
     });
     app.disk_map.phase = Phase::Scanning(job);
 }
@@ -341,7 +386,7 @@ fn start_undo(app: &mut CleanApp, rep: Report) {
 }
 
 const SUBTITLE: &str =
-    "See what takes space in your home folder. Tick what you do not need and move it to the Trash.";
+    "See what takes space on your Mac. Tick what you do not need and move it to the Trash.";
 
 pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: cleancraft_core::FeatureId) {
     let t = app.t;
@@ -422,8 +467,24 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: cleancraft_core::FeatureId) {
 
 fn storage_bar(app: &mut CleanApp, ui: &mut Ui) {
     let t = app.t;
+    // The disk of the location picked (start screen) or mapped.
+    let loc = match &app.disk_map.phase {
+        Phase::Idle => app.disk_map.location.clone(),
+        _ => app.disk_map.map_loc.clone().unwrap_or_default(),
+    };
+    let disk_name = match &loc {
+        MapLocation::Volume(v) => v.name.clone(),
+        _ => "Startup disk".to_string(),
+    };
     if app.disk_map.disk.is_none() {
-        app.disk_map.disk = Some(space::disk_use(&app.env, app.env.home()));
+        app.disk_map.disk = Some(match &loc {
+            MapLocation::Volume(v) => DiskUse {
+                total: Some(v.total),
+                used: Some(v.total.saturating_sub(v.free)),
+                free: Some(v.free),
+            },
+            other => space::disk_use(&app.env, &other.root(&app.env)),
+        });
     }
     let d = app.disk_map.disk.unwrap_or_default();
     let sel = app.disk_map.selected_size();
@@ -433,13 +494,13 @@ fn storage_bar(app: &mut CleanApp, ui: &mut Ui) {
             ui.set_width(ui.available_width());
             let text = match (d.used, d.total, d.free) {
                 (Some(u), Some(tot), Some(fr)) => format!(
-                    "Startup disk: {} used of {}, {} free",
+                    "{disk_name}: {} used of {}, {} free",
                     human_size(u),
                     human_size(tot),
                     human_size(fr)
                 ),
-                (_, _, Some(fr)) => format!("Startup disk: {} free", human_size(fr)),
-                _ => "Startup disk: free space unknown".to_string(),
+                (_, _, Some(fr)) => format!("{disk_name}: {} free", human_size(fr)),
+                _ => format!("{disk_name}: free space unknown"),
             };
             ui.horizontal(|ui| {
                 ui.label(
@@ -481,6 +542,19 @@ fn storage_bar(app: &mut CleanApp, ui: &mut Ui) {
 fn idle(app: &mut CleanApp, ui: &mut Ui) {
     let t = app.t;
     let mut folder_go = false;
+    let vols = volumes(app);
+    // A volume that went away since it was picked: back to the home folder.
+    if let MapLocation::Volume(v) = &app.disk_map.location
+        && !vols.iter().any(|x| x.mount == v.mount)
+    {
+        app.disk_map.location = MapLocation::Home;
+        app.disk_map.disk = None;
+    }
+    let action = match &app.disk_map.location {
+        MapLocation::Home => "Map Home Folder".to_string(),
+        MapLocation::Startup => "Map Startup Disk".to_string(),
+        other => format!("Map {}", other.label(&app.env)),
+    };
     let go = kit::hero(
         ui,
         &t,
@@ -489,10 +563,12 @@ fn idle(app: &mut CleanApp, ui: &mut Ui) {
             title: cleancraft_core::FeatureId::SpaceLens.title(),
             desc: SUBTITLE,
             covers: &[],
-            action: "Map Home Folder",
+            action: &action,
             note: "Measuring only looks. Nothing moves until you review the list and confirm.",
         },
         |ui| {
+            location_picker(app, ui, &vols);
+            ui.add_space(theme::space::S);
             ui.scope(|ui| {
                 ui.set_max_width(520.0);
                 storage_bar(app, ui);
@@ -584,17 +660,87 @@ fn idle(app: &mut CleanApp, ui: &mut Ui) {
         }
     } else if go {
         app.act();
-        let home = app.env.home().to_path_buf();
-        start_map(app, home, false);
+        let loc = app.disk_map.location.clone();
+        start_location(app, loc, false);
+    }
+}
+
+/// The places the map can measure: the home folder, the whole startup disk and each mounted
+/// external volume (name and capacity).
+fn location_picker(app: &mut CleanApp, ui: &mut Ui, vols: &[Volume]) {
+    let t = app.t;
+    let mut choices = vec![
+        (MapLocation::Home, "Home folder".to_string()),
+        (MapLocation::Startup, "Startup Disk".to_string()),
+    ];
+    for v in vols {
+        choices.push((
+            MapLocation::Volume(v.clone()),
+            format!(
+                "{} ({}, {} free)",
+                v.name,
+                human_size(v.total),
+                human_size(v.free)
+            ),
+        ));
+    }
+    let current = app.disk_map.location.clone();
+    let shown = current.label(&app.env);
+    let mut picked = None;
+    kit::centered_row(ui, egui::Id::new("disk-map-where"), |ui| {
+        ui.label(
+            RichText::new("Where to look")
+                .font(font(size::BODY, Weight::SemiBold))
+                .color(t.text),
+        );
+        let r = kit::menu_pill(ui, &t, &shown, |ui| {
+            ui.set_min_width(240.0);
+            for (loc, label) in &choices {
+                if kit::menu_choice(ui, label, *loc == current) {
+                    picked = Some(loc.clone());
+                    ui.close();
+                }
+            }
+        });
+        if r.response.clicked() {
+            app.act();
+        }
+    });
+    if let Some(loc) = picked {
+        app.act();
+        app.disk_map.location = loc;
+        app.disk_map.disk = None;
+        app.disk_map.error = None;
+    }
+    if app.disk_map.location == MapLocation::Startup {
+        kit::dim(
+            ui,
+            &t,
+            "Some folders need Full Disk Access to be measured. Only your own files can be removed.",
+        );
     }
 }
 
 fn node_label(app: &CleanApp, n: &Node) -> String {
-    if n.path == app.env.home() {
-        "Home folder".into()
-    } else {
-        n.name.clone()
+    path_label(app, &n.path)
+}
+
+/// "Home folder", "Startup Disk", a volume's name, or the folder's own name.
+fn path_label(app: &CleanApp, p: &Path) -> String {
+    if p == app.env.home() {
+        return "Home folder".into();
     }
+    if p == app.env.sys_path("/") {
+        return "Startup Disk".into();
+    }
+    if let Some(MapLocation::Volume(v)) = &app.disk_map.map_loc
+        && v.mount == p
+    {
+        return v.name.clone();
+    }
+    p.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 fn open_folder(app: &mut CleanApp, p: PathBuf) {
@@ -648,13 +794,7 @@ fn map(app: &mut CleanApp, ui: &mut Ui) {
                 let (r, _) = ui.allocate_exact_size(vec2(10.0, 14.0), Sense::hover());
                 icons::paint(ui.painter(), r, Icon::Chevron, t.text_faint);
             }
-            let label = if *c == app.env.home() {
-                "Home folder".to_string()
-            } else {
-                c.file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_default()
-            };
+            let label = path_label(app, c);
             let kind = if *c == node.path {
                 kit::Kind::Secondary
             } else {
@@ -673,9 +813,12 @@ fn map(app: &mut CleanApp, ui: &mut Ui) {
                 app.act();
                 start_map(app, root.clone(), true);
             }
-            if kit::secondary(ui, &t, "Other Folder") {
+            if kit::secondary(ui, &t, "Other Place") {
                 app.act();
                 app.disk_map.phase = Phase::Idle;
+                // The drives may have changed since: read them again.
+                app.disk_map.vols = None;
+                app.disk_map.disk = None;
             }
         });
     });
@@ -696,12 +839,36 @@ fn map(app: &mut CleanApp, ui: &mut Ui) {
     });
     if let Some(tree) = app.disk_map.tree() {
         if tree.unreadable > 0 {
+            // Every folder that could not be read, below the folder shown: never a silent 0.
+            let here = tree
+                .unreadable_paths
+                .iter()
+                .filter(|p| p.starts_with(&node.path))
+                .count();
             kit::dim(
                 ui,
                 &t,
                 &format!(
-                    "{} folders could not be read; their size is not counted. Full Disk Access may help.",
-                    tree.unreadable
+                    "Could not be read: {} (their contents are not in these sizes). Full Disk Access may help.",
+                    cleancraft_core::fsutil::count(here, "folder", "folders")
+                ),
+            );
+        }
+        let whole = app
+            .disk_map
+            .map_loc
+            .as_ref()
+            .is_some_and(|l| l.whole_disk() && node.path == root);
+        if whole
+            && let Some(d) = app.disk_map.disk
+            && let Some(gap) = space::not_measured(tree, &d)
+        {
+            kit::dim(
+                ui,
+                &t,
+                &format!(
+                    "Not measured: {} of the used space (folders that could not be read, snapshots and space macOS keeps for itself).",
+                    human_size(gap)
                 ),
             );
         }
@@ -1025,7 +1192,12 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                             &c.path,
                             crate::file_icons::FileKind::of(&c.path),
                         );
-                        let size_text = human_size(c.size);
+                        // A folder that could not be read has no known size (never a bare 0).
+                        let size_text = if c.unreadable {
+                            "Unknown".to_string()
+                        } else {
+                            human_size(c.size)
+                        };
                         let sf = font(size::BODY, Weight::SemiBold);
                         let size_w = kit::galley(ui, &size_text, sf.clone(), t.text).size().x;
                         kit::text_at(
@@ -1188,6 +1360,10 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                             };
                             kit::text_at(ui, line, &s, &text, lf, t.text_dim, Align::Min)
                                 .on_hover_text(format!("Locked: {why}"));
+                        } else if c.unreadable {
+                            let lf = font(size::FOOTNOTE, Weight::Regular);
+                            let s = "Could not be read. Full Disk Access may help.";
+                            kit::text_at(ui, line, s, s, lf, t.warning, Align::Min);
                         } else {
                             let bar = egui::Rect::from_min_size(
                                 egui::pos2(line.left(), line.center().y - 2.0),

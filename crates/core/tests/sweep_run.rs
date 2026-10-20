@@ -27,7 +27,7 @@ fn scan(m: &FakeMac, s: &Sources) -> sweep::SweepResult {
 fn registered_sources_skip_missing_modules() {
     let s = Sources::registered();
     for f in &s.plans {
-        assert!(sweep::PLAN_MODULES.contains(&f.id()));
+        assert!(sweep::plan_module_ids().contains(&f.id()));
         assert!(features::get(f.id()).is_some());
     }
     // System Junk is registered in every build.

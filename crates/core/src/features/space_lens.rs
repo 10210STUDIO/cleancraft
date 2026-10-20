@@ -1,7 +1,12 @@
 //! Disk Map removal: the items the user ticked in the map, as a plan for the executor.
-//! Allow-list: the home folder. Protected places, Library, hidden items and apps are locked
-//! ([`crate::space::lock_reason_deep`]: also folders holding a Photos library or another protected
-//! place); [`Feature::prepare`] refuses a plan that still selects one.
+//! Allow-list: the home folder, plus the top user folders of the mounted external volumes
+//! (`df`, see [`crate::space::external_volumes`] and [`crate::space::volume_user_folders`];
+//! never `/`, `/Volumes` or a volume itself). Protected places, Library, hidden items, apps, macOS's
+//! own folders, everything outside the home folder and the volumes' system folders
+//! (`.Spotlight-V100`, `.Trashes`, `.fseventsd`, `Backups.backupdb`, other hidden items) are
+//! locked ([`crate::space::lock_reason_deep`]: also folders holding a Photos library or another
+//! protected place). An edited plan cannot get past that: [`Feature::validate`] refuses each
+//! such item again right before the move, and [`Feature::prepare`] refuses the whole plan.
 
 use std::path::PathBuf;
 
@@ -46,7 +51,25 @@ impl Feature for SpaceLens {
     }
 
     fn allow_roots(&self, env: &Env) -> Vec<PathBuf> {
-        vec![env.home().to_path_buf()]
+        let mut v = vec![env.home().to_path_buf()];
+        // On external disks: their top user folders only, never the disk itself.
+        for vol in space::external_volumes(env) {
+            v.extend(space::volume_user_folders(&vol.mount));
+        }
+        v
+    }
+
+    fn validate(
+        &self,
+        env: &Env,
+        _settings: &crate::settings::Settings,
+        _plan: &Plan,
+        item: &crate::plan::Item,
+    ) -> Result<(), String> {
+        match lock_reason_deep(env, &item.path) {
+            Some(why) => Err(why),
+            None => Ok(()),
+        }
     }
 
     /// The top level of the home folder, measured, nothing selected (for the CLI and agents).

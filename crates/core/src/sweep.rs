@@ -5,23 +5,66 @@
 //! that is not registered simply has no tile), and count-only modules (tune-up suggestions,
 //! app updates) through [`count_sources`]. Removing still goes through
 //! [`features::run_plan_with`] with each plan's confirmed digest: nothing here moves files.
+//!
+//! Two tiles look at a part of a module: "Duplicate Downloads" is the Duplicates feature on
+//! `~/Downloads` and the last 3 months only ([`duplicates::DownloadDuplicates`]: one copy of
+//! each set always stays unselected), and "Developer Clutter" is dev6's module, looked up by
+//! its name ([`LATE_MODULES`]) so the tile appears as soon as the module is registered.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::env::Env;
 use crate::executor::Report;
+use crate::features::duplicates::DownloadDuplicates;
 use crate::features::{self, Feature, ScanCtx};
 use crate::plan::{FeatureId, Plan};
 use crate::settings::Settings;
 
-/// Plan modules Quick Sweep includes when they are registered, in tile order.
-pub const PLAN_MODULES: [FeatureId; 4] = [
+/// Plan modules Quick Sweep includes when they are registered, in tile order. Duplicates is
+/// the "Duplicate Downloads" tile ([`DownloadDuplicates`]).
+pub const PLAN_MODULES: [FeatureId; 5] = [
     FeatureId::SystemJunk,
     FeatureId::TrashBins,
     FeatureId::MailAttachments,
     FeatureId::Malware,
+    FeatureId::Duplicates,
 ];
+
+/// Plan modules named by their id string, added after [`PLAN_MODULES`] when a build has them
+/// (Developer Clutter, from another builder).
+pub const LATE_MODULES: [&str; 1] = ["dev_clutter"];
+
+/// Every plan module id Quick Sweep may show, in tile order.
+pub fn plan_module_ids() -> Vec<FeatureId> {
+    PLAN_MODULES
+        .iter()
+        .copied()
+        .chain(LATE_MODULES.iter().filter_map(|s| FeatureId::parse(s)))
+        .collect()
+}
+
+/// The module behind a tile: Duplicates looks at recent Downloads only.
+fn tile_feature(id: FeatureId) -> Option<Arc<dyn Feature>> {
+    if id == FeatureId::Duplicates {
+        return features::get(id).map(|_| Arc::new(DownloadDuplicates) as Arc<dyn Feature>);
+    }
+    features::get(id).map(Arc::from)
+}
+
+/// The name on a tile.
+pub fn tile_title(id: FeatureId) -> &'static str {
+    match id {
+        FeatureId::Duplicates => "Duplicate Downloads",
+        _ => id.title(),
+    }
+}
+
+/// Tiles whose big number is what was found, not what is selected (the module's own
+/// preselection is shown under it): modules where the user decides more.
+pub fn shows_found_size(id: FeatureId) -> bool {
+    id.as_str() == "dev_clutter"
+}
 
 /// A module that only reports a number (tune-up suggestions, app updates). Its tile opens the
 /// module's page; Quick Sweep never runs it.
@@ -61,10 +104,9 @@ impl Sources {
     /// The registered modules among [`PLAN_MODULES`], plus [`count_sources`].
     pub fn registered() -> Sources {
         Sources {
-            plans: PLAN_MODULES
-                .iter()
-                .filter_map(|id| features::get(*id))
-                .map(Arc::from)
+            plans: plan_module_ids()
+                .into_iter()
+                .filter_map(tile_feature)
                 .collect(),
             counts: count_sources(),
         }
@@ -151,7 +193,7 @@ pub fn scan(
         if cancel.load(Ordering::Relaxed) {
             return SweepResult { tiles };
         }
-        progress(id.title());
+        progress(tile_title(id));
         if let Some(data) = scan_one(env, settings, sources, id, cancel, progress) {
             tiles.push(Tile { id, data });
         }
@@ -213,7 +255,7 @@ pub fn run(
         let Some(id) = plan.feature else {
             continue;
         };
-        progress(id.title());
+        progress(tile_title(id));
         let result = match sources.feature(id) {
             Some(f) => {
                 features::run_plan_with(f.as_ref(), env, settings, plan, digest, &mut |_, _| {})
@@ -232,7 +274,7 @@ pub fn describe(t: &Tile) -> String {
     match &t.data {
         TileData::Plan(p) => format!(
             "{}: {} selected in {} of {} items{}",
-            t.id.title(),
+            tile_title(t.id),
             human_size(p.selected_size()),
             p.selected_count(),
             p.items.len(),
@@ -242,7 +284,7 @@ pub fn describe(t: &Tile) -> String {
                 " (cleaned from its own page)"
             }
         ),
-        TileData::Count { count, noun } => format!("{}: {count} {noun}", t.id.title()),
-        TileData::Failed(e) => format!("{}: could not scan ({e})", t.id.title()),
+        TileData::Count { count, noun } => format!("{}: {count} {noun}", tile_title(t.id)),
+        TileData::Failed(e) => format!("{}: could not scan ({e})", tile_title(t.id)),
     }
 }
