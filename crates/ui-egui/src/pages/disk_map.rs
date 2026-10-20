@@ -61,6 +61,10 @@ pub struct State {
     pub error: Option<String>,
     pub folder_text: String,
     pub disk: Option<DiskUse>,
+    /// The macOS folder dialog, while it is open.
+    pick: Option<Job<Result<Option<PathBuf>, String>>>,
+    /// The action log as the trees reflect it: moves made on other pages update the map.
+    watch: super::history::JournalWatch,
 }
 
 impl State {
@@ -119,6 +123,9 @@ fn start_map(app: &mut CleanApp, root: PathBuf, fresh: bool) {
     let cancel = st.cancel.clone();
     st.root = Some(root.clone());
     st.current = Some(root.clone());
+    // Before measuring: the first play writes the sound into CleanCraft's cache folder
+    // (in Library), which the map would otherwise miss.
+    crate::sound::play(&app.env, crate::sound::Cue::ScanStart);
     let job = Job::start(app.sync, move |status| {
         space::build(&root, &cancel, &|n, _| status(&format!("{n} files")))
     });
@@ -129,6 +136,10 @@ fn start_map(app: &mut CleanApp, root: PathBuf, fresh: bool) {
 pub fn poll(app: &mut CleanApp) -> bool {
     let st = &mut app.disk_map;
     let mut notice: Option<(String, bool)> = None;
+    // Tell the other pages (plan pages, Quick Sweep) what moved or came back.
+    let mut moved: Option<Vec<PathBuf>> = None;
+    let mut done_scan = false;
+    let mut came_back = false;
     let busy = match &mut st.phase {
         Phase::Scanning(job) => {
             if let Some(tree) = job.poll() {
@@ -138,7 +149,9 @@ pub fn poll(app: &mut CleanApp) -> bool {
                 } else if let Some(r) = st.root.clone() {
                     st.trees.insert(r, tree);
                     st.phase = Phase::Map;
+                    done_scan = true;
                 }
+                st.watch.prime(&app.env);
                 false
             } else if job.is_dead() {
                 st.error = Some("Measuring stopped unexpectedly.".into());
@@ -153,6 +166,15 @@ pub fn poll(app: &mut CleanApp) -> bool {
                 if let Some(r) = st.root.clone() {
                     st.trees.insert(r, out.tree);
                 }
+                // Its own move or undo is in this tree already; other mapped folders catch up.
+                if let Some(ch) = st.watch.changes(&app.env) {
+                    let root = st.root.clone();
+                    for (k, t) in st.trees.iter_mut() {
+                        if Some(k) != root.as_ref() {
+                            t.refresh_after(&app.env, &ch);
+                        }
+                    }
+                }
                 st.disk = None;
                 // The shown folder may be gone now.
                 while let Some(c) = st.current.clone() {
@@ -163,6 +185,7 @@ pub fn poll(app: &mut CleanApp) -> bool {
                 }
                 match (out.result, out.undo) {
                     (_, Some((n, errs))) => {
+                        came_back = true;
                         notice = Some(if errs.is_empty() {
                             (
                                 format!("{} put back.", cleancraft_core::fsutil::items(n)),
@@ -182,6 +205,7 @@ pub fn poll(app: &mut CleanApp) -> bool {
                         st.phase = Phase::Map;
                     }
                     (Ok(rep), None) => {
+                        moved = Some(CleanApp::moved_paths(&rep));
                         st.selected.clear();
                         st.phase = Phase::Done(rep);
                     }
@@ -201,6 +225,16 @@ pub fn poll(app: &mut CleanApp) -> bool {
         }
         _ => false,
     };
+    if done_scan {
+        play(app, crate::sound::Cue::ScanDone);
+    }
+    if let Some(m) = moved {
+        app.files_moved(&m);
+        play(app, crate::sound::Cue::CleanDone);
+    }
+    if came_back {
+        app.files_back(&[]);
+    }
     if let Some((m, err)) = notice {
         if err {
             app.warn(m);
@@ -209,6 +243,43 @@ pub fn poll(app: &mut CleanApp) -> bool {
         }
     }
     busy
+}
+
+/// Play a sound, then measure CleanCraft's sound cache again: the first play of a cue writes
+/// its file there (in Library), and the map must not miss it.
+fn play(app: &mut CleanApp, cue: crate::sound::Cue) {
+    crate::sound::play(&app.env, cue);
+    let dir = crate::sound::cache_dir(&app.env);
+    for t in app.disk_map.trees.values_mut() {
+        t.refresh(&dir);
+    }
+}
+
+/// Moves and undos made elsewhere (another page, History, an agent) since the map was
+/// measured: measure just those places again, so moved blocks leave the map and the numbers
+/// match a new scan.
+fn catch_up(app: &mut CleanApp) {
+    let st = &mut app.disk_map;
+    if !matches!(st.phase, Phase::Idle | Phase::Map | Phase::Done(_)) || st.trees.is_empty() {
+        return;
+    }
+    let Some(ch) = st.watch.changes(&app.env) else {
+        return;
+    };
+    if super::history::moved_paths(&ch).is_empty() {
+        return;
+    }
+    for t in st.trees.values_mut() {
+        t.refresh_after(&app.env, &ch);
+    }
+    st.selected.retain(|p| std::fs::symlink_metadata(p).is_ok());
+    st.disk = None;
+    while let Some(c) = st.current.clone() {
+        if st.tree().and_then(|t| t.find(&c)).is_some() {
+            break;
+        }
+        st.current = c.parent().map(Path::to_path_buf);
+    }
 }
 
 fn start_remove(app: &mut CleanApp) {
@@ -274,6 +345,7 @@ const SUBTITLE: &str =
 
 pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: cleancraft_core::FeatureId) {
     let t = app.t;
+    catch_up(app);
     let (icon, _) = kit::feature_look(&t, f);
     let phase = match &app.disk_map.phase {
         Phase::Idle => 0,
@@ -371,13 +443,17 @@ fn storage_bar(app: &mut CleanApp, ui: &mut Ui) {
                         .font(font(size::BODY, Weight::SemiBold))
                         .color(t.text),
                 );
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(
-                        RichText::new(format!("Selected: {}", human_size(sel)))
-                            .font(font(size::CALLOUT, Weight::Medium))
-                            .color(t.warning),
-                    );
-                });
+                // What the selection would free, only when something is selected (the
+                // bottom bar says "0 selected" otherwise).
+                if sel > 0 {
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.label(
+                            RichText::new(format!("Selected: {}", human_size(sel)))
+                                .font(font(size::CALLOUT, Weight::Medium))
+                                .color(t.warning),
+                        );
+                    });
+                }
             });
             if let (Some(u), Some(tot)) = (d.used, d.total)
                 && tot > 0
@@ -418,8 +494,11 @@ fn idle(app: &mut CleanApp, ui: &mut Ui) {
                 storage_bar(app, ui);
             });
             ui.add_space(theme::space::M);
+            // The field takes what the two buttons leave (the column is narrow at 1280).
+            let field_w = (ui.available_width() - 300.0).clamp(140.0, 300.0);
             kit::centered_row(ui, egui::Id::new("disk-map-folder-row"), |ui| {
-                let r = kit::text_field(ui, &t, &mut app.disk_map.folder_text, "~/Projects", 300.0);
+                let r =
+                    kit::text_field(ui, &t, &mut app.disk_map.folder_text, "~/Projects", field_w);
                 r.widget_info(|| {
                     egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Folder to map")
                 });
@@ -449,9 +528,49 @@ fn idle(app: &mut CleanApp, ui: &mut Ui) {
                 if (clicked || enter) && can {
                     folder_go = true;
                 }
+                let picking = app.disk_map.pick.is_some();
+                let ch = ui
+                    .add_enabled_ui(!picking, |ui| {
+                        kit::pill(ui, &t, "Choose Folder...", kit::Kind::Secondary, None)
+                    })
+                    .inner;
+                if ch
+                    .on_hover_text("Pick the folder to map in the macOS file dialog")
+                    .clicked()
+                    && !picking
+                {
+                    app.act();
+                    let env = app.env.clone();
+                    app.disk_map.pick = Some(Job::start(app.sync, move |_| {
+                        super::settings::choose_folder(&env, "Choose a folder to map")
+                    }));
+                }
             });
         },
     );
+    // The folder dialog answered: map that folder.
+    if let Some(job) = app.disk_map.pick.as_mut() {
+        if let Some(r) = job.poll() {
+            app.disk_map.pick = None;
+            match r {
+                Ok(Some(p)) => {
+                    app.disk_map.folder_text = app.env.display(&p);
+                    match space::parse_map_folder(&app.env, &app.disk_map.folder_text) {
+                        Ok(p) => start_map(app, p, false),
+                        Err(e) => app.disk_map.error = Some(e),
+                    }
+                    return;
+                }
+                Ok(None) => {}
+                Err(e) => app.disk_map.error = Some(e),
+            }
+        } else if job.is_dead() {
+            app.disk_map.pick = None;
+        } else {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(200));
+        }
+    }
     if folder_go {
         app.act();
         match space::parse_map_folder(&app.env, &app.disk_map.folder_text) {
@@ -545,7 +664,7 @@ fn map(app: &mut CleanApp, ui: &mut Ui) {
             }
         }
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if kit::secondary(ui, &t, "Map Again") {
+            if kit::secondary(ui, &t, "Scan Again") {
                 app.act();
                 start_map(app, root.clone(), true);
             }
@@ -709,8 +828,9 @@ fn treemap(app: &mut CleanApp, ui: &mut Ui, node: &Node, area: egui::Rect) {
         let name = format!("Block {label}");
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
         let p = ui.painter();
-        let hov = kit::anim(ui.ctx(), id.with("hov"), resp.hovered(), motion::HOVER);
         let round = (rect.width().min(rect.height()) * 0.18).clamp(2.0, 8.0);
+        let feel = kit::feel_ring(ui, &t, &resp, rect, round);
+        let hov = (feel.hov - 0.4 * feel.down).max(0.0);
         let top = icons::lerp(color, Color32::WHITE, 0.10 + 0.12 * hov);
         let bottom = icons::lerp(color, Color32::BLACK, 0.28 - 0.1 * hov);
         icons::gradient_tile(p, rect, round, top, bottom);
@@ -870,13 +990,20 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                         } else {
                             Color32::from_rgb(0x44, 0x48, 0x50)
                         };
-                        let ir =
-                            egui::Rect::from_center_size(dot + vec2(4.0, 0.0), vec2(18.0, 18.0));
-                        icons::paint(
-                            ui.painter(),
-                            ir,
-                            if c.is_dir { Icon::Folder } else { Icon::File },
+                        // The block's colour as a short bar, then the item's own kind icon
+                        // (folder, archive, picture...), like every other file list.
+                        ui.painter().rect_filled(
+                            egui::Rect::from_center_size(dot - vec2(6.0, 0.0), vec2(3.0, 22.0)),
+                            1.5,
                             color,
+                        );
+                        let ir =
+                            egui::Rect::from_center_size(dot + vec2(8.0, 0.0), vec2(26.0, 26.0));
+                        crate::images::paint_file_icon(
+                            ui,
+                            ir,
+                            &c.path,
+                            crate::file_icons::FileKind::of(&c.path),
                         );
                         let size_text = human_size(c.size);
                         let sf = font(size::BODY, Weight::SemiBold);
@@ -893,7 +1020,7 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                             t.text,
                             Align::Max,
                         );
-                        let x0 = r.left() + 62.0;
+                        let x0 = r.left() + 70.0;
                         let name_w = (r.right() - size_w - 20.0 - x0).max(40.0);
                         let nf = font(size::BODY, Weight::Medium);
                         let name_s = kit::truncate_middle(ui.ctx(), &c.name, &nf, name_w);
@@ -903,6 +1030,7 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                         );
                         if c.is_dir {
                             let resp = ui.interact(name_rect, row.id.with("open"), Sense::click());
+                            kit::feel_ring(ui, &t, &resp, name_rect, 4.0);
                             // A folder name opens it: a link, for VoiceOver and tests.
                             resp.widget_info(|| {
                                 egui::WidgetInfo::labeled(egui::WidgetType::Link, true, &c.name)
@@ -937,11 +1065,18 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                             // The whole reason when it fits; else its first clause (never a
                             // sentence cut mid-way with an open parenthesis); the tooltip
                             // has it all.
-                            let short = match why.split_once(" (") {
-                                Some((head, _)) => format!("Locked: {head}"),
-                                None => format!("Locked: {why}"),
+                            // The padlock says "locked"; the line says why, once.
+                            let cap = |s: &str| {
+                                let mut c = s.chars();
+                                c.next()
+                                    .map(|f| f.to_uppercase().chain(c).collect::<String>())
+                                    .unwrap_or_default()
                             };
-                            let full_shown = format!("Locked: {why}");
+                            let short = match why.split_once(" (") {
+                                Some((head, _)) => cap(head),
+                                None => cap(why),
+                            };
+                            let full_shown = cap(why);
                             let fits = |s: &str| {
                                 kit::galley(ui, s, lf.clone(), t.text_faint).size().x
                                     <= line.width()
@@ -1012,18 +1147,13 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
                 });
         });
         ui.add_space(theme::space::L);
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let label = match app.settings.method {
-                Method::Trash => "Move to Trash",
-                Method::Quarantine | Method::AdminQuarantine => "Move to Quarantine",
-            };
-            if kit::danger(ui, &t, label) {
-                go = true;
-            }
-            if kit::secondary(ui, &t, "Cancel") {
-                close = true;
-            }
-        });
+        let label = match app.settings.method {
+            Method::Trash => "Move to Trash",
+            Method::Quarantine | Method::AdminQuarantine => "Move to Quarantine",
+        };
+        let (g, c) = kit::dialog_actions(ui, &t, label, kit::Kind::Danger);
+        go = g;
+        close = c;
     });
     if go {
         app.act();

@@ -194,7 +194,7 @@ pub fn results_toolbar(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     // A pill like the buttons beside it (egui's menu button, restyled).
     let r = kit::menu_pill(ui, &app.t, "Select Copies", |ui| {
         for (label, rule) in &rules {
-            if ui.button(*label).clicked() {
+            if kit::menu_item(ui, label).clicked() {
                 chosen = Some(*rule);
                 ui.close();
             }

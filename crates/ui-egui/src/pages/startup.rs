@@ -67,9 +67,12 @@ pub struct State {
     pub confirm_quit: Option<Proc>,
     /// Removal of an agent's file waiting for confirmation (a plan with that one item).
     pub confirm_remove: Option<Plan>,
+    /// The action log as the snapshot reflects it (an uninstall moves agents too).
+    watch: super::history::JournalWatch,
 }
 
 fn reload(app: &mut CleanApp) {
+    app.startup.watch.prime(&app.env);
     let env = app.env.clone();
     app.startup.loading = Some(Job::start(app.sync, move |_| read(&env)));
 }
@@ -91,7 +94,12 @@ pub fn poll(app: &mut CleanApp) -> bool {
         if let Some(r) = job.poll() {
             app.startup.busy = None;
             match r {
-                Ok(m) => app.tell(m),
+                Ok(m) => {
+                    if m.starts_with("Moved ") {
+                        crate::sound::play(&app.env, crate::sound::Cue::Trash);
+                    }
+                    app.tell(m)
+                }
                 Err(e) => app.warn(e),
             }
             reload(app);
@@ -107,7 +115,16 @@ pub fn poll(app: &mut CleanApp) -> bool {
 }
 
 fn change_text(e: ChangeError) -> String {
-    e.to_string()
+    plain_error(&e.to_string())
+}
+
+/// Tool errors in plain words: macOS's "not authorized to send Apple events" (-1743) means
+/// CleanCraft lacks the Automation permission, and says where to turn it on.
+pub fn plain_error(raw: &str) -> String {
+    if raw.contains("-1743") || raw.contains("Not authorized to send Apple events") {
+        return "CleanCraft needs permission to control System Events. Turn it on in System Settings > Privacy & Security > Automation, then try again.".into();
+    }
+    raw.to_string()
 }
 
 fn report_text(rep: &Report) -> Result<String, String> {
@@ -174,12 +191,12 @@ fn start(app: &mut CleanApp, a: Action) {
 }
 
 /// A small button whose accessible name says which item it acts on.
-fn row_button(ui: &mut Ui, text: &str, name: String) -> bool {
+fn row_button(ui: &mut Ui, text: &str, name: String, tip: &str) -> bool {
     let t = crate::theme::Tokens::dark();
     let icon = (text == "Remove").then_some(crate::icons::Icon::Trash);
     let r = kit::ghost(ui, &t, text, icon);
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name.clone()));
-    r.clicked()
+    r.on_hover_text(tip).clicked()
 }
 
 /// On or Off as one switch; its accessible name is the action a click takes ("Turn Off
@@ -238,23 +255,33 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     );
     if app.startup.data.is_none() && app.startup.loading.is_none() {
         reload(app);
-    }
-    if app.startup.busy.is_some() {
-        kit::progress(
-            ui,
-            &t,
-            f,
-            "Working... macOS may ask for your password.",
-            "",
-            0,
-            false,
-        );
-        return;
+    } else if app.startup.loading.is_none()
+        && app.startup.busy.is_none()
+        && app.startup.watch.changes(&app.env).is_some()
+    {
+        // Something changed elsewhere (an app removed with its agents, an undo in History).
+        reload(app);
     }
     let Some(data) = app.startup.data.clone() else {
         kit::progress(ui, &t, f, "Reading startup items...", "", 0, false);
         return;
     };
+    let busy = app.startup.busy.is_some() || app.startup.loading.is_some();
+    // A change in progress keeps the list on screen (no full-page flash for a switch).
+    if app.startup.busy.is_some() {
+        ui.horizontal(|ui| {
+            let (r, _) = ui.allocate_exact_size(egui::vec2(20.0, 20.0), egui::Sense::hover());
+            let time = ui.input(|i| i.time);
+            kit::progress_ring(ui.painter(), r.center(), 16.0, &t, time);
+            ui.label(
+                RichText::new("Working... macOS may ask for your password.")
+                    .font(font(size::CALLOUT, Weight::Medium))
+                    .color(t.text),
+            );
+        });
+        ui.ctx().request_repaint();
+        ui.add_space(space::XS);
+    }
     ui.horizontal(|ui| {
         let n_on = data.launch.iter().filter(|i| i.enabled).count()
             + data.login.as_ref().map(|l| l.len()).unwrap_or(0);
@@ -264,7 +291,12 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                 .color(t.text),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if kit::secondary(ui, &t, "Refresh") {
+            let r = ui
+                .add_enabled_ui(!busy, |ui| {
+                    kit::pill(ui, &t, "Scan Again", kit::Kind::Secondary, None)
+                })
+                .inner;
+            if r.on_hover_text("Read the startup items again").clicked() && !busy {
                 app.act();
                 reload(app);
             }
@@ -277,11 +309,14 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         .id_salt("startup")
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            login_section(app, ui, &data);
-            for d in Domain::ALL {
-                launch_section(app, ui, &data, d);
-            }
-            heavy_section(app, ui, &data);
+            ui.add_enabled_ui(app.startup.busy.is_none(), |ui| {
+                login_section(app, ui, &data);
+                for d in Domain::ALL {
+                    launch_section(app, ui, &data, d);
+                }
+                heavy_section(app, ui, &data);
+                ui.add_space(space::M);
+            });
         });
     kit::scroll_fade_page(ui, &fade_out, &t);
     if app.startup.confirm_quit.is_some() {
@@ -309,16 +344,16 @@ fn login_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot) {
         ui,
         &t,
         "Login items",
-        "Apps that open when you log in. Turning one off removes it from the list; Turn On adds it back.",
+        "Apps that open when you log in. Turn one off and it no longer opens at login; turn it on again any time.",
     );
     kit::card(&t).show(ui, |ui| {
         ui.set_width(ui.available_width());
         match &data.login {
             Err(e) => {
-                ui.label(RichText::new(e).color(t.warning));
+                kit::strip(ui, crate::icons::Icon::Warning, t.warning, e);
             }
             Ok(list) if list.is_empty() && data.removed_login.is_empty() => {
-                ui.label("No login items.");
+                kit::dim(ui, &t, "No app opens when you log in.");
             }
             Ok(list) => {
                 for it in list {
@@ -406,12 +441,18 @@ fn login_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot) {
 fn launch_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot, d: Domain) {
     let t = app.t;
     let items: Vec<&LaunchItem> = data.launch.iter().filter(|i| i.domain == d).collect();
-    section(ui, &t, d.title(), d.description());
+    let desc = match d {
+        Domain::UserAgent => {
+            "Background helpers that your apps installed for you. They start when you log in."
+        }
+        other => other.description(),
+    };
+    section(ui, &t, d.title(), desc);
     let removable = app.env.can_modify(&d.path(&app.env));
     kit::card(&t).show(ui, |ui| {
         ui.set_width(ui.available_width());
         if items.is_empty() {
-            ui.label("None.");
+            kit::dim(ui, &t, "None on this Mac.");
         }
         let n = items.len();
         for (k, it) in items.into_iter().enumerate() {
@@ -425,13 +466,14 @@ fn launch_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot, d: Domain) {
                 split_row(
                     ui,
                     |ui| {
+                        let tile = crate::theme::icon::APP_ROW;
                         match &owner {
                             Some(a) => {
-                                crate::images::app_icon(ui, a, 28.0);
+                                crate::images::app_icon(ui, a, tile);
                             }
                             None => {
                                 let (r, _) = ui.allocate_exact_size(
-                                    egui::Vec2::splat(28.0),
+                                    egui::Vec2::splat(tile),
                                     egui::Sense::hover(),
                                 );
                                 kit::icon_tile(
@@ -444,7 +486,27 @@ fn launch_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot, d: Domain) {
                         }
                         ui.vertical(|ui| {
                             ui.spacing_mut().item_spacing.y = 2.0;
-                            short(ui, &it.label, size::BODY, Weight::SemiBold, t.text);
+                            // The app it belongs to, when known, reads better than an id.
+                            let app_name = owner.as_ref().and_then(|a| {
+                                std::path::Path::new(a)
+                                    .file_stem()
+                                    .map(|n| n.to_string_lossy().into_owned())
+                            });
+                            match &app_name {
+                                Some(n) => {
+                                    ui.horizontal(|ui| {
+                                        short(ui, n, size::BODY, Weight::SemiBold, t.text);
+                                        short(
+                                            ui,
+                                            &it.label,
+                                            size::FOOTNOTE,
+                                            Weight::Regular,
+                                            t.text_dim,
+                                        );
+                                    });
+                                }
+                                None => short(ui, &it.label, size::BODY, Weight::SemiBold, t.text),
+                            }
                             let prog = it.program.as_deref().unwrap_or("no program named");
                             path_line(ui, &format!("Runs {prog}"), t.text_faint);
                             let (sig, col) = if !it.program_exists && it.program.is_some() {
@@ -475,7 +537,14 @@ fn launch_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot, d: Domain) {
                         ui.add_space(space::XS);
                         // Removing moves the file: a quieter, separate action with the
                         // Trash glyph, never next to the switch's own spot.
-                        if removable && row_button(ui, "Remove", format!("Remove {}", it.label)) {
+                        if removable
+                            && row_button(
+                                ui,
+                                "Remove",
+                                format!("Remove {}", it.label),
+                                "Move this agent's file to the Trash (asks first)",
+                            )
+                        {
                             app.act();
                             open_remove(app, it);
                         }
@@ -536,10 +605,10 @@ fn heavy_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot) {
         ui.set_width(ui.available_width());
         match &data.heavy {
             Err(e) => {
-                ui.label(RichText::new(e).color(t.warning));
+                kit::strip(ui, crate::icons::Icon::Warning, t.warning, e);
             }
             Ok(v) if v.is_empty() => {
-                ui.label("No app is working hard right now.");
+                kit::dim(ui, &t, "No app is working hard right now.");
             }
             Ok(v) => {
                 for p in v {
@@ -579,7 +648,12 @@ fn heavy_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot) {
                                 kit::dim(ui, &t, &format!("pid {}", p.pid));
                             },
                             |ui| {
-                                if row_button(ui, "Quit", format!("Quit {}", p.name)) {
+                                if row_button(
+                                    ui,
+                                    "Quit",
+                                    format!("Quit {}", p.name),
+                                    "Ask the app to quit (asks first)",
+                                ) {
                                     app.act();
                                     app.startup.confirm_quit = Some(p.clone());
                                 }
@@ -621,17 +695,17 @@ fn confirm_quit(app: &mut CleanApp, ui: &mut Ui) {
         ui.add_space(10.0);
         kit::well(&t).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(RichText::new(cmd).monospace().size(crate::theme::size::FOOTNOTE).color(t.text_dim));
+            kit::eyebrow(ui, &t, "Command");
+            ui.label(
+                RichText::new(cmd)
+                    .font(font(size::FOOTNOTE, Weight::Medium))
+                    .color(t.text),
+            );
         });
         ui.add_space(14.0);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if kit::danger(ui, &t, "Quit App") {
-                go = true;
-            }
-            if kit::secondary(ui, &t, "Cancel") {
-                close = true;
-            }
-        });
+        let (g, c) = kit::dialog_actions(ui, &t, "Quit App", kit::Kind::Danger);
+        go = g;
+        close = c;
     });
     if dlg.should_close() {
         close = true;
@@ -673,7 +747,11 @@ fn confirm_remove(app: &mut CleanApp, ui: &mut Ui) {
         kit::well(&t).show(ui, |ui| {
             ui.set_width(ui.available_width());
             for it in plan.selected() {
-                ui.label(RichText::new(app.env.display(&it.path)).monospace().size(crate::theme::size::FOOTNOTE));
+                ui.label(
+                    RichText::new(app.env.display(&it.path))
+                        .font(font(size::CALLOUT, Weight::Medium))
+                        .color(t.text),
+                );
                 ui.label(
                     RichText::new(format!("{}  {}", human_size(it.size), it.reason))
                         .color(t.text_dim),
@@ -681,14 +759,9 @@ fn confirm_remove(app: &mut CleanApp, ui: &mut Ui) {
             }
         });
         ui.add_space(14.0);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if kit::danger(ui, &t, label) {
-                go = true;
-            }
-            if kit::secondary(ui, &t, "Cancel") {
-                close = true;
-            }
-        });
+        let (g, c) = kit::dialog_actions(ui, &t, label, kit::Kind::Danger);
+        go = g;
+        close = c;
     });
     if dlg.should_close() {
         close = true;

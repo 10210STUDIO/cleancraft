@@ -43,6 +43,8 @@ pub struct State {
     /// Index (in `Sources::ids`) of the module the running scan is in. Modules scan one
     /// after the other, so the ones before it are done.
     pub scan_at: usize,
+    /// Files came back since the results were made (an Undo): scan again when shown.
+    pub stale: bool,
 }
 
 fn sources(app: &CleanApp) -> Sources {
@@ -106,14 +108,13 @@ pub fn poll(app: &mut CleanApp) -> bool {
         }
         Phase::Running(job) => {
             if let Some(runs) = job.poll() {
-                // Module pages must not show lists that were just cleaned.
-                for r in &runs {
-                    let ps = app.plan_state(r.id);
-                    if !ps.is_busy() {
-                        ps.phase = plan_page::Phase::Idle;
-                        ps.plan = None;
-                    }
-                }
+                // Module pages (and every other list) drop what was just moved.
+                let moved: Vec<std::path::PathBuf> = runs
+                    .iter()
+                    .filter_map(|r| r.result.as_ref().ok())
+                    .flat_map(CleanApp::moved_paths)
+                    .collect();
+                app.files_moved(&moved);
                 let ok = runs.iter().any(|r| r.result.is_ok());
                 app.sweep.phase = Phase::Done(runs);
                 crate::sound::play(
@@ -140,11 +141,25 @@ pub fn poll(app: &mut CleanApp) -> bool {
 const SUBTITLE: &str = "One scan across junk, mail downloads, the Trash, threats and your apps.";
 
 pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
+    // Files came back since the results were made: they are out of date.
+    if app.sweep.stale {
+        match app.sweep.phase {
+            Phase::Results => {
+                app.sweep.stale = false;
+                start_scan(app);
+            }
+            Phase::Idle => {
+                app.sweep.stale = false;
+                app.sweep.result = None;
+            }
+            _ => {}
+        }
+    }
     let t = app.t;
     let (icon, _) = kit::feature_look(&t, f);
-    if !matches!(app.sweep.phase, Phase::Idle) {
-        kit::header(ui, &t, icon, f.title(), SUBTITLE);
-    }
+    // One title row in every phase, at the same place (REVIEW-A 18, REVIEW-C C15): the start
+    // screen's large headline says what the scan does instead of repeating the name.
+    kit::header(ui, &t, icon, f.title(), "");
     match &app.sweep.phase {
         Phase::Idle => idle(app, ui),
         Phase::Scanning(j) => {
@@ -236,7 +251,7 @@ fn idle(app: &mut CleanApp, ui: &mut Ui) {
         &t,
         FeatureId::SmartCare,
         kit::HeroText {
-            title: FeatureId::SmartCare.title(),
+            title: "One scan for your whole Mac",
             desc: SUBTITLE,
             covers: &[],
             action: "Scan",
@@ -301,8 +316,11 @@ fn results(app: &mut CleanApp, ui: &mut Ui) {
             let rows_full = res.tiles.len().div_ceil(per_full) as f32;
             let scrolls = rows_full * TILE_MIN_H + gap * (rows_full - 1.0) > ui.available_height();
             let w = if scrolls { full - 14.0 } else { full };
-            let per_row = (((w + gap) / (236.0 + gap)).floor() as usize).clamp(1, 4);
-            let tile_w = (w - gap * (per_row as f32 - 1.0)) / per_row as f32;
+            let fit = (((w + gap) / (236.0 + gap)).floor() as usize).clamp(1, 4);
+            // As few rows as fit, with the tiles shared evenly between them (5 tiles: 3 + 2,
+            // never 4 + 1); a shorter last row widens its tiles, so no cell stays empty.
+            let rows = res.tiles.len().div_ceil(fit).max(1);
+            let per_row = res.tiles.len().div_ceil(rows).max(1);
             // Tiles share the height of the page, so the grid fills it instead of leaving
             // an empty lower half.
             let n_rows = res.tiles.len().div_ceil(per_row) as f32;
@@ -321,6 +339,7 @@ fn results(app: &mut CleanApp, ui: &mut Ui) {
                 if i > 0 {
                     ui.add_space(gap);
                 }
+                let tile_w = (w - gap * (chunk.len() as f32 - 1.0)) / chunk.len() as f32;
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = gap;
                     for (j, tile) in chunk.iter().enumerate() {
@@ -343,6 +362,7 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile, w: f32, tile_h: 
     let t = app.t;
     let skipped = app.settings.sweep_skip.contains(&tile.id);
     let mut review = false;
+    let mut retry = false;
     let mut include = !skipped;
     let (icon, color) = kit::feature_look(&t, tile.id);
     let (rect, _) = ui.allocate_exact_size(vec2(w, tile_h), Sense::hover());
@@ -414,7 +434,11 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile, w: f32, tile_h: 
                 "Open the page to act on them.".to_string(),
                 t.text,
             ),
-            TileData::Failed(e) => ("Could not scan".to_string(), e.clone(), t.warning),
+            TileData::Failed(e) => (
+                "Could not scan".to_string(),
+                plan_page::sentence(e),
+                t.warning,
+            ),
         };
         let failed = matches!(tile.data, TileData::Failed(_));
         ui.horizontal(|ui| {
@@ -468,8 +492,27 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile, w: f32, tile_h: 
                 ui.add_space(4.0);
                 kit::check_text(ui, &t, &mut include, "Include");
             }
+            // A module that could not scan offers to scan again (REVIEW-U U23).
+            if matches!(tile.data, TileData::Failed(_)) {
+                let r = kit::secondary_resp(ui, &t, "Try Again");
+                r.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Button,
+                        true,
+                        format!("Scan {} again", tile.id.title()),
+                    )
+                });
+                if r.clicked() {
+                    retry = true;
+                }
+            }
         },
     );
+    if retry {
+        app.act();
+        start_scan(app);
+        return;
+    }
     if review {
         app.act();
         if let TileData::Plan(p) = &tile.data {
@@ -506,8 +549,8 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
     let size: u64 = plans.iter().map(|p| p.selected_size()).sum();
     let mut go = false;
     let mut close = false;
-    let width = (ui.ctx().content_rect().width() - 120.0).clamp(420.0, 680.0);
-    let max_list = (ui.ctx().content_rect().height() - 330.0).clamp(120.0, 380.0);
+    let width = kit::dialog_width(ui.ctx());
+    let max_list = (ui.ctx().content_rect().height() - 350.0).clamp(120.0, 380.0);
     let dlg = kit::modal(egui::Id::new("sweep-confirm"), &t).show(ui.ctx(), |ui| {
         ui.set_width(width);
         kit::dialog_head(
@@ -539,7 +582,7 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
                 .map(|p| 32.0 + p.selected_count() as f32 * crate::theme::hit::CONFIRM_LINE)
                 .sum();
             let list_h = est.min(max_list);
-            egui::ScrollArea::vertical()
+            let out = egui::ScrollArea::vertical()
                 .min_scrolled_height(list_h)
                 .max_height(list_h)
                 .auto_shrink([false, false])
@@ -575,20 +618,16 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
                         }
                     }
                 });
+            kit::list_more(ui, &t, &out, count);
         });
         ui.add_space(space::L);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let label = match app.settings.method {
-                Method::Trash => "Move to Trash",
-                Method::Quarantine | Method::AdminQuarantine => "Move to Quarantine",
-            };
-            if kit::danger(ui, &t, label) {
-                go = true;
-            }
-            if kit::secondary(ui, &t, "Cancel") {
-                close = true;
-            }
-        });
+        let label = match app.settings.method {
+            Method::Trash => "Move to Trash",
+            Method::Quarantine | Method::AdminQuarantine => "Move to Quarantine",
+        };
+        let (ok, cancel) = kit::dialog_actions(ui, &t, label, kit::Kind::Danger);
+        go |= ok;
+        close |= cancel;
     });
     if dlg.should_close() {
         close = true;
@@ -686,12 +725,20 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
                                         match &r.result {
                                             Ok(rep) => {
                                                 ui.label(
-                                                    RichText::new(format!(
-                                                        "{} moved, {} skipped, {}",
-                                                        rep.moved.len(),
-                                                        rep.skipped.len(),
-                                                        human_size(rep.freed)
-                                                    ))
+                                                    RichText::new(if rep.skipped.is_empty() {
+                                                        format!(
+                                                            "{} moved, {}",
+                                                            rep.moved.len(),
+                                                            human_size(rep.freed)
+                                                        )
+                                                    } else {
+                                                        format!(
+                                                            "{} moved, {} skipped, {}",
+                                                            rep.moved.len(),
+                                                            rep.skipped.len(),
+                                                            human_size(rep.freed)
+                                                        )
+                                                    })
                                                     .font(font(size::CALLOUT, Weight::Regular))
                                                     .color(t.text_dim),
                                                 );
@@ -747,6 +794,7 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
     if let Some((id, plan_id)) = undo {
         app.act();
         let (n, errs) = executor::undo_plan(&app.env, &plan_id);
+        app.files_back(&[]);
         app.sweep.undone.push(id);
         if errs.is_empty() {
             app.tell(format!(

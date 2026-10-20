@@ -242,7 +242,16 @@ fn cpu_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
         Some(c) => {
             let frac = (c.load / 100.0) as f32;
             gauge_big(app, ui, frac, level_color(app, frac), &pct(c.load));
-            sparkline(ui, &history, app.t.sec_a);
+            // The history line once there is something to draw (two different readings).
+            let varied = history
+                .windows(2)
+                .any(|w| (w[0] - w[1]).abs() > f64::EPSILON);
+            if varied {
+                ui.add_space(12.0);
+                sparkline(ui, &history, app.t.sec_a);
+            } else {
+                kit::dim(ui, &app.t, "The load over time shows after a few readings.");
+            }
             if let Some(l) = c.load_avg {
                 row(
                     app,
@@ -338,11 +347,26 @@ fn memory_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
                 let (r, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
                 let time = ui.input(|i| i.time);
                 kit::progress_ring(ui.painter(), r.center(), 14.0, &t, time);
-                ui.label("Freeing memory...");
+                ui.label(
+                    RichText::new("Freeing memory...")
+                        .font(font(size::CALLOUT, Weight::Medium))
+                        .color(t.text),
+                );
             });
             ui.ctx().request_repaint();
-        } else if kit::secondary(ui, &t, "Free Up RAM") {
-            purge = true;
+        } else {
+            // In a row of its own: the columns are justified, and the click area must be
+            // the painted pill only.
+            ui.horizontal(|ui| {
+                if kit::pill(ui, &t, "Free Up RAM", kit::Kind::Secondary, None)
+                    .on_hover_text(
+                        "Clear memory macOS keeps as disk cache (asks for your password)",
+                    )
+                    .clicked()
+                {
+                    purge = true;
+                }
+            });
         }
     });
     if purge {
@@ -376,9 +400,14 @@ fn storage_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
             kit::dim(ui, &t, n);
         }
         ui.add_space(6.0);
-        if kit::secondary(ui, &t, "Free Up Space") {
-            go = true;
-        }
+        ui.horizontal(|ui| {
+            if kit::pill(ui, &t, "Free Up Space", kit::Kind::Secondary, None)
+                .on_hover_text("Open Quick Sweep to find what you can remove")
+                .clicked()
+            {
+                go = true;
+            }
+        });
     });
     if go {
         app.act();
@@ -446,7 +475,11 @@ fn network_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
                 let (r, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
                 let time = ui.input(|i| i.time);
                 kit::progress_ring(ui.painter(), r.center(), 14.0, &app.t, time);
-                ui.label("Measuring speed...");
+                ui.label(
+                    RichText::new("Measuring speed...")
+                        .font(font(size::CALLOUT, Weight::Medium))
+                        .color(app.t.text_dim),
+                );
             });
             ui.ctx().request_repaint();
         }
@@ -470,14 +503,9 @@ fn confirm_purge(app: &mut CleanApp, ui: &mut Ui) {
              macOS asks for an administrator password. Apps may feel slower for a moment.",
         );
         ui.add_space(space::L);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if kit::primary(ui, &t, "Free Up RAM Now") {
-                go = true;
-            }
-            if kit::secondary(ui, &t, "Cancel") {
-                close = true;
-            }
-        });
+        let (g, c) = kit::dialog_actions(ui, &t, "Free Up RAM Now", kit::Kind::Primary);
+        go = g;
+        close = c;
     });
     if dlg.should_close() {
         close = true;

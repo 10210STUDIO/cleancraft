@@ -81,7 +81,7 @@ fn tiles_show_each_module_plan() {
     assert!(has(&h, &human_size(t)), "trash tile");
     assert!(has(&h, "3 updates"));
     assert!(has(&h, "Could not scan"));
-    assert!(has(&h, "rules could not be loaded"));
+    assert!(has(&h, "Rules could not be loaded."));
     // Header: what Run would move (Trash excluded).
     assert!(has(&h, &human_size(j + ml)));
     // One Review per tile, one Include per runnable tile (System Junk, Mail).
@@ -129,10 +129,7 @@ fn run_lists_everything_moves_exactly_that_and_undo_per_module() {
         &h,
         &format!("{} moved to the Trash", human_size(expect_freed))
     ));
-    assert!(has(
-        &h,
-        &format!("2 moved, 0 skipped, {}", human_size(mail_size))
-    ));
+    assert!(has(&h, &format!("2 moved, {}", human_size(mail_size))));
     // Undo only Mail (second result card).
     assert_eq!(h.query_all_by_label("Undo").count(), 2);
     click_nth(&mut h, "Undo", 1);

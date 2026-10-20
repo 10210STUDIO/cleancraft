@@ -36,6 +36,8 @@ pub enum Sort {
     #[default]
     Size,
     Name,
+    /// Oldest first (Large & Old Files: find what has not been touched for longest).
+    Date,
 }
 
 #[derive(Default)]
@@ -49,12 +51,50 @@ pub struct PlanState {
     pub error: Option<String>,
     /// Set to stop the running scan.
     pub cancel: Arc<AtomicBool>,
+    /// Files came back since this list was made (an Undo): scan again when shown.
+    pub stale: bool,
 }
 
 impl PlanState {
     pub fn is_busy(&self) -> bool {
         matches!(self.phase, Phase::Scanning(_) | Phase::Cleaning(_))
     }
+}
+
+/// Drop from `plan` every item at or inside a path in `gone`; an item that contained one is
+/// measured again. Item ids are renumbered (they are indexes). In a plan of sets
+/// (duplicates, look-alike pictures) a set left with one file is dropped too: one copy is not
+/// a duplicate. Returns true when anything changed.
+pub fn drop_paths(plan: &mut Plan, gone: &[std::path::PathBuf]) -> bool {
+    let before = plan.items.len();
+    let mut resized = false;
+    plan.items
+        .retain(|it| !gone.iter().any(|g| it.path.starts_with(g)));
+    for it in &mut plan.items {
+        if gone.iter().any(|g| g.starts_with(&it.path)) {
+            it.size = cleancraft_core::fsutil::tree_size(&it.path).0;
+            resized = true;
+        }
+    }
+    let sets = matches!(
+        plan.feature,
+        Some(FeatureId::Duplicates | FeatureId::SimilarPhotos)
+    );
+    if sets {
+        let mut count: std::collections::HashMap<String, usize> = Default::default();
+        for g in plan.items.iter().filter_map(|i| i.group.clone()) {
+            *count.entry(g).or_default() += 1;
+        }
+        plan.items.retain(|i| {
+            i.group
+                .as_ref()
+                .is_none_or(|g| count.get(g).copied().unwrap_or(0) > 1)
+        });
+    }
+    for (i, it) in plan.items.iter_mut().enumerate() {
+        it.id = i;
+    }
+    plan.items.len() != before || resized
 }
 
 /// Short text about each module, shown before the first scan.
@@ -138,6 +178,7 @@ fn start_clean(app: &mut CleanApp, f: FeatureId) {
 /// Finish jobs. Returns true while something is running.
 pub fn poll(app: &mut CleanApp, f: FeatureId) -> bool {
     let mut cue = None;
+    let mut moved = Vec::new();
     let st = app.plan_state(f);
     let busy = match &mut st.phase {
         Phase::Scanning(job) => {
@@ -175,6 +216,7 @@ pub fn poll(app: &mut CleanApp, f: FeatureId) -> bool {
                         } else {
                             crate::sound::Cue::CleanDone
                         });
+                        moved = CleanApp::moved_paths(&rep);
                         st.phase = Phase::Done(rep);
                     }
                     Err(e) => {
@@ -197,6 +239,8 @@ pub fn poll(app: &mut CleanApp, f: FeatureId) -> bool {
         }
         _ => false,
     };
+    // What moved leaves this list and every other list that showed it.
+    app.files_moved(&moved);
     if let Some(c) = cue {
         crate::sound::play(&app.env, c);
     }
@@ -212,6 +256,16 @@ pub fn stop_scan(app: &mut CleanApp, f: FeatureId) {
 }
 
 pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
+    // Files came back since this list was made: the list is out of date.
+    let st = app.plan_state(f);
+    if st.stale && !st.is_busy() {
+        st.stale = false;
+        match st.phase {
+            Phase::Results | Phase::Confirm => start_scan(app, f),
+            Phase::Idle => st.plan = None,
+            _ => {}
+        }
+    }
     let t = app.t;
     let (icon, _) = kit::feature_look(&t, f);
     let phase = match &app.plan_state(f).phase {
@@ -228,19 +282,23 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     }
     if let Some(e) = app.plan_state(f).error.clone() {
         let (text, needs_access) = friendly_error(&e);
-        ui.horizontal(|ui| {
-            let w = if needs_access { 200.0 } else { 0.0 };
-            ui.scope(|ui| {
-                ui.set_max_width(ui.available_width() - w);
-                kit::strip(ui, Icon::Warning, t.warning, &text);
-            });
-            if needs_access && kit::secondary(ui, &t, "Open Privacy Settings") {
+        if needs_access {
+            if kit::banner(
+                ui,
+                &t,
+                Icon::Warning,
+                t.warning,
+                &text,
+                "Open Privacy Settings",
+            ) {
                 app.act();
                 if let Err(e) = cleancraft_core::permissions::open_fda_settings(&app.env) {
                     app.warn(format!("Could not open System Settings: {e}"));
                 }
             }
-        });
+        } else {
+            kit::strip(ui, Icon::Warning, t.warning, &text);
+        }
         ui.add_space(space::S);
     }
     match phase {
@@ -332,6 +390,7 @@ fn visible_items(st: &PlanState) -> Vec<usize> {
         .collect();
     match st.sort {
         Sort::Size => v.sort_by(|a, b| plan.items[*b].size.cmp(&plan.items[*a].size)),
+        Sort::Date => v.sort_by_key(|i| plan.items[*i].modified.unwrap_or(i64::MAX)),
         Sort::Name => v.sort_by(|a, b| {
             let n = |i: usize| {
                 plan.items[i]
@@ -431,6 +490,11 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     });
 
     // Bottom bar first, so it always has its place at the bottom of the window.
+    let any_selectable = app
+        .plan_state(f)
+        .plan
+        .as_ref()
+        .is_some_and(|p| p.items.iter().any(|i| i.locked.is_none()));
     let (sel_count, sel_size) = app
         .plan_state(f)
         .plan
@@ -467,8 +531,17 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                         if sel_count > 0 && kit::primary(ui, &t, "Review and Clean") {
                             app.act();
                             app.plan_state(f).phase = Phase::Confirm;
-                        } else if sel_count == 0 {
+                        } else if sel_count == 0 && any_selectable {
                             kit::dim(ui, &t, "Tick the items to clean.");
+                        } else if sel_count == 0 && f == FeatureId::TrashBins {
+                            // The page's one action sits where every other page has its
+                            // main button (REVIEW-U U3).
+                            super::extras_cleanup::trash_bar(app, ui);
+                            kit::dim(
+                                ui,
+                                &t,
+                                "Finder empties the Trash. CleanCraft cannot put those items back.",
+                            );
                         }
                     });
                 });
@@ -486,7 +559,13 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     let search_w = (ui.available_width()
         - 140.0
         - 210.0
-        - if extras_inline { extras_w } else { 0.0 }
+        - if extras_inline {
+            extras_w
+        } else if extras_w > 0.5 {
+            110.0
+        } else {
+            0.0
+        }
         - 5.0 * space::S)
         .clamp(160.0, 220.0);
     ui.horizontal(|ui| {
@@ -494,6 +573,12 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         let st = app.plan_state(f);
         let r = kit::search_field(ui, &t, &mut st.search, "Search", search_w);
         r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Search"));
+        // Cmd+F, as in every Mac app with a search field.
+        if ui.ctx().memory(|m| m.top_modal_layer()).is_none()
+            && ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::F))
+        {
+            r.request_focus();
+        }
         if r.changed() {
             app.act();
         }
@@ -503,50 +588,84 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             ui,
             "sort",
             &mut sort,
-            &[(Sort::Size, "Sort by size"), (Sort::Name, "Sort by name")],
+            if f == FeatureId::LargeOldFiles {
+                &[
+                    (Sort::Size, "Sort by size"),
+                    (Sort::Date, "Sort by date"),
+                    (Sort::Name, "Sort by name"),
+                ][..]
+            } else {
+                &[(Sort::Size, "Sort by size"), (Sort::Name, "Sort by name")][..]
+            },
         );
         if sort != app.plan_state(f).sort {
             app.act();
             app.plan_state(f).sort = sort;
         }
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if kit::secondary(ui, &t, "Select None") {
+        // Right-aligned, in reading order for Tab and VoiceOver: the module's own buttons
+        // (or "More" holding them when they do not fit), Select All, Select None. Where
+        // nothing can be selected (Trash Bins) there is no selection to offer.
+        let selectable = app
+            .plan_state(f)
+            .plan
+            .as_ref()
+            .is_some_and(|p| p.items.iter().any(|i| i.locked.is_none()));
+        let gap = space::S;
+        let all_w = kit::pill_size(ui, "Select All", kit::Kind::Secondary, false).x;
+        let none_w = kit::pill_size(ui, "Select None", kit::Kind::Secondary, false).x;
+        let has_extras = extras_w > 0.5;
+        let more_w = kit::pill_size(ui, "More", kit::Kind::Secondary, false).x + 24.0;
+        let lead_w = if extras_inline {
+            extras_w
+        } else if has_extras {
+            more_w + gap
+        } else {
+            0.0
+        };
+        let sel_w = if selectable {
+            all_w + none_w + gap
+        } else {
+            0.0
+        };
+        ui.add_space((ui.available_width() - lead_w - sel_w).max(0.0));
+        if extras_inline {
+            extras_row(app, ui, f, extras_id);
+        } else if has_extras {
+            // The window is too narrow for one row: the module's buttons go in a menu
+            // instead of a second toolbar row (REVIEW-C C17).
+            let r = kit::menu_pill(ui, &t, "More", |ui| {
+                ui.set_min_width(200.0);
+                super::extras::results_toolbar(app, ui, f);
+            });
+            if r.response.clicked() {
                 app.act();
-                let ids = visible_items(app.plan_state(f));
-                if let Some(p) = app.plan_state(f).plan.as_mut() {
-                    for id in ids {
-                        p.set_selected(id, false);
-                    }
+            }
+        }
+        if selectable && kit::secondary(ui, &t, "Select All") {
+            app.act();
+            let ids = visible_items(app.plan_state(f));
+            if let Some(p) = app.plan_state(f).plan.as_mut() {
+                for id in ids {
+                    p.set_selected(id, true);
                 }
             }
-            if kit::secondary(ui, &t, "Select All") {
-                app.act();
-                let ids = visible_items(app.plan_state(f));
-                if let Some(p) = app.plan_state(f).plan.as_mut() {
-                    for id in ids {
-                        p.set_selected(id, true);
-                    }
+            keep_a_copy(app, f);
+        }
+        if selectable && kit::secondary(ui, &t, "Select None") {
+            app.act();
+            let ids = visible_items(app.plan_state(f));
+            if let Some(p) = app.plan_state(f).plan.as_mut() {
+                for id in ids {
+                    p.set_selected(id, false);
                 }
-                keep_a_copy(app, f);
             }
-            if extras_inline {
-                extras_row(app, ui, f, extras_id);
-            }
-        });
+        }
     });
-    if !extras_inline {
-        ui.add_space(space::S);
-        ui.allocate_ui_with_layout(
-            vec2(ui.available_width(), crate::theme::hit::SECONDARY),
-            Layout::right_to_left(Align::Center),
-            |ui| extras_row(app, ui, f, extras_id),
-        );
-    }
     ui.add_space(space::M);
     let avail_h = ui.available_height() - 4.0;
     let body =
         egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), avail_h));
-    let left_w = if body.width() < 760.0 { 236.0 } else { 272.0 };
+    let left_w = if body.width() < 760.0 { 260.0 } else { 272.0 };
     let left = egui::Rect::from_min_size(body.min, egui::vec2(left_w, avail_h));
     let right = egui::Rect::from_min_max(
         egui::pos2(left.right() + space::GUTTER, body.top()),
@@ -581,10 +700,13 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             .show(ui, |ui| {
                 ui.set_min_size(egui::vec2(ui.available_width(), list_h));
                 if rows.is_empty() {
-                    ui.add_space(space::XL);
-                    ui.vertical_centered(|ui| {
-                        ui.label(RichText::new("No items match.").color(t.text_dim));
-                    });
+                    kit::empty_state(
+                        ui,
+                        &t,
+                        Icon::Search,
+                        "No items match",
+                        "Try other words, or clear the search to see every item.",
+                    );
                     return;
                 }
                 let out = egui::ScrollArea::vertical()
@@ -613,9 +735,9 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
 
 /// The module's own toolbar buttons, measured so the toolbar can place them next frame.
 fn extras_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, id: egui::Id) {
-    let start = ui.cursor().max.x;
+    let start = ui.cursor().min.x;
     super::extras::results_toolbar(app, ui, f);
-    let w = (start - ui.cursor().max.x).max(0.0);
+    let w = (ui.cursor().min.x - start).max(0.0);
     let last: f32 = ui.data(|d| d.get_temp(id)).unwrap_or(0.0);
     if (w - last).abs() > 0.5 {
         ui.data_mut(|d| d.insert_temp(id, w));
@@ -674,12 +796,16 @@ fn categories(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan) {
             size as f32 / total as f32,
             color,
             current,
-            Some((
-                !sel_items.is_empty(),
-                all_on,
-                some_on && !all_on,
-                format!("Select {}", c.title),
-            )),
+            // No checkbox where nothing in the whole list can be selected (Trash Bins:
+            // CleanCraft never empties a Trash itself; REVIEW-U U3).
+            plan.items.iter().any(|i| i.locked.is_none()).then(|| {
+                (
+                    !sel_items.is_empty(),
+                    all_on,
+                    some_on && !all_on,
+                    format!("Select {}", c.title),
+                )
+            }),
         );
         r.row.on_hover_text(&c.description);
         if let Some(on) = r.check_changed {
@@ -721,12 +847,8 @@ pub fn category_row(
     resp.widget_info(|| {
         egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, current, label)
     });
-    let hov = kit::anim(
-        ui.ctx(),
-        resp.id.with("hov"),
-        resp.hovered(),
-        crate::theme::motion::HOVER,
-    );
+    let feel = kit::feel_ring(ui, t, &resp, r, 12.0);
+    let hov = feel.hov;
     let p = ui.painter().clone();
     if current {
         p.rect_filled(r, 12.0, color.gamma_multiply(0.16));
@@ -736,8 +858,12 @@ pub fn category_row(
             egui::Stroke::new(1.0, color.gamma_multiply(0.45)),
             egui::StrokeKind::Inside,
         );
-    } else if hov > 0.0 {
-        p.rect_filled(r, 12.0, Color32::from_white_alpha((10.0 * hov) as u8));
+    } else if hov > 0.0 || feel.down > 0.0 {
+        p.rect_filled(
+            r,
+            12.0,
+            Color32::from_white_alpha((10.0 * hov + 8.0 * feel.down) as u8),
+        );
     }
     let mut x = r.left() + 10.0;
     let mut check_changed = None;
@@ -751,33 +877,53 @@ pub fn category_row(
         if cb.changed() {
             check_changed = Some(v);
         }
-        x += 30.0;
+        x += 28.0;
     } else {
         p.circle_filled(pos2(x + 10.0, r.top() + 17.0), 5.0, color);
-        x += 30.0;
+        x += 28.0;
     }
-    let size_g = kit::galley(ui, size_text, font(size::BODY, Weight::SemiBold), t.text);
+    // Names are never cut in the middle (REVIEW-C C4): when the name and the size do not fit
+    // on line 1 together, the size moves to line 2 (after the bar) and the name gets the
+    // whole line; only a name longer than the whole line ends in an ellipsis.
+    let name_font = font(size::BODY, Weight::SemiBold);
+    let size_g = kit::galley(ui, size_text, name_font.clone(), t.text);
     let size_w = size_g.size().x;
-    p.galley(
-        pos2(
-            r.right() - 10.0 - size_w,
-            r.top() + 17.0 - size_g.size().y / 2.0,
-        ),
-        size_g,
-        t.text,
-    );
+    let full_name_w = kit::galley(ui, title, name_font.clone(), t.text).size().x;
     let title_w = r.right() - 18.0 - size_w - x;
-    let title_s = kit::truncate_middle(
-        ui.ctx(),
-        title,
-        &font(size::BODY, Weight::SemiBold),
-        title_w,
-    );
+    // In the narrow column (small windows) every row puts its size on line 2, so sizes line
+    // up in one place down the list instead of jumping between the two lines.
+    let narrow = r.width() < 250.0;
+    let size_on_line1 = !narrow && full_name_w <= title_w;
+    let small_size = if size_on_line1 {
+        None
+    } else {
+        Some(kit::galley(
+            ui,
+            size_text,
+            font(size::FOOTNOTE, Weight::SemiBold),
+            t.text,
+        ))
+    };
+    let title_s = if size_on_line1 {
+        title.to_string()
+    } else {
+        kit::truncate_end(ui.ctx(), title, &name_font, r.right() - 10.0 - x)
+    };
+    if size_on_line1 {
+        p.galley(
+            pos2(
+                r.right() - 10.0 - size_w,
+                r.top() + 17.0 - size_g.size().y / 2.0,
+            ),
+            size_g,
+            t.text,
+        );
+    }
     p.text(
         pos2(x, r.top() + 17.0),
         egui::Align2::LEFT_CENTER,
         title_s,
-        font(size::BODY, Weight::SemiBold),
+        name_font,
         if current {
             t.text
         } else {
@@ -796,11 +942,21 @@ pub fn category_row(
         count_g,
         t.text_faint,
     );
+    let mut bar_right = r.right() - 10.0;
+    if let Some(g) = small_size {
+        let w = g.size().x;
+        p.galley(
+            pos2(r.right() - 10.0 - w, r.top() + 35.0 - g.size().y / 2.0),
+            g,
+            t.text,
+        );
+        bar_right -= w + 8.0;
+    }
     let bar = Rect::from_min_max(
         pos2(x + count_w.max(56.0) + 10.0, r.top() + 32.5),
-        pos2(r.right() - 10.0, r.top() + 37.5),
+        pos2(bar_right, r.top() + 37.5),
     );
-    if share > 0.0 {
+    if share > 0.0 && bar.width() > 12.0 {
         kit::paint_bar(&p, bar, t, share, color);
     }
     CatResp {
@@ -957,41 +1113,46 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
         .unwrap_or(false);
     let name = item_name(f, it);
     let w = ui.available_width();
-    let (r, resp) = ui.allocate_exact_size(vec2(w, ROW_H), Sense::hover());
+    let locked = it.locked.is_some();
+    // The whole row is a click target that toggles it (its checkbox, Reveal and Ignore sit on
+    // top and keep their own clicks). Not a Tab stop: the checkbox is the row's one stop.
+    let (r, row) = ui.allocate_exact_size(
+        vec2(w, ROW_H),
+        if locked { Sense::hover() } else { Sense::CLICK },
+    );
+    let feel = kit::feel(ui, &row);
+    // Over the row or anything on it (checkbox, Reveal, Ignore).
+    let row_hovered = ui.rect_contains_pointer(r);
     let hov = kit::anim(
         ui.ctx(),
         egui::Id::new(("row-hov", f.as_str(), id)),
-        resp.contains_pointer(),
+        row_hovered,
         crate::theme::motion::HOVER,
     );
     let p = ui.painter().clone();
     let card = r.shrink2(vec2(2.0, 2.0));
     if selected_now {
-        p.rect_filled(card, 12.0, t.sec_a.gamma_multiply(0.07 + 0.04 * hov));
-    } else if hov > 0.0 {
-        p.rect_filled(card, 12.0, Color32::from_white_alpha((9.0 * hov) as u8));
+        p.rect_filled(
+            card,
+            12.0,
+            t.sec_a.gamma_multiply(0.07 + 0.04 * hov + 0.04 * feel.down),
+        );
+    } else if hov > 0.0 || feel.down > 0.0 {
+        p.rect_filled(
+            card,
+            12.0,
+            Color32::from_white_alpha((9.0 * hov + 8.0 * feel.down) as u8),
+        );
     }
-    let locked = it.locked.is_some();
     // Checkbox, named after the file.
     let cb_rect = Rect::from_center_size(pos2(r.left() + 20.0, r.center().y), vec2(22.0, 22.0));
     let mut on = selected_now;
-    let cb = kit::place(ui, cb_rect, |ui| {
-        if locked {
-            // Still a (disabled) checkbox for VoiceOver and tests; a padlock on screen.
-            ui.multiply_opacity(0.0);
-        }
-        ui.add_enabled_ui(!locked, |ui| kit::check(ui, &t, &mut on, &name))
-            .inner
-    });
-    if locked {
-        icons::paint(
-            &p,
-            Rect::from_center_size(cb_rect.center(), egui::Vec2::splat(isz::INLINE + 2.0)),
-            Icon::Lock,
-            t.text_faint,
-        );
+    let cb = kit::check_or_lock(ui, &t, cb_rect, &mut on, &name, locked);
+    let row_click = row.clicked() && !locked;
+    if row_click {
+        on = !selected_now;
     }
-    if cb.changed() {
+    if cb.changed() || row_click {
         app.act();
         let every_copy = on
             && keeps_a_copy(f)
@@ -1060,10 +1221,19 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
     );
     let shown = app.env.display(&it.path);
     let path_x = x0 + name_w + 12.0;
-    let path_w = (x0 + text_w - path_x).max(24.0);
+    // While the row is hovered its actions cover the end of line 1: the path is shortened
+    // again to end before them (a middle ellipsis, never a word cut by the buttons).
+    let actions_w = if keeps_a_copy(f) { 262.0 } else { 150.0 };
+    let actions_left = size_r.left() - 12.0 - actions_w;
+    let path_end = if row_hovered || hov > 0.0 {
+        (x0 + text_w).min(actions_left - 20.0)
+    } else {
+        x0 + text_w
+    };
+    let path_w = (path_end - path_x).max(24.0);
     let pf = font(size::FOOTNOTE, Weight::Regular);
     let path_s = kit::truncate_middle(ui.ctx(), &shown, &pf, path_w);
-    kit::text_at(
+    let path_resp = kit::text_at(
         ui,
         Rect::from_min_size(pos2(path_x, r.top() + 11.0), vec2(path_w, 19.0)),
         &path_s,
@@ -1071,8 +1241,8 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
         pf,
         t.text_faint,
         Align::Min,
-    )
-    .on_hover_text(&shown);
+    );
+    kit::row_tip(&path_resp, r, &shown);
     // The reason as a tag. A reason that repeats the row's name ("Trash of USB: 1 item" on
     // the row "Trash of USB") shows only the rest.
     let why_full = match &it.locked {
@@ -1104,8 +1274,46 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
     let tg = kit::galley(ui, &tag_s, tag_font.clone(), color);
     let tag_r = Rect::from_min_size(pos2(x0, r.top() + 31.0), tg.size() + vec2(16.0, 5.0));
     p.rect_filled(tag_r, tag_r.height() / 2.0, color.gamma_multiply(0.16));
-    kit::text_at(ui, tag_r, &tag_s, &why_full, tag_font, color, Align::Center)
-        .on_hover_text(&why_full);
+    let tag_resp = kit::text_at(ui, tag_r, &tag_s, &why_full, tag_font, color, Align::Center);
+    let tip = if locked {
+        why_full.clone()
+    } else {
+        format!("{why_full}\n{}", kit::risk_note(it.risk))
+    };
+    kit::row_tip(&tag_resp, r, &tip);
+    // In a set of copies, the copy that stays is marked "Kept" (REVIEW-U U11).
+    let kept = keeps_a_copy(f)
+        && !selected_now
+        && !locked
+        && it.group.as_ref().is_some_and(|g| {
+            plan.items
+                .iter()
+                .any(|o| o.id != id && o.group.as_ref() == Some(g) && o.selected)
+        });
+    let kept = kept
+        && app
+            .plan_state(f)
+            .plan
+            .as_ref()
+            .is_some_and(|p| !p.items[id].selected);
+    if kept {
+        let kf = font(size::FOOTNOTE, Weight::SemiBold);
+        let kg = kit::galley(ui, "Kept", kf.clone(), t.success);
+        let kr = Rect::from_min_size(
+            pos2(tag_r.right() + 6.0, tag_r.top()),
+            kg.size() + vec2(16.0, 5.0),
+        );
+        p.rect_filled(kr, kr.height() / 2.0, t.success.gamma_multiply(0.16));
+        kit::text_at(
+            ui,
+            kr,
+            "Kept",
+            "Kept: this copy stays",
+            kf,
+            t.success,
+            Align::Center,
+        );
+    }
     // Why a locked row cannot be ticked, after the tag when it fits whole (never cut: the
     // padlock and the tag's tooltip carry it otherwise).
     if let Some(l) = &it.locked {
@@ -1121,12 +1329,20 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
         }
     }
     // Row actions, shown on hover.
-    let actions_w = 150.0;
     let actions = Rect::from_min_max(
-        pos2(size_r.left() - 12.0 - actions_w, r.top()),
+        pos2(actions_left, r.top()),
         pos2(size_r.left() - 12.0, r.bottom()),
     );
-    let show = hov.max(if resp.contains_pointer() { 1.0 } else { 0.0 });
+    // Shown while the row is hovered, and while the keyboard is on the row (its checkbox
+    // or one of the actions), so a Tab never lands on an invisible button.
+    let actions_focus_id = egui::Id::new(("row-actions-focus", f.as_str(), id));
+    let actions_focused: bool = ui.data(|d| d.get_temp(actions_focus_id)).unwrap_or(false);
+    let keyboard_here = cb.has_focus() || actions_focused;
+    let show = hov.max(if row_hovered || keyboard_here {
+        1.0
+    } else {
+        0.0
+    });
     if show > 0.0 {
         // A soft solid under the buttons so the text beneath does not show through.
         let under = actions
@@ -1142,24 +1358,67 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
     kit::place_with(ui, actions, Layout::right_to_left(Align::Center), |ui| {
         ui.multiply_opacity(show);
         ui.spacing_mut().item_spacing.x = 4.0;
-        let ig = kit::ghost(ui, &t, "Ignore", None)
-            .on_hover_text("Never propose this again (Settings > Ignore list)");
-        if ig.clicked() {
-            app.act();
-            app.settings.ignore.push(it.path.clone());
-            app.save_settings();
-            if let Some(p) = app.plan_state(f).plan.as_mut() {
-                p.set_selected(id, false);
-                p.items[id].locked = Some("on your ignore list".into());
+        // Row actions fit the module (REVIEW-U U27): a whole Trash is neither ignored nor
+        // revealed here, and labels inside a file (Wi-Fi networks, permissions) cannot be
+        // shown in Finder.
+        let on_disk = std::fs::symlink_metadata(&it.path).is_ok();
+        let trash = f == FeatureId::TrashBins;
+        let ignored = app.settings.ignore.iter().any(|p| it.path.starts_with(p));
+        let mut focused = false;
+        if keeps_a_copy(f) && !locked && it.group.is_some() && !kept {
+            let r = kit::ghost(ui, &t, "Keep This One", None)
+                .on_hover_text("Keep this copy and select the others in its set");
+            focused |= r.has_focus();
+            if r.clicked() {
+                app.act();
+                let g = it.group.clone();
+                if let Some(p) = app.plan_state(f).plan.as_mut() {
+                    for i in 0..p.items.len() {
+                        if p.items[i].group == g {
+                            p.set_selected(i, i != id);
+                        }
+                    }
+                }
+            }
+        }
+        if !trash && ignored {
+            let r = kit::ghost(ui, &t, "Stop Ignoring", None)
+                .on_hover_text("Propose this again in scans");
+            focused |= r.has_focus();
+            if r.clicked() {
+                app.act();
+                app.settings.ignore.retain(|p| !it.path.starts_with(p));
+                app.save_settings();
+                if let Some(p) = app.plan_state(f).plan.as_mut() {
+                    p.items[id].locked = None;
+                }
+                app.tell(format!("{name} is no longer ignored."));
+            }
+        } else if !trash {
+            let ig = kit::ghost(ui, &t, "Ignore", None)
+                .on_hover_text("Never propose this again (Settings > Ignore list)");
+            focused |= ig.has_focus();
+            if ig.clicked() {
+                app.act();
+                app.settings.ignore.push(it.path.clone());
+                app.save_settings();
+                if let Some(p) = app.plan_state(f).plan.as_mut() {
+                    p.set_selected(id, false);
+                    p.items[id].locked = Some("on your ignore list".into());
+                }
+                app.tell(format!(
+                    "{name} is on the ignore list now. Stop Ignoring on its row puts it back."
+                ));
             }
         }
         // Only files and folders on disk can be shown in Finder (Wi-Fi networks and
         // permissions are listed under a label, not a file).
-        if std::fs::symlink_metadata(&it.path).is_ok()
-            && kit::ghost(ui, &t, "Reveal", Some(Icon::Reveal))
-                .on_hover_text("Show in Finder")
-                .clicked()
-        {
+        let reveal = (on_disk && !trash).then(|| {
+            kit::ghost(ui, &t, "Reveal", Some(Icon::Reveal)).on_hover_text("Show in Finder")
+        });
+        focused |= reveal.as_ref().is_some_and(|r| r.has_focus());
+        ui.data_mut(|d| d.insert_temp(actions_focus_id, focused));
+        if reveal.is_some_and(|r| r.clicked()) {
             app.act();
             let path = it.path.to_string_lossy().into_owned();
             match app.env.sys.run("/usr/bin/open", &["-R", &path]) {
@@ -1183,6 +1442,32 @@ pub fn item_name(f: FeatureId, it: &cleancraft_core::Item) -> String {
         .file_name()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default()
+}
+
+/// "You will be signed out of websites in Safari and Google Chrome." when the selection holds
+/// browser cookies (Privacy Traces).
+pub fn signed_out_note(plan: &Plan) -> Option<String> {
+    let mut browsers: Vec<String> = Vec::new();
+    for it in plan.selected() {
+        if !it.reason.to_lowercase().contains("cookie") {
+            continue;
+        }
+        let name = plan
+            .categories
+            .iter()
+            .find(|c| c.id == it.category)
+            .map(|c| c.title.clone())
+            .unwrap_or_default();
+        if !name.is_empty() && !browsers.contains(&name) {
+            browsers.push(name);
+        }
+    }
+    let list = match browsers.len() {
+        0 => return None,
+        1 => browsers[0].clone(),
+        n => format!("{} and {}", browsers[..n - 1].join(", "), browsers[n - 1]),
+    };
+    Some(format!("You will be signed out of websites in {list}."))
 }
 
 /// The confirmation line for items that need the administrator password, when there are any.
@@ -1225,8 +1510,8 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     };
     let mut close = false;
     let mut go = false;
-    let width = (ui.ctx().content_rect().width() - 120.0).clamp(420.0, 640.0);
-    let max_list = (ui.ctx().content_rect().height() - 330.0).clamp(120.0, 360.0);
+    let width = kit::dialog_width(ui.ctx());
+    let max_list = (ui.ctx().content_rect().height() - 350.0).clamp(120.0, 360.0);
     let dlg = kit::modal(egui::Id::new(("confirm", f.as_str())), &t).show(ui.ctx(), |ui| {
         ui.set_width(width);
         kit::dialog_head(
@@ -1246,6 +1531,11 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             kit::strip(ui, Icon::Warning, t.warning, &note);
             ui.add_space(space::S);
         }
+        // Said once, where the decision is made (REVIEW-U U20), not only in row tags.
+        if let Some(note) = signed_out_note(&plan) {
+            kit::strip(ui, Icon::Warning, t.warning, &note);
+            ui.add_space(space::S);
+        }
         // Only the visible rows are laid out: plans can hold thousands of items.
         let rows: Vec<&cleancraft_core::Item> = plan.selected().collect();
         kit::well(&t).show(ui, |ui| {
@@ -1253,7 +1543,7 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             // A height known from the first frame (the list shrinks to its rows up to
             // `max_list`), so the dialog opens at its final size and place.
             let list_h = (rows.len() as f32 * hit::CONFIRM_LINE).min(max_list);
-            egui::ScrollArea::vertical()
+            let out = egui::ScrollArea::vertical()
                 .id_salt("confirm-list")
                 .min_scrolled_height(list_h)
                 .max_height(list_h)
@@ -1271,22 +1561,18 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                         );
                     }
                 });
+            kit::list_more(ui, &t, &out, rows.len());
         });
         ui.add_space(space::L);
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let label = match method {
-                executor::Method::Trash => "Move to Trash",
-                executor::Method::Quarantine | executor::Method::AdminQuarantine => {
-                    "Move to Quarantine"
-                }
-            };
-            if kit::danger(ui, &t, label) {
-                go = true;
+        let label = match method {
+            executor::Method::Trash => "Move to Trash",
+            executor::Method::Quarantine | executor::Method::AdminQuarantine => {
+                "Move to Quarantine"
             }
-            if kit::secondary(ui, &t, "Cancel") {
-                close = true;
-            }
-        });
+        };
+        let (ok, cancel) = kit::dialog_actions(ui, &t, label, kit::Kind::Danger);
+        go |= ok;
+        close |= cancel;
     });
     if dlg.should_close() {
         close = true;
@@ -1300,44 +1586,122 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     }
 }
 
-/// The list of what did not move, with the reason for each.
+/// What the person can do about an item that did not move (REVIEW-U U9): the reason in
+/// plain words and the next step.
+pub fn skip_hint(why: &executor::SkipReason) -> Option<String> {
+    use executor::SkipReason as S;
+    Some(match why {
+        S::InUse => "Quit the app that uses it, then Try Again.".into(),
+        S::AppRunning(a) => format!("Quit {a}, then Try Again."),
+        S::PermissionDenied => "Turn on Full Disk Access for CleanCraft, then Try Again.".into(),
+        S::DiskFull => "Empty the Trash, then Try Again.".into(),
+        _ => return None,
+    })
+}
+
+/// What a Done screen's "Not moved" card asks for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SkipActions {
+    pub try_again: bool,
+}
+
+/// The list of what did not move, each with its next step; "Try Again" (when `retry`) and
+/// "Open Privacy Settings" when macOS refused access.
 pub fn skipped_card(
+    app: &mut CleanApp,
     ui: &mut Ui,
-    t: &crate::theme::Tokens,
-    env: &cleancraft_core::Env,
-    skipped: &[(std::path::PathBuf, impl std::fmt::Display)],
+    skipped: &[(std::path::PathBuf, executor::SkipReason)],
     max_h: f32,
-) {
+    retry: bool,
+) -> SkipActions {
+    let t = app.t;
+    let mut out = SkipActions::default();
     if skipped.is_empty() {
-        return;
+        return out;
     }
-    kit::card(t).show(ui, |ui| {
+    let denied = skipped
+        .iter()
+        .any(|(_, w)| matches!(w, executor::SkipReason::PermissionDenied));
+    let can_retry = retry
+        && skipped
+            .iter()
+            .any(|(_, w)| !matches!(w, executor::SkipReason::Missing));
+    kit::card(&t).show(ui, |ui| {
         ui.set_width(ui.available_width().min(720.0));
         ui.horizontal(|ui| {
             let (r, _) = ui.allocate_exact_size(egui::Vec2::splat(isz::INLINE), Sense::hover());
             icons::paint(ui.painter(), r, Icon::Warning, t.warning);
             ui.label(
-                RichText::new("Not moved")
-                    .font(font(size::H2, Weight::SemiBold))
-                    .color(t.text),
+                RichText::new(format!(
+                    "Not moved: {}",
+                    cleancraft_core::fsutil::items(skipped.len())
+                ))
+                .font(font(size::TITLE3, Weight::SemiBold))
+                .color(t.text),
             );
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if can_retry && kit::secondary(ui, &t, "Try Again") {
+                    out.try_again = true;
+                }
+                if denied && kit::secondary(ui, &t, "Open Privacy Settings") {
+                    app.act();
+                    if let Err(e) = cleancraft_core::permissions::open_fda_settings(&app.env) {
+                        app.warn(format!("Could not open System Settings: {e}"));
+                    }
+                }
+            });
         });
         ui.add_space(4.0);
         egui::ScrollArea::vertical()
             .max_height(max_h.max(60.0))
             .show(ui, |ui| {
                 for (p, why) in skipped {
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(env.display(p)).color(t.text));
-                        ui.label(RichText::new(why.to_string()).color(t.warning));
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 1.0;
+                        ui.label(
+                            RichText::new(app.env.display(p))
+                                .font(font(size::CALLOUT, Weight::Medium))
+                                .color(t.text),
+                        );
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(
+                                RichText::new(why.to_string())
+                                    .font(font(size::FOOTNOTE, Weight::Medium))
+                                    .color(t.warning),
+                            );
+                            if let Some(h) = skip_hint(why) {
+                                ui.label(
+                                    RichText::new(h)
+                                        .font(font(size::FOOTNOTE, Weight::Regular))
+                                        .color(t.text_dim),
+                                );
+                            }
+                        });
                     });
+                    ui.add_space(space::XS);
                 }
             });
     });
+    out
+}
+
+/// The note under a Done summary: where the space comes back, by where the items went.
+fn space_note(rep: &Report) -> Option<&'static str> {
+    let method = rep.moved.iter().find_map(|r| match &r.kind {
+        executor::ActionKind::Moved { method, .. } => Some(*method),
+        _ => None,
+    })?;
+    Some(match method {
+        executor::Method::Trash => "The space comes back when the Trash is emptied.",
+        executor::Method::Quarantine | executor::Method::AdminQuarantine => {
+            "The space comes back when the CleanCraft quarantine is emptied (Settings)."
+        }
+    })
 }
 
 /// The Done screen every cleanup shares: the check, how much moved and where, the summary
-/// line, the buttons (from the caller) and what did not move.
+/// line, the buttons (from the caller), "Empty Trash" when items went to the Trash, and what
+/// did not move.
 pub fn done_view(
     app: &mut CleanApp,
     ui: &mut Ui,
@@ -1346,9 +1710,24 @@ pub fn done_view(
     summary: &str,
     buttons: impl FnOnce(&mut CleanApp, &mut Ui),
 ) {
+    done_view_with(app, ui, feature, rep, summary, buttons, false);
+}
+
+/// [`done_view`] with "Try Again" on the "Not moved" card; returns what was asked.
+pub fn done_view_with(
+    app: &mut CleanApp,
+    ui: &mut Ui,
+    feature: FeatureId,
+    rep: &Report,
+    summary: &str,
+    buttons: impl FnOnce(&mut CleanApp, &mut Ui),
+    retry: bool,
+) -> SkipActions {
     let t = app.t;
     let started = kit::first_seen(ui, ("done", &rep.plan_id));
     let id = egui::Id::new(("done-block", &rep.plan_id));
+    let to_trash = space_note(rep) == Some("The space comes back when the Trash is emptied.");
+    let mut acts = SkipActions::default();
     kit::centered_block(ui, id, |ui| {
         let d = if ui.available_height() < 460.0 {
             150.0
@@ -1368,15 +1747,22 @@ pub fn done_view(
                 .font(font(size::BODY_L, Weight::Regular))
                 .color(t.text_dim),
         );
-        if !rep.moved.is_empty() {
-            kit::dim(ui, &t, cleancraft_core::features::SPACE_NOTE);
+        if let Some(note) = space_note(rep) {
+            kit::dim(ui, &t, note);
         }
         ui.add_space(space::XL);
-        kit::centered_row(ui, id.with("buttons"), |ui| buttons(app, ui));
+        // The page's own buttons end with its primary one, so Empty Trash goes first.
+        kit::centered_row(ui, id.with("buttons"), |ui| {
+            if to_trash {
+                super::extras_cleanup::empty_trash(app, ui, "Empty Trash...");
+            }
+            buttons(app, ui);
+        });
         ui.add_space(space::L);
         let h = ui.available_height() - 80.0;
-        skipped_card(ui, &t, &app.env, &rep.skipped, h);
+        acts = skipped_card(app, ui, &rep.skipped, h, retry);
     });
+    acts
 }
 
 fn done(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
@@ -1384,53 +1770,84 @@ fn done(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         return;
     };
     let rep = rep.clone();
-    let summary = format!(
-        "{} moved. {} skipped.",
-        cleancraft_core::fsutil::items(rep.moved.len()),
-        rep.skipped.len()
-    );
-    done_view(app, ui, f, &rep, &summary, |app, ui| {
-        let t = app.t;
-        if !rep.moved.is_empty()
-            && kit::pill(ui, &t, "Undo", kit::Kind::Secondary, Some(Icon::Undo)).clicked()
-        {
-            app.act();
-            let (n, errs) = executor::undo_plan(&app.env, &rep.plan_id);
-            if errs.is_empty() {
-                app.tell(format!("{} put back.", cleancraft_core::fsutil::items(n)));
-            } else {
-                app.warn(format!(
-                    "{} put back, {} could not be: {}",
-                    cleancraft_core::fsutil::items(n),
-                    errs.len(),
-                    errs[0].1
-                ));
+    let summary = kit::moved_summary(rep.moved.len(), rep.skipped.len());
+    let acts = done_view_with(
+        app,
+        ui,
+        f,
+        &rep,
+        &summary,
+        |app, ui| {
+            let t = app.t;
+            if !rep.moved.is_empty()
+                && kit::pill(ui, &t, "Undo", kit::Kind::Secondary, Some(Icon::Undo)).clicked()
+            {
+                app.act();
+                let (n, errs) = executor::undo_plan(&app.env, &rep.plan_id);
+                app.files_back(&CleanApp::moved_paths(&rep));
+                if errs.is_empty() {
+                    app.tell(format!("{} put back.", cleancraft_core::fsutil::items(n)));
+                } else {
+                    app.warn(format!(
+                        "{} put back, {} could not be: {}",
+                        cleancraft_core::fsutil::items(n),
+                        errs.len(),
+                        errs[0].1
+                    ));
+                }
+                start_scan(app, f);
             }
-            start_scan(app, f);
+            if kit::pill(
+                ui,
+                &t,
+                "Show History",
+                kit::Kind::Secondary,
+                Some(Icon::History),
+            )
+            .clicked()
+            {
+                app.act();
+                app.navigate("history");
+            }
+            if kit::primary(ui, &t, "Done") {
+                app.act();
+                // Back to the list when something is left in it (what did not move, what was
+                // not selected); the start screen when the list is empty.
+                let st = app.plan_state(f);
+                if st.plan.as_ref().is_some_and(|p| !p.items.is_empty()) {
+                    st.phase = Phase::Results;
+                } else {
+                    st.phase = Phase::Idle;
+                    st.plan = None;
+                }
+            }
+        },
+        true,
+    );
+    if acts.try_again {
+        // Only what did not move, with the same confirmation listing it.
+        app.act();
+        let again: Vec<std::path::PathBuf> = rep
+            .skipped
+            .iter()
+            .filter(|(_, w)| !matches!(w, executor::SkipReason::Missing))
+            .map(|(p, _)| p.clone())
+            .collect();
+        let st = app.plan_state(f);
+        if let Some(plan) = st.plan.as_mut() {
+            for i in 0..plan.items.len() {
+                let on = again.contains(&plan.items[i].path);
+                plan.set_selected(i, on);
+            }
+            if plan.selected_count() > 0 {
+                st.phase = Phase::Confirm;
+            }
         }
-        if kit::pill(
-            ui,
-            &t,
-            "Show History",
-            kit::Kind::Secondary,
-            Some(Icon::History),
-        )
-        .clicked()
-        {
-            app.act();
-            app.navigate("history");
-        }
-        if kit::primary(ui, &t, "Done") {
-            app.act();
-            let st = app.plan_state(f);
-            st.phase = Phase::Idle;
-            st.plan = None;
-        }
-    });
+    }
 }
 
 /// A note as a sentence: capital first letter, full stop at the end.
-fn sentence(s: &str) -> String {
+pub fn sentence(s: &str) -> String {
     let mut c = s.trim().chars();
     let mut out: String = match c.next() {
         Some(f) => f.to_uppercase().chain(c).collect(),

@@ -54,7 +54,8 @@ pub fn before_scan(_app: &mut CleanApp, _ui: &mut Ui, _f: FeatureId) {}
 
 pub fn results_toolbar(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     match f {
-        FeatureId::TrashBins => trash_toolbar(app, ui),
+        // Trash Bins' "Empty Trash in Finder" sits in the bottom bar (trash_bar).
+        FeatureId::TrashBins => {}
         FeatureId::Privacy => privacy_toolbar(app, ui),
         _ => {}
     }
@@ -67,7 +68,24 @@ fn plan_has(app: &mut CleanApp, f: FeatureId, cats: &[&str]) -> bool {
         .is_some_and(|p| p.items.iter().any(|i| cats.contains(&i.category.as_str())))
 }
 
-fn trash_toolbar(app: &mut CleanApp, ui: &mut Ui) {
+/// Trash Bins' bottom bar action.
+pub fn trash_bar(app: &mut CleanApp, ui: &mut Ui) {
+    let busy = load(ui).empty_job.is_some();
+    if busy
+        || plan_has(
+            app,
+            FeatureId::TrashBins,
+            &["startup_trash", "external_trash"],
+        )
+    {
+        empty_trash(app, ui, EMPTY_BUTTON);
+    }
+}
+
+/// "Empty Trash" with Finder's own emptying, after a confirmation that says it cannot be
+/// undone: on the Trash Bins toolbar and on every Done screen that moved items to the Trash
+/// (REVIEW-U U4: free the space without leaving CleanCraft).
+pub fn empty_trash(app: &mut CleanApp, ui: &mut Ui, label: &str) {
     let t = app.t;
     let mut st = load(ui);
     // A finished background empty: report, scan again.
@@ -90,15 +108,7 @@ fn trash_toolbar(app: &mut CleanApp, ui: &mut Ui) {
             }
         }
     }
-    if !plan_has(
-        app,
-        FeatureId::TrashBins,
-        &["startup_trash", "external_trash"],
-    ) {
-        store(ui, st);
-        return;
-    }
-    if kit::secondary_resp(ui, &t, EMPTY_BUTTON)
+    if kit::secondary_resp(ui, &t, label)
         .on_hover_text("Finder removes what is in the Trash for good")
         .clicked()
     {
@@ -119,14 +129,9 @@ fn trash_toolbar(app: &mut CleanApp, ui: &mut Ui) {
                 "Finder will remove everything in the Trash of every disk for good. This cannot be undone, and CleanCraft cannot put these items back. Mail's deleted messages are not affected.",
             );
             ui.add_space(16.0);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if kit::danger(ui, &t, EMPTY_CONFIRM) {
-                    go = true;
-                }
-                if kit::secondary(ui, &t, "Cancel") {
-                    cancel = true;
-                }
-            });
+            let (ok, no) = kit::dialog_actions(ui, &t, EMPTY_CONFIRM, kit::Kind::Danger);
+            go |= ok;
+            cancel |= no;
         });
         if dlg.should_close() {
             cancel = true;
@@ -236,14 +241,17 @@ fn privacy_toolbar(app: &mut CleanApp, ui: &mut Ui) {
             });
             ui.add_space(14.0);
             let n = list.iter().filter(|e| e.3).count();
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if n > 0 && kit::danger(ui, &t, RESET_CONFIRM) {
-                    go = true;
-                }
-                if kit::secondary(ui, &t, "Cancel") {
-                    cancel = true;
-                }
-            });
+            if n > 0 {
+                let (ok, no) = kit::dialog_actions(ui, &t, RESET_CONFIRM, kit::Kind::Danger);
+                go |= ok;
+                cancel |= no;
+            } else {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if kit::secondary(ui, &t, "Cancel") {
+                        cancel = true;
+                    }
+                });
+            }
         });
         if dlg.should_close() {
             cancel = true;

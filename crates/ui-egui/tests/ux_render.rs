@@ -22,7 +22,7 @@ use cleancraft_ui_egui::CleanApp;
 use cleancraft_ui_egui::jobs::Job;
 use cleancraft_ui_egui::pages::{plan_page, sweep};
 use egui::epaint::Shape;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 
 type H = egui_kittest::Harness<'static, CleanApp>;
 
@@ -715,4 +715,218 @@ fn pages_render() {
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------------------
+// The pointer (round 4: "the cursor does not change over buttons").
+// ---------------------------------------------------------------------------------------
+
+/// The pointer egui asks for after hovering `pos`.
+fn cursor_at(h: &mut H, pos: egui::Pos2) -> egui::CursorIcon {
+    h.hover_at(pos);
+    h.step();
+    h.step();
+    h.output().platform_output.cursor_icon
+}
+
+/// In every scene, every control a pointer can reach shows the pointing hand while hovered
+/// (buttons, sidebar entries, switcher segments, checkboxes, radios, switches, rows that open
+/// something, links, pop-ups, sliders); text fields show the I-beam; disabled controls keep
+/// the arrow; the title bar strip and the plain backdrop keep the arrow.
+#[test]
+fn every_control_shows_the_pointing_hand() {
+    use egui::CursorIcon;
+    use egui::accesskit::Role;
+    let (w, hgt) = (1280.0, 820.0);
+    let mut problems = Vec::new();
+    let mut checked = 0;
+    for s in scenes() {
+        let mac = (s.mac)();
+        let mut h = harness(&mac, w, hgt, 1.0);
+        (s.go)(&mut h);
+        // The title bar strip (drag area) and a label keep the arrow.
+        let c = cursor_at(&mut h, egui::pos2(w - 40.0, 8.0));
+        if c != CursorIcon::Default {
+            problems.push(format!("{}: title bar strip shows {c:?}", s.name));
+        }
+        let modal = h.ctx.memory(|m| m.top_modal_layer());
+        let modal_id = modal.map(|l| l.id.accesskit_id());
+        let mut targets = Vec::new();
+        for n in h.root().children_recursive() {
+            let a = n.accesskit_node();
+            if a.is_hidden() {
+                continue;
+            }
+            let role = a.role();
+            let kind = match role {
+                Role::Button
+                | Role::CheckBox
+                | Role::RadioButton
+                | Role::ComboBox
+                | Role::Link
+                | Role::Slider
+                | Role::Tab => "click",
+                Role::TextInput | Role::SearchInput | Role::MultilineTextInput => "text",
+                _ => continue,
+            };
+            if let Some(id) = modal_id {
+                let mut cur = Some(n);
+                let mut inside = false;
+                while let Some(c) = cur {
+                    if c.accesskit_node().locate().0 == id {
+                        inside = true;
+                        break;
+                    }
+                    cur = c.parent();
+                }
+                if !inside {
+                    continue;
+                }
+            }
+            let Some(b) = a.bounding_box() else { continue };
+            let r = egui::Rect::from_min_max(
+                egui::pos2(b.x0 as f32, b.y0 as f32),
+                egui::pos2(b.x1 as f32, b.y1 as f32),
+            );
+            // Only what is fully on screen (lists scroll; the rest is reached by scrolling).
+            if r.min.y < 0.0 || r.max.y > hgt || r.min.x < 0.0 || r.max.x > w || r.area() < 4.0 {
+                continue;
+            }
+            let label = a.label().unwrap_or_default();
+            targets.push((kind, a.is_disabled(), label, format!("{role:?}"), r));
+        }
+        // A control is a target only where it is painted: rows scrolled out of a list keep
+        // their accessibility node but are clipped away.
+        let painted = |r: egui::Rect, h: &H| {
+            let c = r.center();
+            // Some shape of the control itself (inside its rect) is drawn with a clip that
+            // keeps the point the test hovers.
+            // Its text when it has some (the most reliable part to tell it is on screen).
+            let own: Vec<_> = h
+                .output()
+                .shapes
+                .iter()
+                .filter(|cs| {
+                    let b = cs.shape.visual_bounding_rect();
+                    !matches!(cs.shape, Shape::Noop)
+                        && b.intersects(r)
+                        && r.expand(4.0).contains_rect(b)
+                })
+                .collect();
+            let texts: Vec<_> = own
+                .iter()
+                .filter(|cs| matches!(cs.shape, Shape::Text(_)))
+                .collect();
+            if texts.is_empty() {
+                own.iter().any(|cs| cs.clip_rect.contains(c))
+            } else {
+                texts.iter().all(|cs| cs.clip_rect.contains(c))
+            }
+        };
+        let targets: Vec<_> = targets.into_iter().filter(|t| painted(t.4, &h)).collect();
+        // A disabled control drawn on an enabled clickable row (a locked category's checkbox)
+        // shows what the row does.
+        let on_row = |r: egui::Rect| {
+            targets
+                .iter()
+                .any(|t| t.0 == "click" && !t.1 && t.4 != r && t.4.contains_rect(r))
+        };
+        let targets: Vec<_> = targets
+            .iter()
+            .filter(|t| !(t.1 && on_row(t.4)))
+            .cloned()
+            .collect();
+        for (kind, disabled, label, role, r) in targets {
+            // Away first, so the hover starts fresh (no tooltip left over).
+            h.remove_cursor();
+            h.step();
+            let c = cursor_at(&mut h, r.center());
+            checked += 1;
+            let want_ok = match (kind, disabled) {
+                (_, true) => c != CursorIcon::PointingHand,
+                ("text", false) => c == CursorIcon::Text,
+                _ => c == CursorIcon::PointingHand,
+            };
+            if !want_ok {
+                let clips: Vec<String> = h
+                    .output()
+                    .shapes
+                    .iter()
+                    .filter(|cs| {
+                        matches!(cs.shape, Shape::Text(_))
+                            && r.expand(4.0).contains_rect(cs.shape.visual_bounding_rect())
+                    })
+                    .map(|cs| format!("{:?}", cs.clip_rect))
+                    .collect();
+                problems.push(format!(
+                    "{}: {role} '{label}' (disabled {disabled}) at {r:?} shows {c:?} (text clips {clips:?})",
+                    s.name
+                ));
+            }
+        }
+    }
+    assert!(checked > 300, "only {checked} controls hovered");
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+/// Pages build their controls from kit (which sets the pointer, hover, press and focus ring):
+/// no raw egui buttons, checkboxes, radios, sliders, combo boxes or links on pages.
+#[test]
+fn pages_use_kit_controls_only() {
+    let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files: Vec<PathBuf> = std::fs::read_dir(src.join("pages"))
+        .expect("pages")
+        .map(|e| e.expect("entry").path())
+        .collect();
+    files.push(src.join("app.rs"));
+    const BANNED: &[&str] = &[
+        "ui.button(",
+        "ui.small_button(",
+        "ui.checkbox(",
+        "ui.radio(",
+        "ui.radio_value(",
+        "ui.selectable_label(",
+        "ui.selectable_value(",
+        "ui.toggle_value(",
+        "ui.link(",
+        "ui.hyperlink",
+        "ui.menu_button(",
+        "egui::Button",
+        "egui::Checkbox",
+        "egui::RadioButton",
+        "egui::ComboBox",
+        "egui::Slider",
+        "egui::DragValue",
+        "egui::Hyperlink",
+        "egui::Link",
+    ];
+    let mut bad = Vec::new();
+    for f in files {
+        let text = std::fs::read_to_string(&f).expect("read");
+        let lines: Vec<&str> = text.lines().collect();
+        for (i, line) in lines.iter().enumerate() {
+            let code = line.split("//").next().unwrap_or("");
+            for b in BANNED {
+                // A slider is built with egui::Slider and handed to kit::slider.
+                if *b == "egui::Slider" && line.contains("egui::Slider::new") {
+                    let prev = lines[i.saturating_sub(3)..i].join(" ");
+                    if prev.contains("kit::slider") {
+                        continue;
+                    }
+                }
+                if code.contains(b) {
+                    bad.push(format!(
+                        "{}:{}: {b}",
+                        f.file_name().unwrap().to_string_lossy(),
+                        i + 1
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        bad.is_empty(),
+        "raw egui controls on pages:\n{}",
+        bad.join("\n")
+    );
 }

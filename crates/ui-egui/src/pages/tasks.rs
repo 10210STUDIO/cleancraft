@@ -91,6 +91,7 @@ pub fn poll(app: &mut CleanApp) -> bool {
                 app.warn(msg);
             } else {
                 app.tell(msg);
+                crate::sound::play(&app.env, crate::sound::Cue::CleanDone);
             }
             start_loading(app);
             busy = true;
@@ -136,22 +137,55 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         return;
     }
     let n = app.tasks.selected.len();
-    ui.horizontal(|ui| {
-        if n > 0 {
-            if kit::primary(ui, &t, "Run Selected") {
+    // The actions stay in reach at the bottom, like every other page's.
+    kit::bottom_bar(ui, &t, egui::Id::new("tasks-bottom"), |ui| {
+        ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = 1.0;
+            ui.add_space(2.0);
+            ui.label(
+                RichText::new(match n {
+                    0 => "Nothing selected".to_string(),
+                    1 => "1 task selected".to_string(),
+                    n => format!("{n} tasks selected"),
+                })
+                .font(font(size::BODY, Weight::SemiBold))
+                .color(if n > 0 { t.text } else { t.text_dim }),
+            );
+            kit::dim(
+                ui,
+                &t,
+                if n > 0 {
+                    "You see the exact commands before anything runs."
+                } else {
+                    "Tick the tasks you want to run."
+                },
+            );
+        });
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let run = ui
+                .add_enabled_ui(n > 0, |ui| {
+                    kit::pill(
+                        ui,
+                        &t,
+                        "Run Selected",
+                        if n > 0 {
+                            kit::Kind::Primary
+                        } else {
+                            kit::Kind::Secondary
+                        },
+                        None,
+                    )
+                })
+                .inner
+                .on_disabled_hover_text("Tick a task first.");
+            if run.clicked() && n > 0 {
                 app.act();
                 open_confirm(app);
             }
-            ui.label(
-                RichText::new(format!("{n} selected"))
-                    .font(font(size::BODY, Weight::Medium))
-                    .color(t.text_dim),
-            );
-        } else {
-            kit::dim(ui, &t, "Tick the tasks you want to run.");
-        }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if kit::secondary(ui, &t, "Check Again") {
+            if kit::pill(ui, &t, "Scan Again", kit::Kind::Secondary, None)
+                .on_hover_text("Check again which tasks can run on this Mac")
+                .clicked()
+            {
                 app.act();
                 start_loading(app);
             }
@@ -176,152 +210,209 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
 fn task_card(app: &mut CleanApp, ui: &mut Ui, info: &tasks::TaskInfo) {
     let t = app.t;
     let ready = app.tasks.ready.get(info.id).cloned();
-    kit::card(&t).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.horizontal(|ui| {
-            let can = matches!(ready, Some(Ok(_)));
-            let mut on = app.tasks.selected.contains(info.id);
-            let cb = ui
-                .add_enabled_ui(can, |ui| {
-                    kit::check_text_font(
-                        ui,
-                        &t,
-                        &mut on,
-                        info.title,
-                        font(size::TITLE3, Weight::SemiBold),
-                        true,
-                    )
-                })
-                .inner;
-            if cb.changed() {
-                app.act();
-                if on {
-                    app.tasks.selected.insert(info.id.to_string());
-                } else {
-                    app.tasks.selected.remove(info.id);
+    kit::card(&t)
+        .inner_margin(egui::Margin::symmetric(16, 12))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.spacing_mut().item_spacing.y = 4.0;
+            // Line 1: the checkbox with the title, the tags, and when it last ran.
+            ui.horizontal(|ui| {
+                let can = matches!(ready, Some(Ok(_)));
+                let mut on = app.tasks.selected.contains(info.id);
+                let cb = ui
+                    .add_enabled_ui(can, |ui| {
+                        kit::check_text_font(
+                            ui,
+                            &t,
+                            &mut on,
+                            info.title,
+                            font(size::BODY, Weight::SemiBold),
+                            true,
+                        )
+                    })
+                    .inner;
+                if cb.changed() {
+                    app.act();
+                    if on {
+                        app.tasks.selected.insert(info.id.to_string());
+                    } else {
+                        app.tasks.selected.remove(info.id);
+                    }
                 }
-            }
-            if info.admin {
-                kit::tag(ui, "Administrator password", t.warning);
-            }
-            kit::tag(
-                ui,
-                &format!("{} risk", info.risk.label()),
-                kit::risk_color(&t, info.risk),
-            );
-        });
-        ui.horizontal(|ui| {
-            ui.add_space(28.0);
-            ui.vertical(|ui| {
-                // Readable line length: about 80 characters.
-                ui.set_max_width(
-                    ui.available_width()
-                        .min(crate::theme::space::MEASURE + 80.0),
+                if info.admin {
+                    kit::tag(ui, "Administrator password", t.warning);
+                }
+                kit::tag(
+                    ui,
+                    &format!("{} risk", info.risk.label()),
+                    kit::risk_color(&t, info.risk),
                 );
-                ui.spacing_mut().item_spacing.y = 6.0;
-                ui.label(
-                    RichText::new(info.description)
-                        .font(font(size::BODY, Weight::Regular))
-                        .color(t.text_dim),
+                ui.with_layout(
+                    egui::Layout::right_to_left(egui::Align::Center),
+                    |ui| match app.tasks.last.get(info.id) {
+                        Some((ts, ok)) => kit::dim(
+                            ui,
+                            &t,
+                            &format!(
+                                "Last run {} ({})",
+                                tasks::local_time(*ts),
+                                if *ok { "done" } else { "failed" }
+                            ),
+                        ),
+                        None => kit::dim(ui, &t, "Never run by CleanCraft"),
+                    },
                 );
-                let command = match &ready {
-                    Some(Ok(p)) => p.commands().join("\n"),
-                    _ => info.command.to_string(),
-                };
+            });
+            let command = match &ready {
+                Some(Ok(p)) => p.commands().join("\n"),
+                _ => info.command.to_string(),
+            };
+            let wide = ui.available_width() >= 720.0;
+            let describe = |ui: &mut Ui| {
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(info.description)
+                            .font(font(size::CALLOUT, Weight::Regular))
+                            .color(t.text_dim),
+                    )
+                    .wrap(),
+                );
+            };
+            let command_well = |ui: &mut Ui| {
                 kit::well(&t)
-                    .inner_margin(egui::Margin::symmetric(12, 8))
+                    .inner_margin(egui::Margin::symmetric(10, 6))
                     .show(ui, |ui| {
-                        // An eyebrow, then the command in Inter Medium: the same type as the
-                        // rest of the app instead of egui's fallback monospace.
-                        kit::eyebrow(ui, &t, "Command");
-                        ui.label(
-                            RichText::new(&command)
-                                .font(font(size::FOOTNOTE, Weight::Medium))
-                                .color(t.text),
+                        ui.set_width(ui.available_width());
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(&command)
+                                    .font(font(size::FOOTNOTE, Weight::Medium))
+                                    .color(t.text),
+                            )
+                            .wrap(),
                         );
                     });
-                if let Some(Err(why)) = &ready {
-                    ui.label(RichText::new(why).color(t.warning));
-                }
-                match app.tasks.last.get(info.id) {
-                    Some((ts, ok)) => kit::dim(
-                        ui,
-                        &t,
-                        &format!(
-                            "Last run {} ({})",
-                            tasks::local_time(*ts),
-                            if *ok { "done" } else { "failed" }
-                        ),
-                    ),
-                    None => kit::dim(ui, &t, "Never run by CleanCraft"),
-                }
-                // Same rule as Quick Sweep's tune-up count.
-                if let Some(why) = tasks::suggestion(
-                    info.id,
-                    &app.tasks.last,
-                    matches!(ready, Some(Ok(_))),
-                    chrono::Utc::now().timestamp(),
-                ) {
-                    ui.label(
-                        RichText::new(why)
-                            .font(font(size::FOOTNOTE, Weight::Medium))
-                            .color(t.sec_a),
+            };
+            // Line 2: what it does, and the exact command beside it when there is room.
+            ui.horizontal_top(|ui| {
+                ui.add_space(28.0);
+                let w = ui.available_width();
+                if wide {
+                    let left = (w * 0.55).min(crate::theme::space::MEASURE);
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(left, 0.0),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            ui.set_width(left);
+                            describe(ui);
+                        },
                     );
-                }
-                if let Some(r) = app.tasks.results.get(info.id).cloned() {
-                    let color = match r.outcome {
-                        Outcome::Done => t.success,
-                        Outcome::Failed => t.danger,
-                        Outcome::Cancelled => t.warning,
-                    };
-                    ui.label(
-                        RichText::new(&r.message)
-                            .font(font(size::BODY, Weight::SemiBold))
-                            .color(color),
+                    ui.add_space(crate::theme::space::M);
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(ui.available_width(), 0.0),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| command_well(ui),
                     );
-                    if let (Some(b), Some(a)) = (r.free_before, r.free_after) {
-                        ui.label(format!(
-                            "Free space before {}, after {}",
-                            human_size(b),
-                            human_size(a)
-                        ));
-                    }
-                    if let (Some(b), Some(a)) = (r.file_before, r.file_after) {
-                        ui.label(format!(
-                            "Mail index before {}, after {}",
-                            human_size(b),
-                            human_size(a)
-                        ));
-                    }
-                    if !r.output.is_empty() {
-                        let open = app.tasks.show_log.contains(info.id);
-                        let label = if open {
-                            format!("Hide log of {}", info.title)
-                        } else {
-                            format!("Show log of {}", info.title)
-                        };
-                        if kit::ghost(ui, &t, &label, None).clicked() {
-                            app.act();
-                            if open {
-                                app.tasks.show_log.remove(info.id);
-                            } else {
-                                app.tasks.show_log.insert(info.id.to_string());
-                            }
-                        }
-                        if open {
-                            kit::well(&t).show(ui, |ui| {
-                                ui.label(
-                                    RichText::new(&r.output)
-                                        .monospace()
-                                        .size(crate::theme::size::FOOTNOTE),
-                                );
-                            });
-                        }
-                    }
+                } else {
+                    ui.vertical(|ui| {
+                        describe(ui);
+                        command_well(ui);
+                    });
                 }
             });
+            ui.horizontal(|ui| {
+                ui.add_space(28.0);
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 4.0;
+                    if let Some(Err(why)) = &ready {
+                        ui.label(
+                            RichText::new(why)
+                                .font(font(size::FOOTNOTE, Weight::Medium))
+                                .color(t.warning),
+                        );
+                    }
+                    // Same rule as Quick Sweep's tune-up count.
+                    if let Some(why) = tasks::suggestion(
+                        info.id,
+                        &app.tasks.last,
+                        matches!(ready, Some(Ok(_))),
+                        chrono::Utc::now().timestamp(),
+                    ) {
+                        ui.label(
+                            RichText::new(why)
+                                .font(font(size::FOOTNOTE, Weight::Medium))
+                                .color(t.sec_a),
+                        );
+                    }
+                    if let Some(r) = app.tasks.results.get(info.id).cloned() {
+                        task_result(app, ui, info, &r);
+                    }
+                });
+            });
         });
-    });
+}
+
+/// The result of the last run on this screen: the message, before and after, the log.
+fn task_result(app: &mut CleanApp, ui: &mut Ui, info: &tasks::TaskInfo, r: &RunResult) {
+    let t = app.t;
+    let color = match r.outcome {
+        Outcome::Done => t.success,
+        Outcome::Failed => t.danger,
+        Outcome::Cancelled => t.warning,
+    };
+    ui.label(
+        RichText::new(&r.message)
+            .font(font(size::CALLOUT, Weight::SemiBold))
+            .color(color),
+    );
+    if let (Some(b), Some(a)) = (r.free_before, r.free_after) {
+        kit::dim(
+            ui,
+            &t,
+            &format!(
+                "Free space before {}, after {}",
+                human_size(b),
+                human_size(a)
+            ),
+        );
+    }
+    if let (Some(b), Some(a)) = (r.file_before, r.file_after) {
+        kit::dim(
+            ui,
+            &t,
+            &format!(
+                "Mail index before {}, after {}",
+                human_size(b),
+                human_size(a)
+            ),
+        );
+    }
+    if !r.output.is_empty() {
+        let open = app.tasks.show_log.contains(info.id);
+        let label = if open {
+            format!("Hide log of {}", info.title)
+        } else {
+            format!("Show log of {}", info.title)
+        };
+        if kit::ghost(ui, &t, &label, None).clicked() {
+            app.act();
+            if open {
+                app.tasks.show_log.remove(info.id);
+            } else {
+                app.tasks.show_log.insert(info.id.to_string());
+            }
+        }
+        if open {
+            kit::well(&t).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(
+                    RichText::new(&r.output)
+                        .font(font(size::FOOTNOTE, Weight::Medium))
+                        .color(t.text_dim),
+                );
+            });
+        }
+    }
 }
 
 fn open_confirm(app: &mut CleanApp) {
@@ -355,7 +446,10 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
             &t,
             crate::icons::Icon::Tasks,
             t.sec_a,
-            &format!("Run {} tasks?", ok.len()),
+            &match ok.len() {
+                1 => "Run 1 task?".to_string(),
+                n => format!("Run {n} tasks?"),
+            },
             "These exact commands will run, in this order. They cannot be undone.",
         );
         ui.add_space(12.0);
@@ -391,14 +485,15 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
                 }
             });
         ui.add_space(14.0);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if !ok.is_empty() && kit::primary(ui, &t, "Run") {
-                go = true;
-            }
-            if kit::secondary(ui, &t, "Cancel") {
-                close = true;
-            }
-        });
+        if ok.is_empty() {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                close = kit::secondary(ui, &t, "Cancel");
+            });
+        } else {
+            let (g, c) = kit::dialog_actions(ui, &t, "Run", kit::Kind::Primary);
+            go = g;
+            close = c;
+        }
     });
     if dlg.should_close() {
         close = true;

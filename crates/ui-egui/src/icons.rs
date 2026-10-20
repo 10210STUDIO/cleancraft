@@ -721,6 +721,35 @@ pub fn gradient_tile(p: &Painter, r: Rect, rounding: f32, a: Color32, b: Color32
     feathered_fan(p, c, lerp(a, b, 0.5), &pts);
 }
 
+/// A highlight that follows a rounded shape's outline: `top` at its top edge, fading to
+/// nothing at its middle (the sheen on pills; no inset rectangle, so no hard side edges).
+pub fn sheen_tile(p: &Painter, r: Rect, rounding: f32, top: Color32) {
+    let rad = rounding.min(r.width() / 2.0).min(r.height() / 2.0);
+    let mut outline = Vec::new();
+    let corners = [
+        (r.right_bottom() - vec2(rad, rad), 0.0f32),
+        (r.left_bottom() + vec2(rad, -rad), 90.0),
+        (r.left_top() + vec2(rad, rad), 180.0),
+        (r.right_top() + vec2(-rad, rad), 270.0),
+    ];
+    for (cc, start) in corners {
+        for i in 0..=10 {
+            let a = (start + 90.0 * i as f32 / 10.0).to_radians();
+            outline.push(cc + vec2(a.cos(), a.sin()) * rad);
+        }
+    }
+    outline.dedup_by(|x, y| (*x - *y).length() < 0.01);
+    if outline.len() > 1 && (outline[0] - outline[outline.len() - 1]).length() < 0.01 {
+        outline.pop();
+    }
+    let k = |q: Pos2| (1.0 - (q.y - r.top()) / (r.height() * 0.5)).clamp(0.0, 1.0);
+    let pts: Vec<(Pos2, Color32)> = outline
+        .iter()
+        .map(|q| (*q, top.gamma_multiply(k(*q))))
+        .collect();
+    feathered_fan(p, r.center(), Color32::TRANSPARENT, &pts);
+}
+
 /// Linear mix of two colours (premultiplied space).
 pub fn lerp(a: Color32, b: Color32, t: f32) -> Color32 {
     let t = t.clamp(0.0, 1.0);

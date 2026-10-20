@@ -124,13 +124,14 @@ fn parts() -> &'static Parts {
     static P: OnceLock<Parts> = OnceLock::new();
     P.get_or_init(|| {
         let puck = |r: f32, h: f32, b: f32, seg: usize| facing(Mesh3::puck(r, h, b, seg));
+        // A chunky bolt: the thin one weighed a third of its neighbours (REVIEW-C C24).
         let bolt = ccw([
-            [0.3, 1.0],
-            [-0.7, -0.1],
-            [-0.08, -0.1],
-            [-0.3, -1.0],
-            [0.72, 0.16],
-            [0.1, 0.16],
+            [0.0, 0.9],
+            [-0.86, -0.2],
+            [-0.18, -0.2],
+            [-0.18, -0.9],
+            [0.86, 0.25],
+            [0.18, 0.25],
         ]
         .to_vec());
         let folder = ccw(vec![
@@ -160,7 +161,7 @@ fn parts() -> &'static Parts {
             bubble: Mesh3::icosphere(3),
             shield: Mesh3::extrude(&shield_outline(1.0), 0.32, 0.12, 3),
             check: Mesh3::extrude(&check, 0.12, 0.045, 2),
-            bolt: Mesh3::extrude(&bolt, 0.3, 0.09, 3),
+            bolt: Mesh3::extrude(&bolt, 0.42, 0.09, 3),
             tile: retint(Mesh3::extrude(&ccw(squircle(0.9, 4.5, 72)), 0.26, 0.09, 3)),
             cell: Mesh3::rounded_box(v3(0.17, 0.17, 0.05), 0.05, 3),
             folder_back: Mesh3::extrude(&folder, 0.16, 0.06, 2),
@@ -212,7 +213,8 @@ fn scene(icon: SectionIcon) -> Scene<'static> {
             ] {
                 sc.add(
                     &p.bubble,
-                    Xf::scale(r).at(v3(x, y, z)).then(root),
+                    // Shifted so the group sits centred in its square (REVIEW-C C24).
+                    Xf::scale(r).at(v3(x - 0.12, y - 0.12, z)).then(root),
                     Material {
                         spec: 1.2,
                         shine: 70.0,
@@ -227,14 +229,26 @@ fn scene(icon: SectionIcon) -> Scene<'static> {
             sc.add(&p.check, Xf::ID.at(v3(0.0, 0.0, 0.22)).then(root), ink);
         }
         SectionIcon::Speed => {
-            sc.add(&p.bolt, Xf::ID.rot_z(-0.1).then(root), body);
+            // The bolt is thin: larger, so it weighs like its neighbours (REVIEW-C C24).
+            sc.add(
+                &p.bolt,
+                Xf::scale(1.24)
+                    .rot_z(-0.1)
+                    .at(v3(-0.06, -0.1, 0.0))
+                    .then(root),
+                body,
+            );
         }
         SectionIcon::Apps => {
-            sc.add(&p.tile, root, body);
+            // A full tile reads heavier than the outlines around it: slightly smaller.
+            let k = 0.9;
+            sc.add(&p.tile, Xf::scale(k).then(root), body);
             for (x, y) in [(-1.0, 1.0), (1.0, 1.0), (-1.0, -1.0), (1.0, -1.0)] {
                 sc.add(
                     &p.cell,
-                    Xf::ID.at(v3(0.26 * x, 0.26 * y, 0.17)).then(root),
+                    Xf::scale(k)
+                        .at(v3(0.26 * k * x, 0.26 * k * y, 0.17))
+                        .then(root),
                     ink,
                 );
                 // The glyph sits on the tile's face: always drawn over it.
@@ -283,10 +297,10 @@ fn scene(icon: SectionIcon) -> Scene<'static> {
             sc.add(&p.pin, Xf::ID.at(v3(0.0, 0.0, 0.18)).then(root), body);
         }
         SectionIcon::Settings => {
-            sc.add(&p.gear, Xf::ID.rot_z(0.12).then(root), body);
+            sc.add(&p.gear, Xf::scale(1.12).rot_z(0.12).then(root), body);
             sc.add(
                 &p.hub,
-                Xf::ID.at(v3(0.0, 0.0, 0.12)).then(root),
+                Xf::scale(1.12).at(v3(0.0, 0.0, 0.12)).then(root),
                 Material::metal(WHITE, mix(WHITE, a, 0.4)),
             );
         }

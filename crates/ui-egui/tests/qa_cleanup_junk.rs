@@ -129,7 +129,7 @@ fn numbers_match_disk_and_default_clean_moves_selected_only() {
         &h,
         &format!("{} moved to the Trash", human_size(sel_size))
     ));
-    assert!(has(&h, &format!("{} items moved. 0 skipped.", sel.len())));
+    assert!(has(&h, &format!("{} items moved.", sel.len())));
     // History lists them, Undo puts everything back.
     click(&mut h, "Undo");
     for (path, _) in &sel {

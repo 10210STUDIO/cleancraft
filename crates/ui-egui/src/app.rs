@@ -96,6 +96,17 @@ pub struct CleanApp {
     /// The tool each sidebar section showed last (by index in [`GROUPS`]), so a section
     /// opens where the person left it.
     pub section_tool: BTreeMap<usize, FeatureId>,
+    /// Grows by one each time files leave their place or come back (a cleanup, an uninstall,
+    /// a move from Disk Map, an Undo). Pages that keep their own lists compare it with the
+    /// value they last saw and reload or drop what moved.
+    pub disk_epoch: u64,
+    /// The original paths the last cleanup moved (empty after an Undo).
+    pub last_moved: Vec<std::path::PathBuf>,
+    /// CleanCraft's action log as last seen: moves and Undos from any page (App Remover,
+    /// Disk Map, History, Startup) reach the plan pages and Quick Sweep through it.
+    journal: pages::history::JournalWatch,
+    /// "Not Now" on the Full Disk Access banner (for this session).
+    pub fda_dismissed: bool,
 }
 
 /// Sidebar entry height.
@@ -128,6 +139,10 @@ impl CleanApp {
             shown_page: Page::Feature(FeatureId::SmartCare),
             page_since: f64::NEG_INFINITY,
             section_tool: BTreeMap::new(),
+            disk_epoch: 0,
+            last_moved: Vec::new(),
+            journal: Default::default(),
+            fda_dismissed: false,
         }
     }
 
@@ -157,6 +172,8 @@ impl CleanApp {
 
     /// Go to a page by name: a feature id ("system_junk"), "history" or "settings".
     pub fn navigate(&mut self, name: &str) {
+        // A notice belongs to the page it was about (REVIEW-U U14).
+        self.notice = None;
         self.page = match name {
             "history" => Page::History,
             "settings" => Page::Settings,
@@ -172,6 +189,120 @@ impl CleanApp {
 
     pub fn plan_state(&mut self, f: FeatureId) -> &mut PlanState {
         self.plans.entry(f).or_default()
+    }
+
+    /// Files left their place (moved to the Trash or quarantine): every list that still shows
+    /// them drops them at once, on every page. Plan pages and Quick Sweep's tiles lose the
+    /// moved items (and anything inside them); an item that contained a moved file is
+    /// measured again; a duplicate set left with one copy is no longer a set. Pages with their
+    /// own lists (App Remover, Disk Map, History) follow [`CleanApp::disk_epoch`].
+    pub fn files_moved(&mut self, moved: &[std::path::PathBuf]) {
+        if moved.is_empty() {
+            return;
+        }
+        for st in self.plans.values_mut() {
+            if st.is_busy() {
+                continue;
+            }
+            if let Some(plan) = st.plan.as_mut() {
+                pages::plan_page::drop_paths(plan, moved);
+            }
+        }
+        if let Some(res) = self.sweep.result.as_mut() {
+            for tile in &mut res.tiles {
+                if let cleancraft_core::sweep::TileData::Plan(plan) = &mut tile.data {
+                    pages::plan_page::drop_paths(plan, moved);
+                }
+            }
+        }
+        self.disk_epoch += 1;
+        self.last_moved = moved.to_vec();
+    }
+
+    /// Apply what the action log says changed since the last look: items moved away by any
+    /// page leave every list; items put back make the lists scan again.
+    fn follow_journal(&mut self) {
+        let env = self.env.clone();
+        let Some(changed) = self.journal.changes(&env) else {
+            if !self.journal_primed() {
+                self.journal.prime(&env);
+            }
+            return;
+        };
+        let moved = pages::history::moved_paths(&changed);
+        let gone: Vec<std::path::PathBuf> =
+            moved.iter().filter(|m| !m.2).map(|m| m.0.clone()).collect();
+        let back: Vec<std::path::PathBuf> =
+            moved.iter().filter(|m| m.2).map(|m| m.0.clone()).collect();
+        if !gone.is_empty() {
+            self.files_moved(&gone);
+        }
+        if !back.is_empty() {
+            self.files_back(&back);
+        }
+    }
+
+    fn journal_primed(&self) -> bool {
+        self.journal.is_primed()
+    }
+
+    /// Standard Mac shortcuts (REVIEW-U U10): Cmd+, opens Settings, Cmd+1 to Cmd+7 the
+    /// sidebar sections. (Cmd+F is the page's own: it focuses its search field.) None while
+    /// a dialog is open.
+    fn shortcuts(&mut self, ctx: &egui::Context) {
+        if ctx.memory(|m| m.top_modal_layer()).is_some() {
+            return;
+        }
+        let cmd = egui::Modifiers::COMMAND;
+        if ctx.input_mut(|i| i.consume_key(cmd, egui::Key::Comma)) {
+            self.act();
+            self.navigate("settings");
+        }
+        const KEYS: [egui::Key; 7] = [
+            egui::Key::Num1,
+            egui::Key::Num2,
+            egui::Key::Num3,
+            egui::Key::Num4,
+            egui::Key::Num5,
+            egui::Key::Num6,
+            egui::Key::Num7,
+        ];
+        for (i, k) in KEYS.iter().enumerate() {
+            if i < GROUPS.len() && ctx.input_mut(|inp| inp.consume_key(cmd, *k)) {
+                self.act();
+                let f = self.section_tool.get(&i).copied().unwrap_or(GROUPS[i].1[0]);
+                self.page = Page::Feature(f);
+            }
+        }
+    }
+
+    /// The original paths a cleanup report moved.
+    pub fn moved_paths(rep: &cleancraft_core::executor::Report) -> Vec<std::path::PathBuf> {
+        rep.moved
+            .iter()
+            .filter_map(|r| match &r.kind {
+                cleancraft_core::executor::ActionKind::Moved { original, .. } => {
+                    Some(original.clone())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Files came back (an Undo): lists made before are out of date. Plan pages with results
+    /// and Quick Sweep's results scan again the next time they are shown.
+    pub fn files_back(&mut self, back: &[std::path::PathBuf]) {
+        let _ = back;
+        for st in self.plans.values_mut() {
+            if st.plan.is_some() && !st.is_busy() {
+                st.stale = true;
+            }
+        }
+        if self.sweep.result.is_some() {
+            self.sweep.stale = true;
+        }
+        self.disk_epoch += 1;
+        self.last_moved.clear();
     }
 
     pub fn save_settings(&mut self) {
@@ -208,6 +339,7 @@ impl CleanApp {
         busy |= pages::tasks::poll(self);
         busy |= pages::disk_map::poll(self);
         busy |= pages::monitor::poll(self);
+        self.follow_journal();
         if busy {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
@@ -222,8 +354,14 @@ impl CleanApp {
     }
 
     pub fn ui(&mut self, ui: &mut Ui) {
+        self.shortcuts(ui.ctx());
+        // A switch or checkbox toggled last frame: its click sound (when turned on).
+        if kit::take_tap(ui.ctx()) {
+            crate::sound::play(&self.env, crate::sound::Cue::Tap);
+        }
         self.t = self.t.for_section(self.section());
         let t = self.t;
+        kit::set_tokens(ui.ctx(), &t);
         let full = ui.max_rect();
         ui.painter().rect_filled(full, 0.0, t.bg);
         // Inter is registered in logic() but only usable from the next pass.
@@ -347,6 +485,7 @@ impl CleanApp {
                     if self.nav_row(ui, group_icon(i), name, current == Some(i)) {
                         self.act();
                         let f = self.section_tool.get(&i).copied().unwrap_or(feats[0]);
+                        self.notice = None;
                         self.page = Page::Feature(f);
                     }
                 }
@@ -388,7 +527,8 @@ impl CleanApp {
         resp.widget_info(|| {
             egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, label)
         });
-        let hov = kit::anim(ui.ctx(), resp.id.with("hov"), resp.hovered(), motion::HOVER);
+        let feel = kit::feel_ring(ui, &t, &resp, r, f32::from(theme::radius::M));
+        let hov = feel.hov;
         let on = kit::anim(ui.ctx(), resp.id.with("on"), active, motion::PAGE);
         let p = ui.painter();
         let round = CornerRadius::same(theme::radius::M);
@@ -409,8 +549,12 @@ impl CleanApp {
                 egui::StrokeKind::Inside,
             );
         }
-        if hov > 0.0 && !active {
-            p.rect_filled(r, round, Color32::from_white_alpha((9.0 * hov) as u8));
+        if (hov > 0.0 || feel.down > 0.0) && !active {
+            p.rect_filled(
+                r,
+                round,
+                Color32::from_white_alpha((9.0 * hov + 8.0 * feel.down) as u8),
+            );
         }
         let tile = egui::Rect::from_center_size(
             r.left_center() + vec2(8.0 + 14.0, 0.0),
@@ -433,9 +577,25 @@ impl CleanApp {
         resp.clicked()
     }
 
+    /// Pages whose results depend on Full Disk Access (Mail, Safari and Trash data).
+    fn needs_fda(&self) -> bool {
+        matches!(
+            self.page,
+            Page::Feature(
+                FeatureId::SmartCare
+                    | FeatureId::SystemJunk
+                    | FeatureId::MailAttachments
+                    | FeatureId::TrashBins
+                    | FeatureId::Privacy
+                    | FeatureId::Malware
+            )
+        )
+    }
+
     fn banners(&mut self, ui: &mut Ui) {
         let t = self.t;
-        if self.fda == Access::Missing {
+        // Only where it matters, and it can be put away (REVIEW-U U14).
+        if self.fda == Access::Missing && !self.fda_dismissed && self.needs_fda() {
             egui::Frame::new()
                 .fill(Color32::from_rgba_unmultiplied(0x3A, 0x2C, 0x12, 200))
                 .stroke(Stroke::new(1.0, t.warning.gamma_multiply(0.45)))
@@ -467,6 +627,10 @@ impl CleanApp {
                             } else {
                                 self.warn("Full Disk Access is still off.");
                             }
+                        }
+                        if kit::ghost(ui, &t, "Not Now", None).clicked() {
+                            self.act();
+                            self.fda_dismissed = true;
                         }
                     });
                 });

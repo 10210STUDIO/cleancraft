@@ -651,7 +651,7 @@ fn nav(h: &mut H, title: &str) -> Result<(), String> {
     use_control(h, &row, true)?;
     if section.is_some() {
         let segment = Key {
-            role: "Button".into(),
+            role: "Radio".into(),
             label: title.into(),
             nth: 0,
         };
@@ -1328,7 +1328,7 @@ fn shell_controls_respond() {
             steps(&mut h);
             let before = h.state().action_count();
             let key = Key {
-                role: "Button".into(),
+                role: "Radio".into(),
                 label: f.title().to_string(),
                 nth: 0,
             };
