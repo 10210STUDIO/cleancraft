@@ -90,7 +90,10 @@ fn ways_forward(h: &H) -> (Vec<String>, Vec<String>) {
         // Category rows ("Mail trash  70 KB") only filter the list.
         let category_row = label.contains("  ")
             && label.rsplit("  ").next().is_some_and(|t| {
-                t.ends_with(" KB") || t.ends_with(" MB") || t.ends_with(" GB") || t.ends_with(" bytes")
+                t.ends_with(" KB")
+                    || t.ends_with(" MB")
+                    || t.ends_with(" GB")
+                    || t.ends_with(" bytes")
             });
         let clickable = matches!(a.role(), Role::Button | Role::Link | Role::MenuItem);
         if clickable && !a.is_disabled() && !category_row && !GENERIC.contains(&label.as_str()) {
@@ -117,7 +120,10 @@ fn assert_way_forward(h: &H, f: FeatureId, what: &str) {
     assert!(
         !buttons.is_empty() || !steps.is_empty(),
         "{what}: every item is locked ({:?}) and the screen offers no enabled action and no step",
-        p.items.iter().filter_map(|i| i.locked.clone()).collect::<Vec<_>>()
+        p.items
+            .iter()
+            .filter_map(|i| i.locked.clone())
+            .collect::<Vec<_>>()
     );
 }
 
@@ -187,7 +193,11 @@ fn way_forward_dev_clutter_in_documents() {
     };
     s.save(&mac.env).unwrap();
     let h = open(&mac, "Clean", "Developer Clutter");
-    assert_way_forward(&h, FeatureId::DevClutter, "Developer Clutter, code in Documents");
+    assert_way_forward(
+        &h,
+        FeatureId::DevClutter,
+        "Developer Clutter, code in Documents",
+    );
 }
 
 /// H1: on Mac Health every enabled button only opens a page or starts a scan that looks.
@@ -249,16 +259,32 @@ fn h1_every_health_button_only_looks() {
         for _ in 0..6 {
             h.step();
         }
-        assert!(executor::history(&mac.env).is_empty(), "'{b}' wrote a journal line");
+        assert!(
+            executor::history(&mac.env).is_empty(),
+            "'{b}' wrote a journal line"
+        );
         let fake = mac.env.fake_sys().unwrap();
-        assert!(fake.admin_calls().is_empty(), "'{b}' asked for the administrator");
+        assert!(
+            fake.admin_calls().is_empty(),
+            "'{b}' asked for the administrator"
+        );
         let changing: Vec<_> = fake
             .calls()
             .into_iter()
             .filter(|c| {
                 let w: Vec<&str> = c.split_whitespace().collect();
                 (w.first().is_some_and(|p| p.ends_with("launchctl"))
-                    && w.get(1).is_some_and(|s| ["bootout", "bootstrap", "unload", "load", "disable", "remove"].contains(s)))
+                    && w.get(1).is_some_and(|s| {
+                        [
+                            "bootout",
+                            "bootstrap",
+                            "unload",
+                            "load",
+                            "disable",
+                            "remove",
+                        ]
+                        .contains(s)
+                    }))
                     || c.contains("/bin/mv")
                     || c.contains("purge")
                     || c.contains("periodic")

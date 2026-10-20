@@ -83,7 +83,11 @@ fn x2_processes_start_only_in_sys() {
         |p| file_name(p) != "sys.rs",
         &["Command::new", "process::Command", "std::process::Command"],
     );
-    assert!(bad.is_empty(), "process started outside sys.rs:\n{}", bad.join("\n"));
+    assert!(
+        bad.is_empty(),
+        "process started outside sys.rs:\n{}",
+        bad.join("\n")
+    );
 }
 
 /// D4 D5 D6: developer tools' own cleanup commands delete permanently, without the Trash or
@@ -158,7 +162,9 @@ fn files_under(dir: &Path) -> Vec<(PathBuf, u64)> {
         let Ok(rd) = fs::read_dir(&d) else { continue };
         for e in rd.flatten() {
             let p = e.path();
-            let Ok(md) = fs::symlink_metadata(&p) else { continue };
+            let Ok(md) = fs::symlink_metadata(&p) else {
+                continue;
+            };
             if md.is_dir() {
                 stack.push(p);
             } else if md.is_file() {
@@ -218,10 +224,22 @@ fn saf6_6_notification_texts_never_become_statements() {
     // An app named like this in the Trash gives the title "<name> was moved to the Trash".
     let name = r#"-e do shell script "touch /tmp/pwn" --"#;
     for (title, body, sub) in [
-        (format!("{name} was moved to the Trash"), "x".to_string(), None),
+        (
+            format!("{name} was moved to the Trash"),
+            "x".to_string(),
+            None,
+        ),
         ("CleanCraft".to_string(), name.to_string(), None),
-        ("CleanCraft".to_string(), "x".to_string(), Some(name.to_string())),
-        (r#"Evil" & (do shell script "id") & ""#.to_string(), "b".into(), None),
+        (
+            "CleanCraft".to_string(),
+            "x".to_string(),
+            Some(name.to_string()),
+        ),
+        (
+            r#"Evil" & (do shell script "id") & ""#.to_string(),
+            "b".into(),
+            None,
+        ),
     ] {
         let n = Notification {
             title: title.clone(),
@@ -260,13 +278,19 @@ fn t1_scheduled_scan_moves_nothing() {
     a.check(&m.env, &s, None, at("2026-10-20 09:00"));
     let rep = a.check(&m.env, &s, None, at("2026-10-20 10:05"));
     assert!(rep.scanned.is_some_and(|b| b > 0), "{rep:?}");
-    assert!(executor::history(&m.env).is_empty(), "the agent wrote a journal line");
+    assert!(
+        executor::history(&m.env).is_empty(),
+        "the agent wrote a journal line"
+    );
     let data = m.env.data_dir().to_path_buf();
     let after: Vec<_> = files_under(m.env.root())
         .into_iter()
         .filter(|(p, _)| !p.starts_with(&data))
         .collect();
-    let before: Vec<_> = before.into_iter().filter(|(p, _)| !p.starts_with(&data)).collect();
+    let before: Vec<_> = before
+        .into_iter()
+        .filter(|(p, _)| !p.starts_with(&data))
+        .collect();
     assert_eq!(before, after, "files outside CleanCraft's data changed");
     assert!(
         fake.admin_calls().is_empty(),
@@ -280,8 +304,17 @@ fn t1_scheduled_scan_moves_nothing() {
             let words: Vec<&str> = c.split_whitespace().collect();
             let changing_launchctl = words.first().is_some_and(|w| w.ends_with("launchctl"))
                 && words.get(1).is_some_and(|w| {
-                    ["bootout", "bootstrap", "load", "unload", "disable", "enable", "remove", "kill"]
-                        .contains(w)
+                    [
+                        "bootout",
+                        "bootstrap",
+                        "load",
+                        "unload",
+                        "disable",
+                        "enable",
+                        "remove",
+                        "kill",
+                    ]
+                    .contains(w)
                 });
             changing_launchctl || c.contains("/bin/mv") || c.contains("rm ")
         })
@@ -295,7 +328,10 @@ fn t1_scheduled_scan_moves_nothing() {
 fn t4_login_agent_plist_is_an_argument_array() {
     use cleancraft_core::login_agent::plist_xml;
     let prog = Path::new("/Applications/A&B <x>/CleanCraft.app/Contents/MacOS/CleanCraft");
-    let xml = plist_xml(prog, Path::new("/Users/t/Library/Logs/CleanCraft/agent.log"));
+    let xml = plist_xml(
+        prog,
+        Path::new("/Users/t/Library/Logs/CleanCraft/agent.log"),
+    );
     let v: plist::Value = plist::from_bytes(xml.as_bytes()).expect("valid plist");
     let d = v.as_dictionary().unwrap();
     let args: Vec<&str> = d["ProgramArguments"]
@@ -317,7 +353,10 @@ fn t4_login_agent_plist_is_an_argument_array() {
 fn editor_with_data(m: &FakeMac) -> (PathBuf, Vec<PathBuf>) {
     let app = m.app("Editor", "com.example.Editor", "2.0");
     let data = vec![
-        m.home_file("Library/Application Support/com.example.Editor/db.sqlite", 300_000),
+        m.home_file(
+            "Library/Application Support/com.example.Editor/db.sqlite",
+            300_000,
+        ),
         m.home_file("Library/Caches/com.example.Editor/cache.bin", 200_000),
         m.home_file("Library/Preferences/com.example.Editor.plist", 2_000),
     ];
@@ -335,7 +374,9 @@ fn w6_leftovers_route_for_an_installed_app_selects_nothing() {
     let (app, data) = editor_with_data(&m);
     // The route text a web page could send.
     let r = AppRoute::parse(&AppRoute::UninstallApp(app.clone()).to_arg()).expect("parses");
-    let AppRoute::UninstallApp(p) = r else { unreachable!() };
+    let AppRoute::UninstallApp(p) = r else {
+        unreachable!()
+    };
     match trashed_app_plan(&m.env, &Settings::default(), &p) {
         Err(_) => {}
         Ok(plan) => {
@@ -395,7 +436,10 @@ fn saf6_5_connect_keeps_a_linked_settings_file_a_link() {
     let link = m.env.home_path(CODE_CONFIG);
     std::os::unix::fs::symlink(&real, &link).unwrap();
     let r = connect(&m.env, ClientKind::ClaudeCode);
-    let still_link = fs::symlink_metadata(&link).unwrap().file_type().is_symlink();
+    let still_link = fs::symlink_metadata(&link)
+        .unwrap()
+        .file_type()
+        .is_symlink();
     assert!(
         r.is_err() || still_link,
         "connected ({:?}) and {} is no longer a link",
@@ -407,11 +451,12 @@ fn saf6_5_connect_keeps_a_linked_settings_file_a_link() {
 /// (b) the binary path reaches the JSON escaped: the result parses and keeps other keys.
 #[test]
 fn h_connect_writes_valid_json_and_keeps_other_servers() {
-    use cleancraft_core::mcp_setup::{APP_BINARY, DESKTOP_CONFIG, ClientKind, connect};
+    use cleancraft_core::mcp_setup::{APP_BINARY, ClientKind, DESKTOP_CONFIG, connect};
     let m = FakeMac::new();
     m.sys_file(APP_BINARY, 1_000);
     let cfg = m.env.home_path(DESKTOP_CONFIG);
-    let before = r#"{"mcpServers":{"other":{"command":"/x","env":{"KEY":"secret"}}},"theme":"dark"}"#;
+    let before =
+        r#"{"mcpServers":{"other":{"command":"/x","env":{"KEY":"secret"}}},"theme":"dark"}"#;
     m.write(&cfg, before.as_bytes());
     connect(&m.env, ClientKind::ClaudeDesktop).expect("connect");
     let v: serde_json::Value = serde_json::from_slice(&fs::read(&cfg).unwrap()).unwrap();
@@ -543,8 +588,9 @@ mod dev {
         std::os::unix::fs::symlink(&elsewhere, m.env.home_path("Projects/old")).unwrap();
         let p = scan(&m, &Settings::default());
         assert!(
-            p.items.iter().all(|i| !i.path.starts_with(m.env.home_path("Projects/old"))
-                && i.path != t),
+            p.items
+                .iter()
+                .all(|i| !i.path.starts_with(m.env.home_path("Projects/old")) && i.path != t),
             "{:?}",
             p.items
         );
@@ -606,9 +652,9 @@ mod dev {
 /// the steps in Mail instead of erasing every account.
 #[test]
 fn saf6_7_erase_scope_matches_the_confirmed_numbers() {
+    use cleancraft_core::FeatureId;
     use cleancraft_core::features::{self, trash};
     use cleancraft_core::testkit_trash::{answer_account_names, mail_trash};
-    use cleancraft_core::FeatureId;
     let m = FakeMac::new();
     let unnamed = "BDEB6609-9DCF-4859-898F-019D1CA8E2D0";
     let icloud = "AAAA6609-9DCF-4859-898F-019D1CA8E2D0";
@@ -672,7 +718,14 @@ mod disk_map {
         let mut p = Plan::new(FeatureId::SpaceLens);
         p.add_category("items", "Items", "", Risk::High);
         for x in paths {
-            p.push(x.clone(), 1, "items", "picked in the map".to_string(), Risk::High, true);
+            p.push(
+                x.clone(),
+                1,
+                "items",
+                "picked in the map".to_string(),
+                Risk::High,
+                true,
+            );
         }
         p
     }
@@ -702,7 +755,10 @@ mod disk_map {
         sel.push(m.env.sys_path("/Applications"));
         sel.push(m.env.sys_path("/Volumes/USB/Photos Library.photoslibrary"));
         #[cfg(unix)]
-        sel.push(m.env.sys_path("/Volumes/Macintosh HD/Users/tester/Downloads"));
+        sel.push(
+            m.env
+                .sys_path("/Volumes/Macintosh HD/Users/tester/Downloads"),
+        );
         let p = plan_of(&sel);
         let s = Settings::default();
         let rep = features::run_plan(&m.env, &s, &p, &p.digest(), &mut |_, _| {});
@@ -711,7 +767,10 @@ mod disk_map {
             .map(|r| r.moved.iter().map(|x| x.id.clone()).collect())
             .unwrap_or_default();
         let gone: Vec<_> = targets.iter().filter(|t| !t.exists()).collect();
-        assert!(gone.is_empty() && moved.is_empty(), "moved {moved:?}, gone {gone:?}");
+        assert!(
+            gone.is_empty() && moved.is_empty(),
+            "moved {moved:?}, gone {gone:?}"
+        );
         assert!(m.env.sys_path("/Volumes/USB").is_dir());
     }
 
@@ -728,7 +787,9 @@ mod disk_map {
         assert!(!f.exists());
         let trash = m.env.sys_path("/Volumes/USB/.Trashes");
         assert!(
-            files_under(&trash).iter().any(|(x, _)| x.ends_with("holiday.mov")),
+            files_under(&trash)
+                .iter()
+                .any(|(x, _)| x.ends_with("holiday.mov")),
             "not in the drive's Trash"
         );
         executor::undo(&m.env, &rep.moved[0].id).expect("undo");
@@ -763,11 +824,25 @@ fn f12_duplicate_downloads_never_lose_the_last_copy() {
     let kept = if sel[0] == a { b.clone() } else { a.clone() };
     // The kept copy is edited after the scan: it is no longer a copy.
     m.write(&kept, b"edited");
-    let rep = features::run_plan_with(&DownloadDuplicates, &m.env, &s, &p, &p.digest(), &mut |_, _| {});
+    let rep = features::run_plan_with(
+        &DownloadDuplicates,
+        &m.env,
+        &s,
+        &p,
+        &p.digest(),
+        &mut |_, _| {},
+    );
     assert!(sel[0].exists(), "the last copy moved: {rep:?}");
     // The kept copy is gone (the person moved it): same.
     fs::remove_file(&kept).unwrap();
-    let rep = features::run_plan_with(&DownloadDuplicates, &m.env, &s, &p, &p.digest(), &mut |_, _| {});
+    let rep = features::run_plan_with(
+        &DownloadDuplicates,
+        &m.env,
+        &s,
+        &p,
+        &p.digest(),
+        &mut |_, _| {},
+    );
     assert!(sel[0].exists(), "the last copy moved: {rep:?}");
 }
 
@@ -781,7 +856,10 @@ fn x1_background_features_default_off() {
     assert_eq!(fresh.scan_every, ScanEvery::Off);
     assert!(!fresh.agents_may_clean);
     assert!(fresh.dev_roots.is_empty());
-    m.write(&m.env.data_dir().join("settings.json"), br#"{"agents_may_clean":false}"#);
+    m.write(
+        &m.env.data_dir().join("settings.json"),
+        br#"{"agents_may_clean":false}"#,
+    );
     let old = Settings::load(&m.env);
     assert_eq!(old.scan_every, ScanEvery::Off);
     assert!(!cleancraft_core::login_agent::is_on(&m.env));
@@ -792,7 +870,10 @@ fn x1_background_features_default_off() {
             .iter()
             .any(|w| k.contains(w))
         {
-            assert!(val != &serde_json::Value::Bool(true), "{k} is on by default");
+            assert!(
+                val != &serde_json::Value::Bool(true),
+                "{k} is on by default"
+            );
         }
     }
 }
