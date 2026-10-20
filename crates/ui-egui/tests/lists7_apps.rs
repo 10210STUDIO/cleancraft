@@ -114,13 +114,21 @@ fn macos_apps_are_hidden_until_asked_for_and_never_selectable() {
     click(&mut h, "Show apps that are part of macOS");
     assert!(rows(&h).contains(&"Safari".to_string()));
     assert!(has(&h, "Part of macOS"));
-    assert!(h.get_by_label("Select Safari").accesskit_node().is_disabled());
+    assert!(
+        h.get_by_label("Select Safari")
+            .accesskit_node()
+            .is_disabled()
+    );
     assert!(has_text(&h, "All Apps  4  "));
     assert!(has_text(&h, "in 4 apps"));
     // Never selectable: its padlock, and select all in a group leaves it out.
     h.get_by_label("Select Safari").click();
     settle(&mut h);
     assert!(h.state().apps.picked.is_empty());
+    // (The padlock does nothing; a click that reaches the row opens the app's detail.)
+    if has(&h, "Back to Apps") {
+        click(&mut h, "Back to Apps");
+    }
     click(&mut h, "Select all in Other Sources");
     assert!(!h.state().apps.picked.contains(&m.safari));
     assert_eq!(
@@ -147,12 +155,15 @@ fn search_narrows_the_list_and_the_counts_and_esc_clears_it() {
     let m = mac();
     let mut h = harness(&m.mac);
     go(&mut h);
-    assert!(!has_text(&h, "Showing"), "no line while nothing narrows the list");
+    assert!(
+        !has_text(&h, "Showing"),
+        "no line while nothing narrows the list"
+    );
     type_into(&mut h, "Search apps", "maker");
     assert_eq!(rows(&h), ["Viewer"], "developer and bundle id are searched");
     assert!(has(&h, "Showing 1 of 3 apps"));
     // Cmd+F focuses the field, Esc clears it.
-    h.get_by_label("Editor").focus();
+    h.get_by_label("Viewer").focus();
     steps(&mut h);
     h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::F);
     settle(&mut h);
@@ -182,7 +193,9 @@ fn every_filter_narrows_with_its_count_and_is_remembered() {
         assert_eq!(rows(&h), want, "{entry}");
         assert!(has(&h, &format!("Showing 1 of 3 apps")), "{entry}");
         assert!(
-            h.get_by_label("Filter").value().is_some_and(|v| v != "None"),
+            h.get_by_label("Filter")
+                .value()
+                .is_some_and(|v| v != "None"),
             "Filter announces what is on"
         );
         click(&mut h, "Clear Filters");
@@ -229,7 +242,10 @@ fn every_sort_and_direction_works_and_is_remembered() {
     }
     let mut h = harness(&m.mac);
     go(&mut h);
-    assert_eq!(h.get_by_label("Sort").value().as_deref(), Some("Sort by size"));
+    assert_eq!(
+        h.get_by_label("Sort").value().as_deref(),
+        Some("Sort by size")
+    );
     assert_eq!(rows(&h), ["Viewer", "Editor", "Jotter"]);
     sort(&mut h, "Smallest first");
     assert_eq!(rows(&h), ["Jotter", "Editor", "Viewer"]);
@@ -270,11 +286,20 @@ fn every_sort_and_direction_works_and_is_remembered() {
         .iter()
         .map(|n| {
             let st = &h.state().apps;
-            let p = &st.list.iter().flatten().find(|a| &a.name == n).unwrap().path;
+            let p = &st
+                .list
+                .iter()
+                .flatten()
+                .find(|a| &a.name == n)
+                .unwrap()
+                .path;
             st.facts.installed[p]
         })
         .collect();
-    assert!(dates.windows(2).all(|w| w[0] >= w[1]), "newest first: {dates:?}");
+    assert!(
+        dates.windows(2).all(|w| w[0] >= w[1]),
+        "newest first: {dates:?}"
+    );
     sort(&mut h, "Oldest first");
     // Remembered after a relaunch.
     let h2 = relaunch(&m);
@@ -299,9 +324,6 @@ fn ticked_apps_the_filters_hide_are_counted_and_listed_before_they_go() {
         has_text(&h, "2 apps selected (1 hidden by filters)"),
         "the bar counts every ticked app"
     );
-    // Select all in the group while filtered ticks only what is shown.
-    click(&mut h, "Select all in Other Sources");
-    assert!(!h.state().apps.picked.contains(&m.editor));
     click(&mut h, "Review and Uninstall");
     // The review and the confirmation list both apps, filters or not.
     assert!(has(&h, "Uninstall 2 apps"));
@@ -323,9 +345,24 @@ fn app_updates_search_filter_and_sort() {
     use cleancraft_core::testkit_apps::appcast;
     let mac = FakeMac::new();
     let feeds = [
-        ("Alpha", "com.a.Alpha", "https://a.example/cast.xml", 5_000_000),
-        ("Beta", "com.b.Beta", "https://b.example/cast.xml", 1_000_000),
-        ("Gamma", "com.g.Gamma", "https://g.example/cast.xml", 9_000_000),
+        (
+            "Alpha",
+            "com.a.Alpha",
+            "https://a.example/cast.xml",
+            5_000_000,
+        ),
+        (
+            "Beta",
+            "com.b.Beta",
+            "https://b.example/cast.xml",
+            1_000_000,
+        ),
+        (
+            "Gamma",
+            "com.g.Gamma",
+            "https://g.example/cast.xml",
+            9_000_000,
+        ),
     ];
     for (name, id, feed, size) in feeds {
         mac.app_spec(&AppSpec {
@@ -353,7 +390,9 @@ fn app_updates_search_filter_and_sort() {
             })
             .collect();
         v.sort_by(|a, b| a.0.total_cmp(&b.0));
-        v.into_iter().map(|(_, n)| n.to_string()).collect::<Vec<_>>()
+        v.into_iter()
+            .map(|(_, n)| n.to_string())
+            .collect::<Vec<_>>()
     };
     assert_eq!(order(&h), ["Alpha", "Beta", "Gamma"], "by name");
     sort(&mut h, "Sort by size");

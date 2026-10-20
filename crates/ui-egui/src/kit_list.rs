@@ -32,11 +32,11 @@ use crate::theme::{Tokens, Weight, font, hit, size, space};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Filter {
     /// Stable key, remembered in the settings ("app_store").
-    pub key: &'static str,
+    pub key: String,
     /// What the menu shows ("App Store").
-    pub label: &'static str,
+    pub label: String,
     /// The heading it is listed under in the menu ("Source").
-    pub group: &'static str,
+    pub group: String,
     /// Filters of one group with `any` set match when any of them does.
     pub any: bool,
     /// How many items of the whole list it matches (shown in the menu).
@@ -45,24 +45,31 @@ pub struct Filter {
 
 impl Filter {
     /// A filter that must match on its own (AND with the others).
-    pub fn only(group: &'static str, key: &'static str, label: &'static str, count: usize) -> Self {
+    pub fn only(
+        group: impl Into<String>,
+        key: impl Into<String>,
+        label: impl Into<String>,
+        count: usize,
+    ) -> Self {
         Filter {
-            key,
-            label,
-            group,
+            key: key.into(),
+            label: label.into(),
+            group: group.into(),
             any: false,
             count,
         }
     }
 
     /// One of several choices of a group, any of which may match (OR within the group).
-    pub fn any(group: &'static str, key: &'static str, label: &'static str, count: usize) -> Self {
+    pub fn any(
+        group: impl Into<String>,
+        key: impl Into<String>,
+        label: impl Into<String>,
+        count: usize,
+    ) -> Self {
         Filter {
-            key,
-            label,
-            group,
             any: true,
-            count,
+            ..Filter::only(group, key, label, count)
         }
     }
 
@@ -71,8 +78,8 @@ impl Filter {
         format!("{} ({})", self.label, self.count)
     }
 
-    fn logic_group(&self) -> &'static str {
-        if self.any { self.group } else { self.key }
+    fn logic_group(&self) -> &str {
+        if self.any { &self.group } else { &self.key }
     }
 }
 
@@ -139,21 +146,21 @@ pub fn on(p: &ListPrefs, key: &str) -> bool {
 
 /// The filters of `filters` that are on (filters a list no longer has are left out).
 pub fn active<'a>(p: &ListPrefs, filters: &'a [Filter]) -> Vec<&'a Filter> {
-    filters.iter().filter(|f| on(p, f.key)).collect()
+    filters.iter().filter(|f| on(p, &f.key)).collect()
 }
 
 /// Is any filter of `filters` on?
 pub fn filtering(p: &ListPrefs, filters: &[Filter]) -> bool {
-    filters.iter().any(|f| on(p, f.key))
+    filters.iter().any(|f| on(p, &f.key))
 }
 
 /// Does an item pass the filters that are on? `has(key)` says whether the item matches the
 /// filter `key`.
 pub fn passes(p: &ListPrefs, filters: &[Filter], has: impl Fn(&str) -> bool) -> bool {
     let mut groups: BTreeMap<&str, bool> = BTreeMap::new();
-    for f in filters.iter().filter(|f| on(p, f.key)) {
+    for f in filters.iter().filter(|f| on(p, &f.key)) {
         let g = groups.entry(f.logic_group()).or_insert(false);
-        *g = *g || has(f.key);
+        *g = *g || has(&f.key);
     }
     groups.values().all(|ok| *ok)
 }
@@ -246,7 +253,13 @@ pub fn search(
 /// The Filter button and its pop-up: the filters by group, each with a check mark when on
 /// and how many items it matches; Clear Filters at the end. The pop-up stays open while
 /// filters are switched. Returns true when a filter changed.
-pub fn filter_menu(ui: &mut Ui, t: &Tokens, id: &str, filters: &[Filter], p: &mut ListPrefs) -> bool {
+pub fn filter_menu(
+    ui: &mut Ui,
+    t: &Tokens,
+    id: &str,
+    filters: &[Filter],
+    p: &mut ListPrefs,
+) -> bool {
     let n_on = active(p, filters).len();
     let label = if n_on == 0 {
         "Filter".to_string()
@@ -259,7 +272,7 @@ pub fn filter_menu(ui: &mut Ui, t: &Tokens, id: &str, filters: &[Filter], p: &mu
     } else {
         active(p, filters)
             .iter()
-            .map(|f| f.label)
+            .map(|f| f.label.as_str())
             .collect::<Vec<_>>()
             .join(", ")
     };
@@ -283,13 +296,13 @@ pub fn filter_menu(ui: &mut Ui, t: &Tokens, id: &str, filters: &[Filter], p: &mu
                     }
                     ui.horizontal(|ui| {
                         ui.add_space(10.0);
-                        kit::eyebrow(ui, t, f.group);
+                        kit::eyebrow(ui, t, &f.group);
                     });
                 }
-                last_group = f.group;
-                let was = on(p, f.key);
+                last_group = &f.group;
+                let was = on(p, &f.key);
                 if filter_entry(ui, t, f, was) {
-                    toggle(p, f.key);
+                    toggle(p, &f.key);
                     changed = true;
                 }
             }
@@ -317,7 +330,16 @@ pub fn toggle(p: &mut ListPrefs, key: &str) {
 
 /// Turn off every filter of `filters`.
 pub fn clear_filters(p: &mut ListPrefs, filters: &[Filter]) {
-    p.filters.retain(|k| !filters.iter().any(|f| f.key == k));
+    p.filters.retain(|k| !filters.iter().any(|f| &f.key == k));
+}
+
+/// "Smallest first" -> "smallest first"; "Z to A" stays.
+fn lower_first(s: &str) -> String {
+    let mut c = s.chars();
+    match (c.next(), c.clone().next()) {
+        (Some(f), Some(n)) if n.is_lowercase() => f.to_lowercase().chain(c).collect(),
+        _ => s.to_string(),
+    }
 }
 
 /// The Sort pop-up: the orders, then the two directions of the chosen one. Announced as
@@ -326,7 +348,7 @@ pub fn clear_filters(p: &mut ListPrefs, filters: &[Filter]) {
 pub fn sort_menu(ui: &mut Ui, id: &str, sorts: &[SortKey], p: &mut ListPrefs) -> bool {
     let (cur, rev) = sort_of(p, sorts);
     let value = if rev {
-        format!("{}, {}", cur.label, cur.second.to_lowercase())
+        format!("{}, {}", cur.label, lower_first(cur.second))
     } else {
         cur.label.to_string()
     };
@@ -460,8 +482,8 @@ pub fn status(
                     .color(if shown == 0 { t.warning } else { t.text_dim }),
             );
             for f in active(p, filters) {
-                if chip(ui, t, f.label).clicked() {
-                    toggle(p, f.key);
+                if chip(ui, t, &f.label).clicked() {
+                    toggle(p, &f.key);
                     out.prefs = true;
                 }
             }
@@ -548,10 +570,16 @@ fn filter_button(ui: &mut Ui, t: &Tokens, label: &str, lit: bool) -> Response {
         ),
         egui::StrokeKind::Inside,
     );
-    let ir = Rect::from_center_size(pos2(rect.left() + 14.0 + 8.0, rect.center().y), Vec2::splat(14.0));
+    let ir = Rect::from_center_size(
+        pos2(rect.left() + 14.0 + 8.0, rect.center().y),
+        Vec2::splat(14.0),
+    );
     funnel(p, ir, if lit { t.text } else { t.text_dim });
     p.galley(
-        pos2(rect.left() + 14.0 + 22.0, rect.center().y - g.size().y / 2.0),
+        pos2(
+            rect.left() + 14.0 + 22.0,
+            rect.center().y - g.size().y / 2.0,
+        ),
         g,
         t.text,
     );
@@ -589,7 +617,7 @@ fn filter_entry(ui: &mut Ui, t: &Tokens, f: &Filter, is_on: bool) -> bool {
     p.text(
         pos2(r.left() + 32.0, r.center().y),
         Align2::LEFT_CENTER,
-        f.label,
+        &f.label,
         fid.clone(),
         t.text,
     );
@@ -598,7 +626,11 @@ fn filter_entry(ui: &mut Ui, t: &Tokens, f: &Filter, is_on: bool) -> bool {
         Align2::RIGHT_CENTER,
         f.count.to_string(),
         fid,
-        if f.count == 0 { t.text_faint } else { t.text_dim },
+        if f.count == 0 {
+            t.text_faint
+        } else {
+            t.text_dim
+        },
     );
     resp.clicked()
 }
@@ -637,7 +669,11 @@ fn chip(ui: &mut Ui, t: &Tokens, label: &str) -> Response {
     resp.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &name));
     let f = kit::feel(ui, &resp);
     let p = ui.painter();
-    p.rect_filled(r, r.height() / 2.0, t.sec_a.gamma_multiply(0.18 + 0.1 * f.hov));
+    p.rect_filled(
+        r,
+        r.height() / 2.0,
+        t.sec_a.gamma_multiply(0.18 + 0.1 * f.hov),
+    );
     p.rect_stroke(
         r,
         r.height() / 2.0,
@@ -647,7 +683,11 @@ fn chip(ui: &mut Ui, t: &Tokens, label: &str) -> Response {
     if f.focus {
         kit::focus_ring(p, t, r, r.height() / 2.0);
     }
-    p.galley(pos2(r.left() + 12.0, r.center().y - g.size().y / 2.0), g, t.text);
+    p.galley(
+        pos2(r.left() + 12.0, r.center().y - g.size().y / 2.0),
+        g,
+        t.text,
+    );
     icons::paint_with(
         p,
         Rect::from_center_size(pos2(r.right() - 13.0, r.center().y), Vec2::splat(9.0)),
@@ -717,7 +757,11 @@ mod tests {
         assert!(passes(&p(&[]), &d, item(&[])));
         assert!(passes(&p(&["store", "setapp"]), &d, item(&["setapp"])));
         assert!(!passes(&p(&["store"]), &d, item(&["setapp"])));
-        assert!(passes(&p(&["unused", "large"]), &d, item(&["unused", "large"])));
+        assert!(passes(
+            &p(&["unused", "large"]),
+            &d,
+            item(&["unused", "large"])
+        ));
         assert!(!passes(&p(&["unused", "large"]), &d, item(&["unused"])));
         assert!(!passes(&p(&["store", "unused"]), &d, item(&["store"])));
         // A remembered filter the list no longer has is ignored.

@@ -1261,7 +1261,12 @@ fn app_filters(st: &State, settings: &cleancraft_core::Settings) -> Vec<Filter> 
         Filter::only("Show only", "unused", "Unused", n("unused")),
         Filter::only("Show only", "running", "Running", n("running")),
         Filter::only("Show only", "large", "Large (1 GB or more)", n("large")),
-        Filter::only("Show only", "leftovers", "Has files in Library", n("leftovers")),
+        Filter::only(
+            "Show only",
+            "leftovers",
+            "Has files in Library",
+            n("leftovers"),
+        ),
         Filter::only("Show only", "selected", "Selected", n("selected")),
     ]
 }
@@ -1513,7 +1518,12 @@ fn apps_bottom_bar(app: &mut CleanApp, ui: &mut Ui) {
         .into_iter()
         .map(|a| a.path)
         .collect();
-    let hidden = app.apps.picked.iter().filter(|p| !shown.contains(*p)).count();
+    let hidden = app
+        .apps
+        .picked
+        .iter()
+        .filter(|p| !shown.contains(*p))
+        .count();
     let apps_text = kit_list::selected_text(
         &if n == 1 {
             "1 app selected".to_string()
@@ -1849,7 +1859,8 @@ fn apps_list(app: &mut CleanApp, ui: &mut Ui, h: f32) {
     let rows = visible_apps(&app.apps, &app.settings);
     if rows.is_empty() {
         let searching = !app.apps.search.trim().is_empty();
-        let filtering = kit_list::filtering(&app.apps.prefs, &app_filters(&app.apps, &app.settings));
+        let filtering =
+            kit_list::filtering(&app.apps.prefs, &app_filters(&app.apps, &app.settings));
         empty_state(
             ui,
             &t,
@@ -4298,8 +4309,14 @@ fn updates_page(app: &mut CleanApp, ui: &mut Ui) {
         let mut search = std::mem::take(&mut app.apps.upd_search);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = space::S;
-            let (_, ch) =
-                kit_list::search(ui, &t, &mut search, "Search updates", "Search updates", 240.0);
+            let (_, ch) = kit_list::search(
+                ui,
+                &t,
+                &mut search,
+                "Search updates",
+                "Search updates",
+                240.0,
+            );
             if ch {
                 app.act();
             }
