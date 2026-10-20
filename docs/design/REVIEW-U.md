@@ -201,3 +201,7 @@ Method: the owner's branch checked out, this branch's `review_usability.rs` copi
 | U12 Ignore list folder picker | agent4/ux4 ae18abe | Fixed: "Choose Folder..." (`u12` passes) |
 | U28 Tune-up bottom bar | agent4/ux4 ae18abe | Claimed; `task_11` still succeeds in 4 steps; no proof test (layout) |
 | U16, U17 | agent4/ux4 ae18abe | Fail on this branch only because design4 is not merged into it yet; fixed on agent4/design4 |
+| U2 helper named | agent4/apps4 f35df8f | Core only (`app_quit::running_parts` lists helpers, login items and launchd jobs inside the bundle; quit and force quit); the App Remover page does not use it yet, so `u02` still fails there. Open: ux4 wires the headline into the banner |
+| Combined state | agent4/design4 86e756c (design4 with ux4 merged) | 23 of 37 pass: all 17 walkthroughs, and U1, U6, U7, U12, U16, U17. Still failing: U2, U3, U4, U5, U8, U9, U10 (both proofs), U11, U13, U14 (both proofs), U18, U19 |
+
+Summary at the end of this pass: fixed and verified U1, U6, U7, U12, U16, U17 (6 of 28); claimed without a proof test U28 (task flow fine); open U2 (S1), U3, U4, U5, U8, U9, U10, U11, U20 (S2), and the S3 items.
