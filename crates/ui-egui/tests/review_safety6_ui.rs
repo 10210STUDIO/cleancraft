@@ -210,7 +210,7 @@ fn h1_every_health_button_only_looks() {
     use std::path::PathBuf;
     let now = th::now();
     let mac = th::calm_mac(now);
-    th::sample_history(&mac.env, now, 500 * GB);
+    th::sample_history(&mac.env, now, 500 * GB, 12 * GB);
     th::set_disk(&mac.env, 500 * GB, 12 * GB);
     th::set_pressure(&mac.env, 4);
     th::launch_agent(&mac, "com.example.unsigned", false);
