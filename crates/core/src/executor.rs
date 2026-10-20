@@ -968,12 +968,30 @@ fn undo_admin(env: &Env, ids: &[String]) -> (usize, Vec<(String, UndoError)>) {
 /// Undo every still-undoable action of a plan. Returns how many were put back and the errors.
 /// Administrator moves go back together, with one password dialog.
 pub fn undo_plan(env: &Env, plan_id: &str) -> (usize, Vec<(String, UndoError)>) {
-    let recs: Vec<ActionRecord> = history(env)
+    let ids: Vec<String> = history(env)
         .into_iter()
         .filter(|r| r.plan_id == plan_id && r.can_undo())
+        .map(|r| r.id)
         .collect();
-    let mut ok = 0;
+    undo_actions(env, &ids)
+}
+
+/// Undo these actions (ids from the journal), like [`undo_plan`] does for a whole plan: the
+/// administrator moves among them go back together, with one password dialog. Ids that are
+/// unknown, already put back or not undoable are reported, nothing else changes for them.
+pub fn undo_actions(env: &Env, ids: &[String]) -> (usize, Vec<(String, UndoError)>) {
+    let all = history(env);
+    let mut recs: Vec<ActionRecord> = Vec::new();
     let mut errs = Vec::new();
+    for id in ids {
+        match find_record(&all, id).map(|i| &all[i]) {
+            Some(r) if r.can_undo() => recs.push(r.clone()),
+            Some(r) if r.undone.is_some() => errs.push((id.clone(), UndoError::AlreadyUndone)),
+            Some(_) => errs.push((id.clone(), UndoError::NotUndoable)),
+            None => errs.push((id.clone(), UndoError::NotFound)),
+        }
+    }
+    let mut ok = 0;
     let admin_ids: Vec<String> = recs
         .iter()
         .filter(|r| is_admin_move(r))

@@ -25,9 +25,10 @@ use crate::env::Env;
 use crate::extensions;
 use crate::features::{Feature, ScanCtx, leftovers};
 use crate::fsutil::{children, tree_size};
-use crate::plan::{FeatureId, Plan, Risk};
+use crate::plan::{FeatureId, Item, Plan, Risk};
 use crate::policy;
 use crate::settings::Settings;
+use serde::{Deserialize, Serialize};
 
 pub struct Uninstaller;
 
@@ -130,6 +131,12 @@ pub fn uninstall_plan(
             env.display(app_path)
         );
     };
+    Ok(plan_for(env, settings, &all, &app, reset))
+}
+
+/// [`uninstall_plan`] for `app` of the app list `all` (read once for several apps).
+fn plan_for(env: &Env, settings: &Settings, all: &[AppInfo], app: &AppInfo, reset: bool) -> Plan {
+    let app = app.clone();
     let mut plan = Plan::new(FeatureId::Uninstaller);
     let allow = Uninstaller.allow_roots(env);
     plan.add_category(CAT_APP, "Application", "The app itself.", Risk::High);
@@ -170,7 +177,7 @@ pub fn uninstall_plan(
     let twin = all
         .iter()
         .find(|a| a.path != app.path && a.bundle_id.eq_ignore_ascii_case(&app.bundle_id));
-    for (path, label, conf) in find_leftovers(env, &app, &all) {
+    for (path, label, conf) in find_leftovers(env, &app, all) {
         if settings.is_ignored(&path) || policy::check(env, &allow, &path).is_err() {
             continue;
         }
@@ -235,7 +242,7 @@ pub fn uninstall_plan(
         }
         plan.notes.push(why);
     }
-    Ok(plan)
+    plan
 }
 
 /// Added to a leftover's reason when part of it could not be read: its size is a lower bound
@@ -360,6 +367,345 @@ pub fn find_leftovers(
     out
 }
 
+// ---------- several apps at once ----------
+
+/// Plan id prefix of an uninstall of several apps ([`batch_plan`]).
+pub const BATCH_PREFIX: &str = "uninstaller-batch";
+
+/// Item group prefix in a batch plan: `app:<bundle path>`.
+pub const GROUP_PREFIX: &str = "app:";
+
+/// One app of a batch uninstall.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BatchApp {
+    pub path: PathBuf,
+    pub name: String,
+    /// The [`Item::group`] of its items.
+    pub group: String,
+    /// Why nothing of it may move now (it runs), as its own plan says; its items are locked.
+    pub lock: Option<String>,
+    /// The app (or something inside its bundle) runs.
+    pub running: bool,
+}
+
+/// The group key of an app's items in a batch plan.
+pub fn group_key(app: &Path) -> String {
+    format!("{GROUP_PREFIX}{}", app.display())
+}
+
+/// The app an item of a batch plan belongs to, from its group key.
+pub fn group_app(it: &Item) -> Option<PathBuf> {
+    it.group
+        .as_deref()
+        .and_then(|g| g.strip_prefix(GROUP_PREFIX))
+        .map(PathBuf::from)
+}
+
+/// Is this the plan of an uninstall of several apps?
+pub fn is_batch(plan: &Plan) -> bool {
+    plan.id.starts_with(BATCH_PREFIX)
+}
+
+/// One plan to uninstall several apps: each app's own uninstall plan ([`uninstall_plan`]),
+/// with the same preselection (the bundle and the files named after its id), joined. Every
+/// item carries its app's [`group_key`]. A file two apps would list is listed once, under the
+/// first app; it is selected when either plan selects it, and locked when either locks it.
+/// A running app stays in the plan with its items locked, so the others can go. Apps that are
+/// part of macOS, or on the ignore list, are refused.
+pub fn batch_plan(
+    env: &Env,
+    settings: &Settings,
+    app_paths: &[PathBuf],
+) -> anyhow::Result<(Plan, Vec<BatchApp>)> {
+    let all = apps::inventory(env, false, &|_| {});
+    let mut plan = Plan::new(FeatureId::Uninstaller);
+    plan.id = plan
+        .id
+        .replacen(FeatureId::Uninstaller.as_str(), BATCH_PREFIX, 1);
+    let mut out = Vec::new();
+    let mut seen: Vec<&Path> = Vec::new();
+    for path in app_paths {
+        if seen.contains(&path.as_path()) {
+            continue;
+        }
+        seen.push(path);
+        let Some(app) = all.iter().find(|a| &a.path == path) else {
+            bail!(
+                "{} is not an app in the Applications folders",
+                env.display(path)
+            );
+        };
+        if app.apple || apps::macos_app(&app.path) || apps::in_system(env, &app.path) {
+            bail!("{} is part of macOS and cannot be removed", app.name);
+        }
+        if settings.is_ignored(&app.path) {
+            bail!(
+                "{} is on your ignore list (Settings), so CleanCraft does not remove it",
+                app.name
+            );
+        }
+        let one = plan_for(env, settings, &all, app, false);
+        let group = group_key(&app.path);
+        for c in &one.categories {
+            plan.add_category(&c.id, &c.title, &c.description, c.risk);
+        }
+        for it in one.items {
+            if let Some(e) = plan.items.iter_mut().find(|e| e.path == it.path) {
+                if let Some(l) = it.locked {
+                    if e.locked.is_none() {
+                        e.locked = Some(l);
+                    }
+                    e.selected = false;
+                } else if e.locked.is_none() {
+                    e.selected |= it.selected;
+                }
+                e.needs_admin |= it.needs_admin;
+                continue;
+            }
+            let id = plan.items.len();
+            plan.items.push(Item {
+                id,
+                group: Some(group.clone()),
+                ..it
+            });
+        }
+        plan.notes.extend(one.notes.iter().cloned());
+        out.push(BatchApp {
+            path: app.path.clone(),
+            name: app.name.clone(),
+            group,
+            lock: one.notes.first().cloned(),
+            running: is_running(env, &app.path),
+        });
+    }
+    if out.is_empty() {
+        bail!("No app was chosen");
+    }
+    Ok((plan, out))
+}
+
+/// The size an app's uninstall would move with the usual preselection (the bundle and the
+/// files named after its id): what the list's selection bar adds up. One app list for all.
+pub fn preselected_sizes(
+    env: &Env,
+    settings: &Settings,
+    app_paths: &[PathBuf],
+) -> Vec<(PathBuf, u64)> {
+    let all = apps::inventory(env, false, &|_| {});
+    app_paths
+        .iter()
+        .filter_map(|p| {
+            let app = all.iter().find(|a| &a.path == p)?;
+            let plan = plan_for(env, settings, &all, app, false);
+            // A running app is locked now, but it is what it will move once it quits.
+            let size = plan
+                .items
+                .iter()
+                .filter(|i| i.selected || (i.locked.is_some() && preselected(i)))
+                .map(|i| i.size)
+                .sum();
+            Some((p.clone(), size))
+        })
+        .collect()
+}
+
+/// Would this item be selected for you when nothing locks it?
+fn preselected(it: &Item) -> bool {
+    it.category == CAT_APP || it.category == CAT_HIGH
+}
+
+/// The app of a batch plan that `item` belongs to: its group, else (an edited plan without
+/// groups) the app of the plan whose bundle holds it or whose bundle id names it on disk.
+fn owner_app(plan: &Plan, item: &Item) -> Option<PathBuf> {
+    if let Some(p) = group_app(item)
+        && plan
+            .items
+            .iter()
+            .any(|i| i.category == CAT_APP && i.path == p)
+    {
+        return Some(p);
+    }
+    let name = item.path.file_name()?.to_string_lossy().into_owned();
+    plan.items
+        .iter()
+        .filter(|i| i.category == CAT_APP)
+        .find(|a| {
+            item.path.starts_with(&a.path)
+                || apps::read_bundle(&a.path).is_some_and(|b| {
+                    !b.bundle_id.is_empty() && matches_id(&name, &b.bundle_id, &[])
+                })
+        })
+        .map(|a| a.path.clone())
+}
+
+/// Where a batch's app groups are kept, so one app of it can be put back from History.
+fn batches_path(env: &Env) -> PathBuf {
+    env.data_dir().join("uninstall-batches.json")
+}
+
+/// One app of a batch that ran: its name and the plan item ids of its files.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BatchEntry {
+    pub path: PathBuf,
+    pub name: String,
+    pub items: Vec<usize>,
+}
+
+/// How many batches are remembered for per-app Undo (the newest).
+const BATCHES_KEPT: usize = 100;
+
+type Batches = Vec<(String, Vec<BatchEntry>)>;
+
+fn read_batches(env: &Env) -> Batches {
+    std::fs::read(batches_path(env))
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
+/// Remember which items of a batch plan belong to which app (before it runs).
+pub fn save_batch(env: &Env, plan: &Plan, apps: &[BatchApp]) -> std::io::Result<()> {
+    let entries: Vec<BatchEntry> = apps
+        .iter()
+        .map(|a| BatchEntry {
+            path: a.path.clone(),
+            name: a.name.clone(),
+            items: plan
+                .items
+                .iter()
+                .filter(|i| i.group.as_deref() == Some(a.group.as_str()))
+                .map(|i| i.id)
+                .collect(),
+        })
+        .collect();
+    let mut all = read_batches(env);
+    all.retain(|(id, _)| id != &plan.id);
+    all.push((plan.id.clone(), entries));
+    if all.len() > BATCHES_KEPT {
+        all.drain(0..all.len() - BATCHES_KEPT);
+    }
+    std::fs::create_dir_all(env.data_dir())?;
+    let path = batches_path(env);
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(
+        &tmp,
+        serde_json::to_vec(&all).map_err(std::io::Error::other)?,
+    )?;
+    std::fs::rename(tmp, path)
+}
+
+/// The apps of a batch that ran (empty for any other plan, or when it was not remembered).
+pub fn batch_entries(env: &Env, plan_id: &str) -> Vec<BatchEntry> {
+    read_batches(env)
+        .into_iter()
+        .find(|(id, _)| id == plan_id)
+        .map(|(_, e)| e)
+        .unwrap_or_default()
+}
+
+/// The plan item id of a journal record id (`<plan>#<item>` or `<plan>#<item>~2`).
+fn record_item(plan_id: &str, record_id: &str) -> Option<usize> {
+    let rest = record_id.strip_prefix(plan_id)?.strip_prefix('#')?;
+    rest.split('~').next()?.parse().ok()
+}
+
+/// Journal ids of the still undoable moves of one app of a batch.
+pub fn batch_app_records(env: &Env, plan_id: &str, app: &Path) -> Vec<String> {
+    let Some(entry) = batch_entries(env, plan_id)
+        .into_iter()
+        .find(|e| e.path == app)
+    else {
+        return Vec::new();
+    };
+    crate::executor::history(env)
+        .into_iter()
+        .filter(|r| r.plan_id == plan_id && r.can_undo())
+        .filter(|r| record_item(plan_id, &r.id).is_some_and(|k| entry.items.contains(&k)))
+        .map(|r| r.id)
+        .collect()
+}
+
+/// Put back one app of a batch (its bundle and its files), with one password dialog for its
+/// administrator moves.
+pub fn undo_batch_app(
+    env: &Env,
+    plan_id: &str,
+    app: &Path,
+) -> (usize, Vec<(String, crate::executor::UndoError)>) {
+    let ids = batch_app_records(env, plan_id, app);
+    crate::executor::undo_actions(env, &ids)
+}
+
+/// Carry out a confirmed batch plan: its app groups are remembered first (per-app Undo),
+/// then it runs like any plan ([`crate::features::run_plan`]): one administrator command for
+/// every item that needs the password, items of a running app refused.
+pub fn run_batch(
+    env: &Env,
+    settings: &Settings,
+    plan: &Plan,
+    apps: &[BatchApp],
+    confirmed_digest: &str,
+    progress: &mut dyn FnMut(usize, usize),
+) -> anyhow::Result<crate::executor::Report> {
+    if !is_batch(plan) {
+        bail!("this is not a plan of several apps");
+    }
+    // Without it only per-app Undo is lost (Undo All still works); the journal decides.
+    let _ = save_batch(env, plan, apps);
+    crate::features::run_plan(env, settings, plan, confirmed_digest, progress)
+}
+
+/// What a batch did for one app.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AppResult {
+    pub path: PathBuf,
+    pub name: String,
+    /// Journal ids of what moved.
+    pub moved: Vec<String>,
+    pub moved_size: u64,
+    pub skipped: Vec<(PathBuf, crate::executor::SkipReason)>,
+    /// Its bundle moved: it is uninstalled.
+    pub removed: bool,
+}
+
+/// The report of a batch, per app (in the batch's order).
+pub fn batch_results(
+    plan: &Plan,
+    apps: &[BatchApp],
+    report: &crate::executor::Report,
+) -> Vec<AppResult> {
+    let mut out: Vec<AppResult> = apps
+        .iter()
+        .map(|a| AppResult {
+            path: a.path.clone(),
+            name: a.name.clone(),
+            ..Default::default()
+        })
+        .collect();
+    let slot = |it: &Item| {
+        apps.iter()
+            .position(|a| it.group.as_deref() == Some(a.group.as_str()))
+    };
+    for r in &report.moved {
+        let Some(it) = record_item(&plan.id, &r.id).and_then(|k| plan.items.get(k)) else {
+            continue;
+        };
+        if let Some(i) = slot(it) {
+            out[i].moved.push(r.id.clone());
+            out[i].moved_size += r.size;
+            if it.category == CAT_APP {
+                out[i].removed = true;
+            }
+        }
+    }
+    for (p, why) in &report.skipped {
+        if let Some(i) = plan.items.iter().find(|it| &it.path == p).and_then(slot) {
+            out[i].skipped.push((p.clone(), why.clone()));
+        }
+    }
+    out
+}
+
 impl Feature for Uninstaller {
     fn id(&self) -> FeatureId {
         FeatureId::Uninstaller
@@ -409,7 +755,7 @@ impl Feature for Uninstaller {
         &self,
         env: &Env,
         _settings: &Settings,
-        _plan: &Plan,
+        plan: &Plan,
         item: &crate::plan::Item,
     ) -> Result<(), String> {
         for a in item.path.ancestors() {
@@ -419,6 +765,16 @@ impl Feature for Uninstaller {
                     a.file_stem().unwrap_or_default().to_string_lossy()
                 ));
             }
+        }
+        // Several apps: the files of an app that runs stay, the other apps go on.
+        if is_batch(plan)
+            && let Some(owner) = owner_app(plan, item)
+            && is_running(env, &owner)
+        {
+            return Err(format!(
+                "Quit {} first",
+                owner.file_stem().unwrap_or_default().to_string_lossy()
+            ));
         }
         Ok(())
     }
@@ -443,7 +799,9 @@ impl Feature for Uninstaller {
                 .file_stem()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            if is_running(env, &it.path) {
+            // One app: nothing moves while it runs. Several: its files were refused one by one
+            // ([`Feature::validate`]) and the other apps go on.
+            if is_running(env, &it.path) && (it.selected || !is_batch(plan)) {
                 bail!("Quit {name} first. Nothing was moved.");
             }
             if it.selected && (apps::macos_app(&it.path) || apps::in_system(env, &it.path)) {
