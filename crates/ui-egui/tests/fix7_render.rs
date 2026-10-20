@@ -13,7 +13,7 @@ use cleancraft_core::testkit_health as th;
 use cleancraft_core::testkit_trash::{answer_account_names, erase_call, mail_trash};
 use cleancraft_core::{Fault, FeatureId};
 use cleancraft_ui_egui::CleanApp;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 
 type H = egui_kittest::Harness<'static, CleanApp>;
 
@@ -302,7 +302,7 @@ fn scenes() -> Vec<(&'static str, Box<dyn Fn() -> (FakeMac, H)>)> {
                 let label = h
                     .root()
                     .children_recursive()
-                    .filter_map(|n| egui_kittest::kittest::NodeT::accesskit_node(&n).label())
+                    .filter_map(|n| n.accesskit_node().label())
                     .find(|l| l.starts_with("My Backup"))
                     .unwrap();
                 click(&mut h, &label);
