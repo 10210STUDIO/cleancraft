@@ -5,10 +5,12 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::todo)]
 
+mod agent;
 mod cli;
 mod cli_apps;
 mod cli_monitor;
 mod cli_perf;
+mod tray;
 
 use cleancraft_core::Env;
 use cleancraft_ui_egui::{CleanApp, titlebar};
