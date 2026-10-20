@@ -192,16 +192,10 @@ fn app_dragged_to_the_trash_gives_one_offer_with_its_leftovers() {
             human_size(bytes)
         )
     );
-    assert_eq!(
-        ev.open,
-        AppRoute::AppRemoverLeftovers {
-            app_name: "Editor".into(),
-            bundle_id: "com.example.Editor".into(),
-            trashed: trashed.clone(),
-        }
-    );
+    assert_eq!(ev.open, AppRoute::UninstallApp(trashed.clone()));
+    assert_eq!(ev.paths, vec![trashed.clone()]);
     // The route goes through the agent as text and back.
-    assert_eq!(AppRoute::decode(&ev.open.encode()).as_ref(), Some(&ev.open));
+    assert_eq!(AppRoute::parse(&ev.open.to_arg()).as_ref(), Some(&ev.open));
 
     // The plan the route opens lists the same files, nothing selected beyond App Remover's
     // usual choice (named after the id), and not the app in the Trash.
@@ -416,12 +410,8 @@ fn an_unsigned_launch_agent_gives_an_event_that_opens_threat_check_on_it() {
         "{}",
         ev.body
     );
-    assert_eq!(
-        ev.open,
-        AppRoute::ThreatReview {
-            path: plist.clone()
-        }
-    );
+    assert_eq!(ev.open, AppRoute::Scan(FeatureId::Malware));
+    assert_eq!(ev.paths, vec![plist.clone()]);
     // Threat Check finds the same item, and the route selects it for review.
     let settings = Settings::default();
     let cancel = std::sync::atomic::AtomicBool::new(false);
@@ -432,8 +422,15 @@ fn an_unsigned_launch_agent_gives_an_event_that_opens_threat_check_on_it() {
         progress: &|_| {},
     };
     let mut plan = Malware.scan(&ctx).unwrap();
-    let i = preselect_threat(&mut plan, &plist).expect("Threat Check lists it");
+    let i = preselect_threat(&mut plan, &ev.paths[0]).expect("Threat Check lists it");
     assert!(plan.items[i].selected);
+    // A path the scan did not list is never added.
+    let n = plan.items.len();
+    assert_eq!(
+        preselect_threat(&mut plan, &mac.env.home_path("Documents/x.plist")),
+        None
+    );
+    assert_eq!(plan.items.len(), n);
     assert!(plist.exists(), "never quarantined by the watcher");
     assert_nothing_moved(&mac);
     drop(h);
@@ -544,7 +541,8 @@ fn an_installer_writing_many_files_and_several_agents_is_coalesced() {
     assert_eq!(got.len(), 1, "{got:#?}");
     assert_eq!(got[0].kind, WatchKind::NewApp);
     assert_eq!(got[0].title, "New app Gatekeeper rejects: Shady");
-    assert_eq!(got[0].open, AppRoute::ThreatReview { path: app.clone() });
+    assert_eq!(got[0].open, AppRoute::Scan(FeatureId::Malware));
+    assert_eq!(got[0].paths, vec![app.clone()]);
 
     // Three unsigned agents at once: one event naming them.
     evs.lock().unwrap().clear();
@@ -563,12 +561,7 @@ fn an_installer_writing_many_files_and_several_agents_is_coalesced() {
     assert_eq!(got[0].title, "3 new startup items need a look");
     assert!(got[0].body.contains("com.bundle.one"));
     assert_eq!(got[0].paths.len(), 3);
-    assert_eq!(
-        got[0].open,
-        AppRoute::Feature {
-            feature: FeatureId::Malware
-        }
-    );
+    assert_eq!(got[0].open, AppRoute::Scan(FeatureId::Malware));
     assert_nothing_moved(&mac);
     drop(h);
 }
@@ -657,7 +650,7 @@ fn missing_full_disk_access_is_reported_once_and_nothing_is_offered() {
     let got = wait_events(&evs, 1);
     assert_eq!(got.len(), 1, "{got:#?}");
     assert_eq!(got[0].kind, WatchKind::NeedsFullDiskAccess);
-    assert_eq!(got[0].open, AppRoute::FullDiskAccess);
+    assert_eq!(got[0].open, AppRoute::Settings);
     assert!(got[0].body.contains("Full Disk Access"));
     // The threat watch works without it.
     assert_eq!(h.status().threats, Access::Watching);
@@ -703,4 +696,31 @@ fn folders_that_appear_later_are_watched_and_turned_off_watches_stay_off() {
     drag_to_trash(&mac, &app);
     assert_eq!(quiet_for(&evs, 1.2).len(), 1);
     drop(h);
+}
+
+#[test]
+fn the_trash_plan_refuses_paths_that_are_not_an_app_folder_in_the_trash() {
+    let mac = FakeMac::new();
+    editor_leftovers(&mac);
+    let s = Settings::default();
+    // Installed, not in the Trash.
+    let installed = mac.app("Editor", "com.example.Editor", "2.1");
+    assert!(trashed_app_plan(&mac.env, &s, &installed).is_err());
+    // A link in the Trash pointing at the installed app.
+    let link = mac.env.user_trash().join("Editor.app");
+    std::os::unix::fs::symlink(&installed, &link).unwrap();
+    assert!(trashed_app_plan(&mac.env, &s, &link).is_err());
+    // Untrusted ids: Apple's, no dot.
+    for (name, id) in [("Mail", "com.apple.mail"), ("Short", "short")] {
+        let a = staged_app(&mac, name, id);
+        let t = drag_to_trash(&mac, &a);
+        assert!(trashed_app_plan(&mac.env, &s, &t).is_err(), "{id}");
+    }
+    // One folder deeper in the Trash.
+    let a = staged_app(&mac, "Deep", "com.example.Deep");
+    let deep = mac.env.user_trash().join("folder/Deep.app");
+    fs::create_dir_all(deep.parent().unwrap()).unwrap();
+    fs::rename(&a, &deep).unwrap();
+    assert!(trashed_app_plan(&mac.env, &s, &deep).is_err());
+    assert!(executor::history(&mac.env).is_empty());
 }

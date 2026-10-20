@@ -8,13 +8,14 @@ Branch agent6/watch6. Rows: docs/features-r6/watch6.md (W1-W6).
 - `Watcher::start(env, WatchSettings, sink: impl Fn(WatchEvent)) -> io::Result<WatchHandle>`: one thread, `notify::recommended_watcher` (FSEvents on macOS, inotify here). Folders are watched and their contents remembered before `start` returns.
 - `WatchHandle`: `set_paused`, `is_paused`, `status() -> WatchStatus { trash, threats: Access (Watching | NoFullDiskAccess | Off | Failed), paused, notes }`, `stop()` (also on drop).
 - `WatchSettings { trash_offer, threat_watch, quiet_hours: Option<(u8,u8)>, debounce (2 s), coalesce (5 s), tick, clock }`.
-- `WatchEvent { id, kind: WatchKind, title, body, open: route, time, paths }`.
+- `WatchEvent { id, kind: WatchKind, title, body, open: AppRoute, time, paths }`. `AppRoute` is health6's `route::AppRoute` (re-exported as `watch::AppRoute`). Routes: Trash offer `UninstallApp(<~/.Trash/X.app>)`; new startup item or app `Scan(Malware)` with the finding in `paths`; missing Full Disk Access `Settings`; several items at once `Scan(Malware)` or `Scan(Uninstaller)`. A `ThreatReview(path)` / `FullDiskAccess` variant was asked of health6; not there yet.
 - `trashed_app_plan(env, settings, trashed) -> Plan`: App Remover plan of a trashed app's leftovers (Uninstaller feature, its allow-list, its usual preselection), refused unless the path is a real `.app` folder directly in `~/.Trash`.
 - `preselect_threat(&mut plan, path)`: ticks the Threat Check item at that path only when the scan listed it.
 
 Engine rules: Trash non-recursive, new `.app` names only; apps folders recursive (an app one folder down counts); launchd folders non-recursive, `.plist` only. An item is examined when its size, file count and newest change stayed the same for `debounce` (a Trash bundle without an Info.plist waits up to 60 s). Ignored: items CleanCraft moved (journal `Moved.stored`) or put back by Undo, links, apps of macOS, untrusted bundle ids (empty, no dot, `com.apple.`), ids still installed elsewhere, apps that left nothing. Seen-list `watch-seen.json` in the data folder: Trash offers once per bundle id per 24 h, findings once per (item, reasons). Findings within `coalesce` are merged per kind. Quiet hours hold events and send them when they end. Pause drops events (no replay). Missing folders and missing Full Disk Access are retried every 2 s.
 
 ## Shared-file changes
+- Merged agent6/health6 2e93363 (core route.rs) to use the one shared AppRoute.
 - `Cargo.toml` (workspace): `notify = "8"`. `crates/core/Cargo.toml`: `notify = { workspace = true }`. `crates/core/src/lib.rs`: `pub mod watch;`.
 - Behaviour-neutral extractions so the watcher reuses the existing rules instead of copying them (existing tests unchanged):
   - `features/uninstaller.rs` (apps6 owns it now): `add_leftover_categories`, `push_leftovers` (the loop formerly inside `uninstall_plan`).
