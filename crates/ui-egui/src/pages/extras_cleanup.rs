@@ -119,14 +119,9 @@ fn trash_toolbar(app: &mut CleanApp, ui: &mut Ui) {
                 "Finder will remove everything in the Trash of every disk for good. This cannot be undone, and CleanCraft cannot put these items back. Mail's deleted messages are not affected.",
             );
             ui.add_space(16.0);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if kit::danger(ui, &t, EMPTY_CONFIRM) {
-                    go = true;
-                }
-                if kit::secondary(ui, &t, "Cancel") {
-                    cancel = true;
-                }
-            });
+            let (ok, no) = kit::dialog_actions(ui, &t, EMPTY_CONFIRM, kit::Kind::Danger);
+            go |= ok;
+            cancel |= no;
         });
         if dlg.should_close() {
             cancel = true;
@@ -236,14 +231,17 @@ fn privacy_toolbar(app: &mut CleanApp, ui: &mut Ui) {
             });
             ui.add_space(14.0);
             let n = list.iter().filter(|e| e.3).count();
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if n > 0 && kit::danger(ui, &t, RESET_CONFIRM) {
-                    go = true;
-                }
-                if kit::secondary(ui, &t, "Cancel") {
-                    cancel = true;
-                }
-            });
+            if n > 0 {
+                let (ok, no) = kit::dialog_actions(ui, &t, RESET_CONFIRM, kit::Kind::Danger);
+                go |= ok;
+                cancel |= no;
+            } else {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if kit::secondary(ui, &t, "Cancel") {
+                        cancel = true;
+                    }
+                });
+            }
         });
         if dlg.should_close() {
             cancel = true;

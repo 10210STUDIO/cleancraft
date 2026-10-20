@@ -126,6 +126,37 @@ pub fn row_tip(resp: &Response, row: Rect, text: &str) {
     });
 }
 
+/// Width of a confirmation dialog that lists files: as wide as the window allows, up to
+/// 860 pt, so paths are not cut short (REVIEW-C C12).
+pub fn dialog_width(ctx: &egui::Context) -> f32 {
+    (ctx.content_rect().width() - 160.0).clamp(420.0, 860.0)
+}
+
+/// The colour of a well inside a dialog, for [`scroll_fade`].
+pub const DIALOG_WELL: Color32 = Color32::from_rgb(0x14, 0x18, 0x20);
+
+/// Under a list in a dialog that scrolls: the list fades at its cut edge and one line says
+/// how many items it holds, so nobody takes the visible rows for all of them.
+pub fn list_more<R>(
+    ui: &mut Ui,
+    t: &Tokens,
+    out: &egui::scroll_area::ScrollAreaOutput<R>,
+    total: usize,
+) {
+    scroll_fade(ui, out, DIALOG_WELL);
+    if out.content_size.y > out.inner_rect.height() + 1.0 {
+        ui.add_space(space::XS);
+        dim(
+            ui,
+            t,
+            &format!(
+                "{} in all. Scroll the list to see every one.",
+                cleancraft_core::fsutil::items(total)
+            ),
+        );
+    }
+}
+
 /// The Done screen's summary: "3 items moved." and, only when some did not move, "2
 /// skipped." (REVIEW-C C31: no "0 skipped").
 pub fn moved_summary(moved: usize, skipped: usize) -> String {
@@ -1303,9 +1334,11 @@ pub fn hero(
                 let block_h = rest.max(240.0);
                 let top = ((avail - block_h) / 2.0).max(0.0) * 0.85;
                 ui.add_space(top);
+                // The object grows with big windows (REVIEW-C C23: at 1600 x 1000 the block
+                // fills about half the height instead of floating in empty backdrop).
                 let side = (width * 0.42)
-                    .min(avail * 0.82)
-                    .clamp(isz::HERO_MIN * 1.6, isz::HERO_MAX * 2.0)
+                    .min(avail * 0.62)
+                    .clamp(isz::HERO_MIN * 1.6, isz::HERO_MAX * 2.4)
                     .round();
                 let right_w = (width - side - space::XXL).min(space::MEASURE + 40.0);
                 let left_pad = ((width - side - space::XXL - right_w) / 2.0).max(0.0);
@@ -2100,7 +2133,7 @@ pub fn banner(
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             let btn_w = pill_size(ui, action, Kind::Secondary, false).x;
-            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.horizontal(|ui| {
                 let (r, _) = ui.allocate_exact_size(Vec2::splat(isz::INLINE), Sense::hover());
                 icons::paint(ui.painter(), r, icon, color);
                 ui.add_space(space::XS);

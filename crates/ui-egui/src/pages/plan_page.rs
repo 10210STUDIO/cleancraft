@@ -542,7 +542,13 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     let search_w = (ui.available_width()
         - 140.0
         - 210.0
-        - if extras_inline { extras_w } else { 0.0 }
+        - if extras_inline {
+            extras_w
+        } else if extras_w > 0.5 {
+            110.0
+        } else {
+            0.0
+        }
         - 5.0 * space::S)
         .clamp(160.0, 220.0);
     ui.horizontal(|ui| {
@@ -565,39 +571,54 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             app.act();
             app.plan_state(f).sort = sort;
         }
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if kit::secondary(ui, &t, "Select None") {
+        // Right-aligned, in reading order for Tab and VoiceOver: the module's own buttons
+        // (or "More" holding them when they do not fit), Select All, Select None.
+        let gap = space::S;
+        let all_w = kit::pill_size(ui, "Select All", kit::Kind::Secondary, false).x;
+        let none_w = kit::pill_size(ui, "Select None", kit::Kind::Secondary, false).x;
+        let has_extras = extras_w > 0.5;
+        let more_w = kit::pill_size(ui, "More", kit::Kind::Secondary, false).x + 24.0;
+        let lead_w = if extras_inline {
+            extras_w
+        } else if has_extras {
+            more_w + gap
+        } else {
+            0.0
+        };
+        ui.add_space((ui.available_width() - lead_w - all_w - none_w - gap).max(0.0));
+        if extras_inline {
+            extras_row(app, ui, f, extras_id);
+        } else if has_extras {
+            // The window is too narrow for one row: the module's buttons go in a menu
+            // instead of a second toolbar row (REVIEW-C C17).
+            let r = kit::menu_pill(ui, &t, "More", |ui| {
+                ui.set_min_width(200.0);
+                super::extras::results_toolbar(app, ui, f);
+            });
+            if r.response.clicked() {
                 app.act();
-                let ids = visible_items(app.plan_state(f));
-                if let Some(p) = app.plan_state(f).plan.as_mut() {
-                    for id in ids {
-                        p.set_selected(id, false);
-                    }
+            }
+        }
+        if kit::secondary(ui, &t, "Select All") {
+            app.act();
+            let ids = visible_items(app.plan_state(f));
+            if let Some(p) = app.plan_state(f).plan.as_mut() {
+                for id in ids {
+                    p.set_selected(id, true);
                 }
             }
-            if kit::secondary(ui, &t, "Select All") {
-                app.act();
-                let ids = visible_items(app.plan_state(f));
-                if let Some(p) = app.plan_state(f).plan.as_mut() {
-                    for id in ids {
-                        p.set_selected(id, true);
-                    }
+            keep_a_copy(app, f);
+        }
+        if kit::secondary(ui, &t, "Select None") {
+            app.act();
+            let ids = visible_items(app.plan_state(f));
+            if let Some(p) = app.plan_state(f).plan.as_mut() {
+                for id in ids {
+                    p.set_selected(id, false);
                 }
-                keep_a_copy(app, f);
             }
-            if extras_inline {
-                extras_row(app, ui, f, extras_id);
-            }
-        });
+        }
     });
-    if !extras_inline {
-        ui.add_space(space::S);
-        ui.allocate_ui_with_layout(
-            vec2(ui.available_width(), crate::theme::hit::SECONDARY),
-            Layout::right_to_left(Align::Center),
-            |ui| extras_row(app, ui, f, extras_id),
-        );
-    }
     ui.add_space(space::M);
     let avail_h = ui.available_height() - 4.0;
     let body =
@@ -669,9 +690,9 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
 
 /// The module's own toolbar buttons, measured so the toolbar can place them next frame.
 fn extras_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, id: egui::Id) {
-    let start = ui.cursor().max.x;
+    let start = ui.cursor().min.x;
     super::extras::results_toolbar(app, ui, f);
-    let w = (start - ui.cursor().max.x).max(0.0);
+    let w = (ui.cursor().min.x - start).max(0.0);
     let last: f32 = ui.data(|d| d.get_temp(id)).unwrap_or(0.0);
     if (w - last).abs() > 0.5 {
         ui.data_mut(|d| d.insert_temp(id, w));
@@ -820,7 +841,10 @@ pub fn category_row(
     let size_w = size_g.size().x;
     let full_name_w = kit::galley(ui, title, name_font.clone(), t.text).size().x;
     let title_w = r.right() - 18.0 - size_w - x;
-    let size_on_line1 = full_name_w <= title_w;
+    // In the narrow column (small windows) every row puts its size on line 2, so sizes line
+    // up in one place down the list instead of jumping between the two lines.
+    let narrow = r.width() < 250.0;
+    let size_on_line1 = !narrow && full_name_w <= title_w;
     let small_size = if size_on_line1 {
         None
     } else {
@@ -1326,8 +1350,8 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     };
     let mut close = false;
     let mut go = false;
-    let width = (ui.ctx().content_rect().width() - 120.0).clamp(420.0, 640.0);
-    let max_list = (ui.ctx().content_rect().height() - 330.0).clamp(120.0, 360.0);
+    let width = kit::dialog_width(ui.ctx());
+    let max_list = (ui.ctx().content_rect().height() - 350.0).clamp(120.0, 360.0);
     let dlg = kit::modal(egui::Id::new(("confirm", f.as_str())), &t).show(ui.ctx(), |ui| {
         ui.set_width(width);
         kit::dialog_head(
@@ -1354,7 +1378,7 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             // A height known from the first frame (the list shrinks to its rows up to
             // `max_list`), so the dialog opens at its final size and place.
             let list_h = (rows.len() as f32 * hit::CONFIRM_LINE).min(max_list);
-            egui::ScrollArea::vertical()
+            let out = egui::ScrollArea::vertical()
                 .id_salt("confirm-list")
                 .min_scrolled_height(list_h)
                 .max_height(list_h)
@@ -1372,6 +1396,7 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                         );
                     }
                 });
+            kit::list_more(ui, &t, &out, rows.len());
         });
         ui.add_space(space::L);
         let label = match method {
@@ -1529,7 +1554,7 @@ fn done(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
 }
 
 /// A note as a sentence: capital first letter, full stop at the end.
-fn sentence(s: &str) -> String {
+pub fn sentence(s: &str) -> String {
     let mut c = s.trim().chars();
     let mut out: String = match c.next() {
         Some(f) => f.to_uppercase().chain(c).collect(),

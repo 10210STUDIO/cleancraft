@@ -212,7 +212,8 @@ fn scene(icon: SectionIcon) -> Scene<'static> {
             ] {
                 sc.add(
                     &p.bubble,
-                    Xf::scale(r).at(v3(x, y, z)).then(root),
+                    // Shifted so the group sits centred in its square (REVIEW-C C24).
+                    Xf::scale(r).at(v3(x - 0.12, y - 0.12, z)).then(root),
                     Material {
                         spec: 1.2,
                         shine: 70.0,
@@ -227,14 +228,23 @@ fn scene(icon: SectionIcon) -> Scene<'static> {
             sc.add(&p.check, Xf::ID.at(v3(0.0, 0.0, 0.22)).then(root), ink);
         }
         SectionIcon::Speed => {
-            sc.add(&p.bolt, Xf::ID.rot_z(-0.1).then(root), body);
+            // The bolt is thin: larger, so it weighs like its neighbours (REVIEW-C C24).
+            sc.add(
+                &p.bolt,
+                Xf::scale(1.5).rot_z(-0.1).at(v3(-0.09, 0.0, 0.0)).then(root),
+                body,
+            );
         }
         SectionIcon::Apps => {
-            sc.add(&p.tile, root, body);
+            // A full tile reads heavier than the outlines around it: slightly smaller.
+            let k = 0.9;
+            sc.add(&p.tile, Xf::scale(k).then(root), body);
             for (x, y) in [(-1.0, 1.0), (1.0, 1.0), (-1.0, -1.0), (1.0, -1.0)] {
                 sc.add(
                     &p.cell,
-                    Xf::ID.at(v3(0.26 * x, 0.26 * y, 0.17)).then(root),
+                    Xf::scale(k)
+                        .at(v3(0.26 * k * x, 0.26 * k * y, 0.17))
+                        .then(root),
                     ink,
                 );
                 // The glyph sits on the tile's face: always drawn over it.
@@ -283,10 +293,10 @@ fn scene(icon: SectionIcon) -> Scene<'static> {
             sc.add(&p.pin, Xf::ID.at(v3(0.0, 0.0, 0.18)).then(root), body);
         }
         SectionIcon::Settings => {
-            sc.add(&p.gear, Xf::ID.rot_z(0.12).then(root), body);
+            sc.add(&p.gear, Xf::scale(1.12).rot_z(0.12).then(root), body);
             sc.add(
                 &p.hub,
-                Xf::ID.at(v3(0.0, 0.0, 0.12)).then(root),
+                Xf::scale(1.12).at(v3(0.0, 0.0, 0.12)).then(root),
                 Material::metal(WHITE, mix(WHITE, a, 0.4)),
             );
         }

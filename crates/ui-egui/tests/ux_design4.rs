@@ -261,3 +261,62 @@ fn quick_sweep_title_stays_and_the_grid_is_full() {
         .fold((f32::MAX, f32::MIN), |(a, b), x| (a.min(*x), b.max(*x)));
     assert!(hi - lo < 2.0, "rows end at {rights:?}");
 }
+
+/// The sidebar's 3D section icons carry about the same optical weight (REVIEW-C C24): the
+/// painted area of each (alpha over half) is within 25% of their median, and each sits
+/// centred in its square within 1.5 px at 56 px (0.75 pt).
+#[test]
+fn section_icons_have_even_weight_and_sit_centred() {
+    use cleancraft_ui_egui::section_icons::{SectionIcon, image};
+    let all = [
+        SectionIcon::QuickSweep,
+        SectionIcon::Clean,
+        SectionIcon::Protect,
+        SectionIcon::Speed,
+        SectionIcon::Apps,
+        SectionIcon::Files,
+        SectionIcon::Monitor,
+        SectionIcon::History,
+        SectionIcon::Settings,
+    ];
+    let px = 56u32;
+    let mut ink = Vec::new();
+    let mut bad = Vec::new();
+    for icon in all {
+        let img = image(icon, px);
+        let (mut n, mut sx, mut sy) = (0.0f32, 0.0f32, 0.0f32);
+        let (mut x0, mut y0, mut x1, mut y1) = (px as f32, px as f32, 0.0f32, 0.0f32);
+        for y in 0..px as usize {
+            for x in 0..px as usize {
+                let a = img.pixels[y * px as usize + x].a();
+                if a > 128 {
+                    n += 1.0;
+                    sx += x as f32;
+                    sy += y as f32;
+                    x0 = x0.min(x as f32);
+                    y0 = y0.min(y as f32);
+                    x1 = x1.max(x as f32);
+                    y1 = y1.max(y as f32);
+                }
+            }
+        }
+        let _ = (sx, sy);
+        // Centre of the bounding box against the square's centre.
+        let cx = (x0 + x1 + 1.0) / 2.0 - px as f32 / 2.0;
+        let cy = (y0 + y1 + 1.0) / 2.0 - px as f32 / 2.0;
+        if cx.abs() > 1.5 || cy.abs() > 1.5 {
+            bad.push(format!("{icon:?} off centre by ({cx:.1}, {cy:.1}) px"));
+        }
+        ink.push((icon, n));
+    }
+    let mut sorted: Vec<f32> = ink.iter().map(|x| x.1).collect();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let median = sorted[sorted.len() / 2];
+    for (icon, n) in &ink {
+        let k = n / median;
+        if !(0.75..=1.25).contains(&k) {
+            bad.push(format!("{icon:?}: {n} px of ink, {k:.2} x the median {median}"));
+        }
+    }
+    assert!(bad.is_empty(), "{}\nall: {ink:?}", bad.join("\n"));
+}
