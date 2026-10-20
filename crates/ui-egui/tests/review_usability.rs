@@ -743,7 +743,8 @@ fn u01_running_app_offers_quit_in_place() {
     let Some(quit) = b.iter().find(|l| l.starts_with("Quit Editor")).cloned() else {
         panic!("no Quit button while Editor runs; buttons: {b:?}");
     };
-    // The user quits it from here; once it is gone the page unlocks by itself.
+    // The user quits it from here and Editor obeys (the fake stops it as the request goes out).
+    testkit_cleanup::clear_running(&a.mac.env);
     h.get_by_label(&quit).click();
     settle(&mut h);
     if let Some(q) = buttons(&h).into_iter().find(|l| l.starts_with("Quit")) {
@@ -751,7 +752,6 @@ fn u01_running_app_offers_quit_in_place() {
         h.get_by_label(&q).click();
         settle(&mut h);
     }
-    testkit_cleanup::clear_running(&a.mac.env);
     for _ in 0..40 {
         h.step();
     }
