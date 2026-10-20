@@ -94,18 +94,48 @@ running when off, missing lock reason). S3 = wording or hygiene.
 
 | ID | Sev | Owner | What | Proof | Status |
 |---|---|---|---|---|---|
-| SAF6-1 | S1 | dev6 | Tool cleanups ran permanent deletes (`simctl delete unavailable`, `docker image/builder prune`, `brew cleanup`), and deleted what was there at run time, not the list shown | static `d456_no_permanent_developer_cleanup_commands` (WIP, before commit) | lead approved the safer design 17:46; verify on commit |
-| SAF6-2 | S1 | dev6 | `git ls-files -- <rel>` without `--literal-pathspecs`: a folder named `app [old]` is a glob, git-tracked `target/` unlocked | WIP review | approved fix; verify on commit |
-| SAF6-3 | S2 | dev6 | Python venvs preselected in inactive projects | WIP review | approved fix; verify on commit |
-| SAF6-5 | S2 | health6 | `mcp_setup::connect` replaces a symlinked settings file (`~/.claude.json`) with a plain file | `saf6_5_connect_keeps_a_linked_settings_file_a_link` | open |
-| SAF6-6 | S1 (MAC-CHECK) | tray6 | Notification texts follow the `-e` options without `--`: a name starting with `-e` becomes an AppleScript statement (`do shell script`) | `saf6_6_notification_texts_never_become_statements` | open |
+| SAF6-1 | S1 | dev6 | Tool cleanups ran permanent deletes (`simctl delete unavailable`, `docker image/builder prune`, `brew cleanup`) on whatever was there at run time, not the list shown | `d456_no_permanent_developer_cleanup_arguments`, `dev::d456_no_tool_delete_ever_runs` | fixed (dev6 43facd5: simulators are plan items moved with undo; Docker and Homebrew report only) |
+| SAF6-2 | S1 | dev6 | `git ls-files -- <rel>` without `--literal-pathspecs`: a project named `app [old]` is a glob, a git-tracked `target/` unlocked | `dev::saf6_2_bracket_named_project_tracked_target_is_locked` | fixed (43facd5) |
+| SAF6-3 | S2 | dev6 | Python venvs preselected in inactive projects | `dev::saf6_3_venvs_never_selected` | fixed (43facd5) |
+| SAF6-5 | S2 | health6 | `mcp_setup::connect` replaced a symlinked settings file (`~/.claude.json`) with a plain file | `saf6_5_connect_keeps_a_linked_settings_file_a_link` | fixed (health6 439520a) |
+| SAF6-6 | S1 (MAC-CHECK) | tray6 | Notification texts follow the `-e` options without `--`: a name starting with `-e` (an app dragged to the Trash) becomes an AppleScript statement (`do shell script`) | `saf6_6_notification_texts_never_become_statements` | open |
+| SAF6-7 | S1 | files6 | Erase in Mail on an unnamed account ran Mail's "In All Accounts" while the dialog counted one group | `saf6_7_erase_scope_matches_the_confirmed_numbers` | fixed (files6 55dab45) |
+| SAF6-8 | S2 | apps6 | An edited uninstall plan (one app or batch) moves another installed app and its settings: `Uninstaller::validate` checks only running apps (since round 4; the batch widens it) | `review_safety6_apps::{a5_edited_batch_plan_cannot_take_other_apps_files, a5b_edited_single_plan_cannot_take_other_apps_files}` on agent6/safety6-apps | open |
 
-Checked and found right (passing guards): `t1_scheduled_scan_moves_nothing`, `t4_login_agent_plist_is_an_argument_array`,
-`w1_really_trashed_app_offers_its_leftovers_without_moving_them`, `w3_link_in_trash_to_installed_app_selects_nothing`,
-`w6_leftovers_route_for_an_installed_app_selects_nothing`, `h_connect_writes_valid_json_and_keeps_other_servers`,
-static guards `x2_processes_start_only_in_sys`, `t1_background_code_never_reaches_removal`; UI way-forward rule
-`review_safety6_ui::way_forward_*` (Mail open, Trash Bins, browsers open).
+SAF6-4 was a suspicion (a route to an installed app preselecting its data as leftovers); the
+test showed it was already guarded and became the passing check `w6_*`.
+
+Checked and found right (passing tests, kept as guards):
+- tray6: `t1_scheduled_scan_moves_nothing` (full Quick Sweep sources, schedule due: no journal
+  line, no file change, no admin call, no changing launchctl), `t4_login_agent_plist_is_an_argument_array`,
+  argv notifications (string injection closed; only the getopt case SAF6-6 is left).
+- watch6: `w1_*` (a trashed app's leftovers are offered, nothing moves), `w3_*` (a link in the
+  Trash to an installed app selects nothing), `w6_*` (a route to an installed app is refused).
+- health6: `h_connect_writes_valid_json_and_keeps_other_servers`, UI `h1_every_health_button_only_looks`
+  (every Mac Health button only navigates or scans).
+- dev6: own `.git` locked at scan, Documents projects locked and refused when an edited plan
+  selects them, linked projects not followed.
+- files6: `disk_map::f7_*` (edited Disk Map plan cannot reach /Library, /Applications, /Users/Shared,
+  /private, /opt, a network share, a drive's .Spotlight-V100/.fseventsd/Backups.backupdb, a
+  Photos library on a drive, the drive itself, Documents, iCloud, or a path through
+  /Volumes/Macintosh HD), `disk_map::f9_*` (external file to that drive's .Trashes, undo),
+  `f12_*` (Duplicate Downloads never lose the last copy when the kept one changed or went away).
+- apps6 (side branch): a1-a4 (twins, running app, Apple apps, shared maker folder).
+- Cross-cutting: `x1_background_features_default_off`, `x2_processes_start_only_in_sys`,
+  `t1_background_code_never_reaches_removal`; UI way-forward rule `way_forward_*` (Mail open,
+  Trash Bins, browsers open, Developer Clutter in Documents).
 
 ## Verification log
 
-(filled when owners post commit ids)
+- 18:11 dev6 43facd5: SAF6-1, SAF6-2, SAF6-3 fixed.
+- 18:22 health6 439520a: SAF6-5 fixed.
+- 19:13 files6 55dab45: SAF6-7 fixed; Disk Map and Duplicate Downloads guards still pass.
+- 19:40 apps6 6d5f550 (side branch): a1-a4 pass, SAF6-8 open.
+- tray6 c65d005: SAF6-6 open (reminded 19:34).
+
+## Real-Mac checks (cannot be proven here)
+
+- osascript argument parsing (SAF6-6): confirm `osascript -e 'on run argv' -e '...' -e 'end run' -- "-e x"` passes "-e x" as argv 1.
+- Mail's Mailbox > Erase Deleted Items menu shape (one account vs several, localized menu names) for files6's UI scripting.
+- cleancraft:// links: whether the app receives URLs from Launch Services at all (no GetURL handler seen); if it does, they only navigate.
+- External drives: rename into `/Volumes/X/.Trashes/<uid>` on exFAT and network volumes; read-only Time Machine snapshot folders fail cleanly.
