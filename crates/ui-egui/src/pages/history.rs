@@ -87,6 +87,18 @@ pub fn moved_paths(recs: &[ActionRecord]) -> Vec<(std::path::PathBuf, std::path:
         .collect()
 }
 
+/// A path as people read it: the home folder as "~" (like Finder's path bar).
+pub fn short_path(env: &cleancraft_core::Env, p: &std::path::Path) -> String {
+    let shown = env.display(p);
+    let home = env.display(env.home());
+    match shown.strip_prefix(home.as_str()) {
+        Some(rest) if !home.is_empty() && (rest.is_empty() || rest.starts_with('/')) => {
+            format!("~{rest}")
+        }
+        _ => shown,
+    }
+}
+
 /// "Today, 13:26", "Yesterday, 09:02", "Mon 12 Oct, 18:40", or with the year when it is
 /// not this year.
 pub fn when_text(ts: i64, now: chrono::DateTime<chrono::Local>) -> String {
@@ -130,15 +142,6 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
             .font(font(size::TITLE2, Weight::Bold))
             .color(t.text),
         );
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if kit::pill(ui, &t, "Refresh", kit::Kind::Secondary, None)
-                .on_hover_text("Read the action log again")
-                .clicked()
-            {
-                app.act();
-                app.history.reload(&app.env);
-            }
-        });
     });
     ui.add_space(space::S);
     if groups.is_empty() {
@@ -365,9 +368,10 @@ fn record_row(
                                 human_size(r.size),
                                 app.env.display(stored)
                             );
+                            let seen = short_path(&app.env, original);
                             let fid = font(size::FOOTNOTE, Weight::Regular);
                             let w = ui.available_width().max(40.0);
-                            let short = kit::truncate_middle(ui.ctx(), &shown, &fid, w);
+                            let short = kit::truncate_middle(ui.ctx(), &seen, &fid, w);
                             let sw =
                                 kit::galley(ui, &short, fid.clone(), t.text_faint).size().x + 2.0;
                             let (rr, _) =
@@ -382,8 +386,8 @@ fn record_row(
                                 egui::Align::Min,
                             )
                             .on_hover_text(format!(
-                                "Was {shown}\nNow in {}",
-                                app.env.display(stored)
+                                "Was {seen}\nNow in {}",
+                                short_path(&app.env, stored)
                             ));
                         }
                         ActionKind::Command {

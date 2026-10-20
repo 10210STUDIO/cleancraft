@@ -630,7 +630,7 @@ fn remover_page(app: &mut CleanApp, ui: &mut Ui) {
                 secs,
                 false,
             );
-        } else if kit::primary(ui, &t, "Look Again") {
+        } else if kit::primary(ui, &t, "Scan Again") {
             app.act();
             app.apps.error = None;
             start_load(app);
@@ -758,7 +758,7 @@ fn browse(app: &mut CleanApp, ui: &mut Ui) {
                 let time = ui.input(|i| i.time);
                 kit::progress_ring(ui.painter(), r.center(), 16.0, &t, time);
                 ui.ctx().request_repaint();
-            } else if kit::secondary(ui, &t, "Look Again") {
+            } else if kit::secondary(ui, &t, "Scan Again") {
                 app.act();
                 start_load(app);
             }
@@ -2035,8 +2035,8 @@ fn updates_page(app: &mut CleanApp, ui: &mut Ui) {
                 1 => "1 update available".to_string(),
                 n => format!("{n} updates available"),
             })
-            .font(font(size::NUMBER, Weight::Bold))
-            .color(icons::lerp(t.sec_a, Color32::WHITE, 0.15)),
+            .font(font(size::TITLE2, Weight::Bold))
+            .color(t.text),
         );
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if kit::secondary(ui, &t, "Check Again") {
@@ -2203,7 +2203,12 @@ fn update_row(app: &mut CleanApp, ui: &mut Ui, u: &UpdateInfo) {
                     });
                 });
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let r = kit::pill(ui, &t, "Update", kit::Kind::Primary, None);
+                    let r = kit::pill(ui, &t, "Update", kit::Kind::Primary, None).on_hover_text(
+                        match u.source {
+                            Source::Sparkle => "Open the app so its own updater installs the new version",
+                            _ => "Open the App Store page to install the new version",
+                        },
+                    );
                     r.widget_info(|| {
                         egui::WidgetInfo::labeled(
                             egui::WidgetType::Button,
@@ -2219,7 +2224,9 @@ fn update_row(app: &mut CleanApp, ui: &mut Ui, u: &UpdateInfo) {
                         }
                     }
                     if u.source == Source::Sparkle && u.download_url.is_some() {
-                        let r = kit::secondary_resp(ui, &t, "Download");
+                        let r = kit::secondary_resp(ui, &t, "Download Only").on_hover_text(
+                            "Open the new version's download in your browser; you install it yourself",
+                        );
                         r.widget_info(|| {
                             egui::WidgetInfo::labeled(
                                 egui::WidgetType::Button,

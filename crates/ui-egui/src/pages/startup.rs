@@ -279,7 +279,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let r = ui
                 .add_enabled_ui(!busy, |ui| {
-                    kit::pill(ui, &t, "Refresh", kit::Kind::Secondary, None)
+                    kit::pill(ui, &t, "Scan Again", kit::Kind::Secondary, None)
                 })
                 .inner;
             if r.on_hover_text("Read the startup items again").clicked() && !busy {
@@ -330,7 +330,7 @@ fn login_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot) {
         ui,
         &t,
         "Login items",
-        "Apps that open when you log in. Turning one off removes it from the list; Turn On adds it back.",
+        "Apps that open when you log in. Turn one off and it no longer opens at login; turn it on again any time.",
     );
     kit::card(&t).show(ui, |ui| {
         ui.set_width(ui.available_width());
