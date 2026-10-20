@@ -1,0 +1,38 @@
+# apps6, round 6: uninstall several apps at once
+
+User feedback: "here I cannot select the apps I want to remove, I need to go one by one?" The App Remover list only opened one app's detail.
+
+## What was built
+
+### List (pages/apps.rs)
+- A checkbox on every app row ("Select <App>"); the row click still opens the detail. Cmd-click toggles, Shift-click ticks the range from the last ticked app (the range takes the anchor's state), Space on the focused row ticks it (Return still opens it). Rows have stable ids so the focus survives the selection bar appearing.
+- Apps that are part of macOS: a padlock (disabled checkbox) with the reason on hover; never ticked by any path (checkbox, Cmd/Shift-click, group select all).
+- Group rows use plan_page::category_row's existing tri-state checkbox ("Select all in <group>"). All Apps never ticks in one click: "Select all N apps?" with the count of removable apps. File groups (Leftovers, Installers, Extensions) tick their files.
+- Bottom bar while apps are ticked: "3 apps selected, 4.2 GB with their leftovers" (bundle plus the files named after each app's id, measured in a background job, "measuring" until done), Review and Uninstall, Clear Selection.
+
+### Review (core uninstaller::batch_plan + page)
+- One plan built from each app's own uninstall plan (same preselection), every item tagged with its app (`Item::group = "app:<bundle path>"`), plan id prefix `uninstaller-batch`. A file two apps list appears once (first app; selected if either selects, locked if either locks). Apps of macOS and ignored apps are refused.
+- Grouped by app (biggest first), each group foldable ("Hide files of X"), per-app selected count and size, "needs password" note, Leave Out per app, totals in the header and the bar ("N selected from K apps").
+- Running apps: only their group is locked, with the per-app quit banner (headline and helpers from app_quit::running_parts, Quit X, Try Again, Force Quit with confirmation, the password question for system services). Quit All when two or more run. A running check every 1.5 s unlocks a group as soon as its app quits (selection defaults restored for it, choices kept for the others).
+- One confirmation listing every file under its app; the administrator note once (the executor moves every admin item of the plan with one dialog); which running apps stay.
+
+### Run and result
+- core uninstaller::run_batch remembers the app groups (data_dir/uninstall-batches.json, last 100 batches) then runs features::run_plan. Uninstaller::validate refuses per item the files of an app of a batch that runs (by group, or by bundle path/bundle id read from disk when an edited plan drops the groups); prepare no longer refuses a whole batch for a running app whose items are not selected (a single-app plan still refuses as before).
+- One result screen: per app Uninstalled / Not removed / Kept, size moved, every file that stayed with its reason; Undo All (executor::undo_plan, one action) and Undo per app (uninstaller::undo_batch_app). History: the batch card shows one line per app with its own Undo next to the card's Undo All.
+- The list updates at once (forget_moved also drops ticked apps that are gone); undo brings them back through the journal watch and a new look.
+
+### Sort by size
+Sizes are the whole bundle (`tree_size`, allocated blocks) and the list sorts biggest first; iMovie at the top of the user's screenshot is consistent with that (it is usually the biggest bundle). Tested: core apps_batch::app_sizes_include_the_whole_bundle_and_sort_biggest_first, ui qa_apps_batch::keyboard_and_pointer_selection. No change needed.
+
+## Tests
+- core crates/core/tests/apps_batch.rs (9): union of single plans and numbers vs disk, apps of macOS refused (also edited plan), running app locks only its group, app opened after the review (also with groups stripped), one admin dialog plus undo, undo one app then the rest, permission denied and in use per item, shared file once, bundle sizes and sort.
+- ui crates/ui-egui/tests/qa_apps_batch.rs (9): e2e scan, tick 3, bar size vs disk, review, fold, confirmation lists every file, all gone, results, Undo per app, Undo All, counts recalculated; History per-app and Undo All; Apple apps not selectable (checkbox, Cmd-click, select all count, pushed into the set by hand); keyboard Space, Cmd/Shift-click range, plain click opens, pointing hand on the checkbox, sort order; running apps and Quit All (one quits, one does not, Force Quit confirmation), Force Quit after confirmation; admin apps in one prompt; permission denied and file in use per file; Leave Out and Leftovers select all.
+
+## Shared-file changes (outside my files)
+- crates/core/src/executor.rs: new `pub fn undo_actions(env, ids)`; undo_plan now collects its ids and calls it (same behaviour: admin moves go back with one dialog). Nothing in the move path changed.
+- crates/ui-egui/src/pages/history.rs: one line in group_card calling `crate::pages::apps::history_batch_rows` (shows nothing for other plans).
+- No kit.rs or app.rs change.
+
+## Check on a real Mac
+- Ticking 3 apps and the bar size; Review with one running app (Quit and Force Quit), two package-installed apps giving one password dialog, Undo All from History giving one password dialog.
+- Shift-click and Cmd-click feel (Cmd is the Command key on macOS in egui).

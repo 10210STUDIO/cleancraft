@@ -9,10 +9,16 @@
 //! hand off to the app's own updater, its download page or the App Store; macOS updates open
 //! Software Update. CleanCraft never installs software itself.
 //!
+//! Several apps at once: a checkbox on every app row (Cmd-click toggles, Shift-click selects a
+//! range, Space toggles the focused row), "select all" on the group rows, a bar with the
+//! apps and the size they move with their leftovers, then one review of every app's files
+//! (grouped by app; a running app is locked with its own Quit banner while the others go),
+//! one confirmation listing every file, one result screen with Undo All and Undo per app.
+//!
 //! Keys: Enter in the search box opens the first app shown; Esc leaves an app's detail or
 //! cancels the confirmation.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use cleancraft_core::app_quit;
@@ -124,6 +130,8 @@ pub enum Action {
     Uninstall,
     Reset,
     RemoveFiles,
+    /// Several apps from the list ([`Batch`]).
+    UninstallApps,
 }
 
 #[derive(Default)]
@@ -173,6 +181,45 @@ pub struct State {
     checked_running: Option<std::time::Instant>,
     /// What the list reflects of CleanCraft's action log (moves made by any page).
     watch: super::history::JournalWatch,
+    /// Apps ticked in the list, to uninstall together.
+    pub picked: BTreeSet<PathBuf>,
+    /// The app last ticked (Shift-click selects from it to the clicked one).
+    anchor: Option<PathBuf>,
+    /// What each ticked app moves with its usual preselection (bundle and files named
+    /// after its id).
+    pub pick_sizes: BTreeMap<PathBuf, u64>,
+    pick_job: Option<Job<Vec<(PathBuf, u64)>>>,
+    /// "Select all N apps?" (the All Apps group row), with the apps it would tick.
+    pub confirm_all: Option<Vec<PathBuf>>,
+    /// The review of the ticked apps, then their results.
+    pub batch: Option<Batch>,
+}
+
+/// The review of several apps: one plan, grouped by app.
+pub struct Batch {
+    pub plan: Plan,
+    pub apps: Vec<uninstaller::BatchApp>,
+    /// Apps whose files are folded away.
+    pub collapsed: BTreeSet<PathBuf>,
+    /// What runs of each running app (helpers, agents, services).
+    pub parts: BTreeMap<PathBuf, app_quit::RunningState>,
+    /// Apps that did not quit when asked, or could not be quit: what to say.
+    pub quit_notes: BTreeMap<PathBuf, (String, String)>,
+    /// Quitting these apps (one after the other).
+    quitting: Option<(
+        Vec<PathBuf>,
+        Job<Vec<(PathBuf, Result<QuitOutcome, String>)>>,
+    )>,
+    /// Force Quit asked for this app: the confirmation is open.
+    pub confirm_force: Option<PathBuf>,
+    /// Quit asked for these apps, and one runs a system service: the password question.
+    pub confirm_admin: Option<Vec<PathBuf>>,
+    still_running: Option<Job<Vec<(PathBuf, app_quit::RunningState)>>>,
+    checked_running: Option<std::time::Instant>,
+    /// After the run: what happened per app.
+    pub results: Vec<uninstaller::AppResult>,
+    /// Apps put back from the result screen.
+    pub undone: BTreeSet<PathBuf>,
 }
 
 /// Quitting the app whose detail is open.
@@ -273,7 +320,13 @@ fn rebuild_detail(app: &mut CleanApp, keep: Option<&Plan>) {
         .running
         .then(|| app_quit::running_parts(&app.env, &path));
     app.apps.checked_running = Some(std::time::Instant::now());
-    match uninstaller::uninstall_plan(&app.env, &app.settings, &path, false) {
+    // An app already in the Trash (the drag-to-Trash offer): only what it left behind.
+    let plan = if cleancraft_core::watch::in_trash(&app.env, &path) {
+        cleancraft_core::watch::trashed_app_plan(&app.env, &app.settings, &path)
+    } else {
+        uninstaller::uninstall_plan(&app.env, &app.settings, &path, false)
+    };
+    match plan {
         Ok(mut p) => {
             if let Some(old) = keep.filter(|o| o.notes.is_empty()) {
                 copy_selection(old, &mut p);
@@ -341,6 +394,8 @@ pub fn forget_moved(st: &mut State) {
     if let Some(list) = st.list.as_mut() {
         list.retain(|a| a.path.exists());
     }
+    st.picked.retain(|p| p.exists());
+    st.pick_sizes.retain(|p, _| p.exists());
     if let Some(p) = st.extras.as_mut() {
         p.items
             .retain(|i| std::fs::symlink_metadata(&i.path).is_ok());
@@ -377,10 +432,17 @@ fn start_action(app: &mut CleanApp, action: Action) {
     let env = app.env.clone();
     let settings = app.settings.clone();
     let digest = plan.digest();
+    let batch_apps = (action == Action::UninstallApps)
+        .then(|| app.apps.batch.as_ref().map(|b| b.apps.clone()))
+        .flatten();
     let job = Job::start(app.sync, move |status| {
-        features::run_plan(&env, &settings, &plan, &digest, &mut |n, total| {
-            status(&format!("{n} of {total}"))
-        })
+        let mut progress = |n: usize, total: usize| status(&format!("{n} of {total}"));
+        match &batch_apps {
+            Some(apps) => {
+                uninstaller::run_batch(&env, &settings, &plan, apps, &digest, &mut progress)
+            }
+            None => features::run_plan(&env, &settings, &plan, &digest, &mut progress),
+        }
         .map_err(|e| format!("{e:#}"))
     });
     app.apps.phase = Phase::Working(job, action);
@@ -403,6 +465,10 @@ pub fn poll(app: &mut CleanApp) -> bool {
             }
             // Anything moved while it looked.
             forget_moved(st);
+            // Leftovers may have changed: the ticked apps are measured again.
+            st.pick_sizes.clear();
+            measure_picked(app);
+            return poll(app);
         } else if job.is_dead() {
             st.load = None;
             st.error = Some("Looking at the apps stopped unexpectedly.".into());
@@ -441,6 +507,11 @@ pub fn poll(app: &mut CleanApp) -> bool {
                     crate::sound::Cue::CleanDone
                 };
                 crate::sound::play(&app.env, cue);
+                if action == Action::UninstallApps
+                    && let (Some(plan), Some(b)) = (&app.apps.pending, app.apps.batch.as_mut())
+                {
+                    b.results = uninstaller::batch_results(plan, &b.apps, &rep);
+                }
                 app.apps.phase = Phase::Done(rep, action);
                 app.apps.pending = None;
                 // What moved leaves the lists and counts now; the slow look below confirms.
@@ -454,8 +525,12 @@ pub fn poll(app: &mut CleanApp) -> bool {
                 app.apps.phase = Phase::Browse;
                 app.apps.error = Some(e);
                 app.apps.pending = None;
-                let old = app.apps.detail.clone();
-                rebuild_detail(app, old.as_ref());
+                if action == Action::UninstallApps {
+                    rebuild_batch(app);
+                } else {
+                    let old = app.apps.detail.clone();
+                    rebuild_detail(app, old.as_ref());
+                }
             }
         }
         // The list changed on disk: look again.
@@ -464,6 +539,7 @@ pub fn poll(app: &mut CleanApp) -> bool {
     }
     busy |= poll_quit(app);
     busy |= poll_running(app);
+    busy |= poll_batch(app);
     // Moves and undos made elsewhere (another page, History, an agent).
     if app.apps.list.is_some()
         && app.apps.load.is_none()
@@ -481,6 +557,9 @@ pub fn poll(app: &mut CleanApp) -> bool {
             if app.apps.selected.is_some() && matches!(app.apps.phase, Phase::Browse) {
                 let old = app.apps.detail.clone();
                 rebuild_detail(app, old.as_ref());
+            }
+            if app.apps.batch.is_some() && matches!(app.apps.phase, Phase::Browse) {
+                rebuild_batch(app);
             }
         }
     }
@@ -557,6 +636,342 @@ fn poll_running(app: &mut CleanApp) -> bool {
     true
 }
 
+// ---------- several apps: work ----------
+
+/// Can this app be ticked? Never an app that is part of macOS.
+fn pickable(a: &AppInfo) -> bool {
+    !a.apple && !uninstaller::is_cleancraft(&a.path)
+}
+
+/// Tick or untick apps; the sizes of newly ticked ones are measured in the background.
+pub fn set_picked(app: &mut CleanApp, paths: &[PathBuf], on: bool) {
+    let allowed: BTreeSet<PathBuf> = app
+        .apps
+        .list
+        .iter()
+        .flatten()
+        .filter(|a| pickable(a) && !app.settings.is_ignored(&a.path))
+        .map(|a| a.path.clone())
+        .collect();
+    for p in paths {
+        if on && allowed.contains(p) {
+            app.apps.picked.insert(p.clone());
+        } else if !on {
+            app.apps.picked.remove(p);
+        }
+    }
+    measure_picked(app);
+}
+
+/// Measure the ticked apps not measured yet (one job at a time).
+fn measure_picked(app: &mut CleanApp) {
+    let st = &mut app.apps;
+    st.pick_sizes.retain(|p, _| st.picked.contains(p));
+    if st.pick_job.is_some() {
+        return;
+    }
+    let todo: Vec<PathBuf> = st
+        .picked
+        .iter()
+        .filter(|p| !st.pick_sizes.contains_key(*p))
+        .cloned()
+        .collect();
+    if todo.is_empty() {
+        return;
+    }
+    let env = app.env.clone();
+    let settings = app.settings.clone();
+    app.apps.pick_job = Some(Job::start(app.sync, move |_| {
+        uninstaller::preselected_sizes(&env, &settings, &todo)
+    }));
+}
+
+/// The ticked apps' total, once every one is measured.
+pub fn picked_size(st: &State) -> Option<u64> {
+    st.picked
+        .iter()
+        .map(|p| st.pick_sizes.get(p).copied())
+        .sum::<Option<u64>>()
+}
+
+/// Open the review of the ticked apps (in the list's order).
+fn open_batch(app: &mut CleanApp) {
+    let order: Vec<PathBuf> = {
+        let mut v: Vec<&AppInfo> = app
+            .apps
+            .list
+            .iter()
+            .flatten()
+            .filter(|a| app.apps.picked.contains(&a.path))
+            .collect();
+        v.sort_by_key(|a| std::cmp::Reverse(app.apps.pick_sizes.get(&a.path).copied()));
+        v.into_iter().map(|a| a.path.clone()).collect()
+    };
+    match uninstaller::batch_plan(&app.env, &app.settings, &order) {
+        Ok((plan, apps)) => {
+            let parts = running_parts_of(&app.env, &apps);
+            app.apps.batch = Some(Batch {
+                plan,
+                apps,
+                collapsed: BTreeSet::new(),
+                parts,
+                quit_notes: BTreeMap::new(),
+                quitting: None,
+                confirm_force: None,
+                confirm_admin: None,
+                still_running: None,
+                checked_running: Some(std::time::Instant::now()),
+                results: Vec::new(),
+                undone: BTreeSet::new(),
+            });
+            app.apps.error = None;
+        }
+        Err(e) => app.apps.error = Some(format!("{e:#}")),
+    }
+}
+
+fn running_parts_of(
+    env: &cleancraft_core::Env,
+    apps: &[uninstaller::BatchApp],
+) -> BTreeMap<PathBuf, app_quit::RunningState> {
+    apps.iter()
+        .filter(|a| a.running)
+        .map(|a| (a.path.clone(), app_quit::running_parts(env, &a.path)))
+        .collect()
+}
+
+/// Build the review again (an app quit, Scan Again, an app left out), keeping the person's
+/// checkboxes for the apps that were not locked. Apps gone from the disk leave it.
+fn rebuild_batch(app: &mut CleanApp) {
+    let Some(b) = app.apps.batch.as_mut() else {
+        return;
+    };
+    let paths: Vec<PathBuf> = b
+        .apps
+        .iter()
+        .filter(|a| a.path.exists())
+        .map(|a| a.path.clone())
+        .collect();
+    if paths.is_empty() {
+        app.apps.batch = None;
+        return;
+    }
+    match uninstaller::batch_plan(&app.env, &app.settings, &paths) {
+        Ok((mut plan, apps)) => {
+            let old = &b.plan;
+            for i in 0..plan.items.len() {
+                if plan.items[i].category == uninstaller::CAT_APP {
+                    continue;
+                }
+                // Choices made while the app was locked do not exist: its defaults stay.
+                let was_locked = b.apps.iter().any(|a| {
+                    a.lock.is_some() && plan.items[i].group.as_deref() == Some(a.group.as_str())
+                });
+                if was_locked {
+                    continue;
+                }
+                if let Some(o) = old.items.iter().find(|o| o.path == plan.items[i].path) {
+                    plan.set_selected(i, o.selected);
+                }
+            }
+            b.parts = running_parts_of(&app.env, &apps);
+            b.plan = plan;
+            b.apps = apps;
+            b.checked_running = Some(std::time::Instant::now());
+        }
+        Err(e) => app.apps.error = Some(format!("{e:#}")),
+    }
+}
+
+/// Leave an app out of the review (and untick it in the list).
+fn leave_out(app: &mut CleanApp, path: &Path) {
+    app.apps.picked.remove(path);
+    app.apps.pick_sizes.remove(path);
+    if let Some(b) = app.apps.batch.as_mut() {
+        b.apps.retain(|a| a.path != path);
+        b.parts.remove(path);
+        b.quit_notes.remove(path);
+    }
+    rebuild_batch(app);
+}
+
+/// Quit (or force quit) these apps of the review, one after the other.
+fn start_batch_quit(app: &mut CleanApp, paths: Vec<PathBuf>, force: bool, allow_admin: bool) {
+    let env = app.env.clone();
+    let list = paths.clone();
+    let job = Job::start(app.sync, move |status| {
+        list.iter()
+            .map(|p| {
+                status(&p.file_stem().unwrap_or_default().to_string_lossy());
+                (p.clone(), quit_now(&env, p, force, allow_admin))
+            })
+            .collect()
+    });
+    if let Some(b) = app.apps.batch.as_mut() {
+        for p in &paths {
+            b.quit_notes.remove(p);
+        }
+        b.quitting = Some((paths, job));
+    }
+}
+
+/// Ask to quit these apps: first the password question when one runs a system service.
+fn ask_batch_quit(app: &mut CleanApp, paths: Vec<PathBuf>) {
+    let admin = app.apps.batch.as_ref().is_some_and(|b| {
+        paths
+            .iter()
+            .any(|p| b.parts.get(p).is_some_and(|s| s.needs_admin()))
+    });
+    if admin {
+        if let Some(b) = app.apps.batch.as_mut() {
+            b.confirm_admin = Some(paths);
+        }
+    } else {
+        start_batch_quit(app, paths, false, false);
+    }
+}
+
+fn app_name(p: &Path) -> String {
+    p.file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+/// Quitting and the running check of the review. Returns true while something runs.
+fn poll_batch(app: &mut CleanApp) -> bool {
+    let mut busy = false;
+    if let Some(job) = app.apps.pick_job.as_mut() {
+        if let Some(v) = job.poll() {
+            app.apps.pick_job = None;
+            for (p, n) in v {
+                app.apps.pick_sizes.insert(p, n);
+            }
+            // Ticked while it measured.
+            measure_picked(app);
+        } else if job.is_dead() {
+            app.apps.pick_job = None;
+        } else {
+            busy = true;
+        }
+    }
+    if !matches!(app.apps.phase, Phase::Browse | Phase::Confirm(_)) {
+        return busy;
+    }
+    let Some(b) = app.apps.batch.as_mut() else {
+        return busy;
+    };
+    // Quitting.
+    let mut quit_done = None;
+    if let Some((_, job)) = b.quitting.as_mut() {
+        if let Some(r) = job.poll() {
+            quit_done = Some(r);
+        } else if job.is_dead() {
+            let paths = b.quitting.take().map(|q| q.0).unwrap_or_default();
+            quit_done = Some(
+                paths
+                    .into_iter()
+                    .map(|p| (p, Err("Quitting stopped unexpectedly.".to_string())))
+                    .collect(),
+            );
+        } else {
+            return true;
+        }
+    }
+    if let Some(r) = quit_done {
+        b.quitting = None;
+        let mut quit = Vec::new();
+        for (p, o) in r {
+            let name = app_name(&p);
+            match o {
+                Ok(o) if o.done => quit.push(name),
+                Ok(o) => {
+                    b.quit_notes
+                        .insert(p, (format!("{name} did not quit"), o.message));
+                }
+                Err(e) => {
+                    b.quit_notes
+                        .insert(p, (format!("{name} could not be quit"), e));
+                }
+            }
+        }
+        rebuild_batch(app);
+        if !quit.is_empty() {
+            app.tell(format!(
+                "{} quit. {} can be uninstalled now.",
+                join_names(&quit),
+                if quit.len() == 1 { "It" } else { "They" }
+            ));
+        }
+        return busy;
+    }
+    // While an app of the review runs, look again every moment: when it quits by itself its
+    // files unlock without a click.
+    let running: Vec<PathBuf> = b
+        .apps
+        .iter()
+        .filter(|a| a.running)
+        .map(|a| a.path.clone())
+        .collect();
+    if running.is_empty() {
+        b.still_running = None;
+        return busy;
+    }
+    if let Some(job) = b.still_running.as_mut() {
+        match job.poll() {
+            Some(states) => {
+                b.still_running = None;
+                b.checked_running = Some(std::time::Instant::now());
+                let gone: Vec<String> = states
+                    .iter()
+                    .filter(|(_, s)| !s.locked())
+                    .map(|(p, _)| app_name(p))
+                    .collect();
+                for (p, s) in states {
+                    if s.locked() {
+                        b.parts.insert(p, s);
+                    } else {
+                        b.quit_notes.remove(&p);
+                    }
+                }
+                if !gone.is_empty() {
+                    rebuild_batch(app);
+                    app.tell(format!(
+                        "{} {} quit. You can uninstall {} now.",
+                        join_names(&gone),
+                        if gone.len() == 1 { "has" } else { "have" },
+                        if gone.len() == 1 { "it" } else { "them" }
+                    ));
+                }
+            }
+            None if job.is_dead() => b.still_running = None,
+            None => {}
+        }
+        return true;
+    }
+    let due = b
+        .checked_running
+        .is_none_or(|t| t.elapsed() >= RUNNING_CHECK);
+    if due {
+        let env = app.env.clone();
+        b.still_running = Some(Job::start(app.sync, move |_| {
+            running
+                .iter()
+                .map(|p| (p.clone(), app_quit::running_parts(&env, p)))
+                .collect()
+        }));
+    }
+    true
+}
+
+/// "Editor", "Editor and Viewer", "Editor, Viewer and Notes".
+fn join_names(names: &[String]) -> String {
+    match names {
+        [] => String::new(),
+        [a] => a.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
 // ---------- page ----------
 
 pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
@@ -612,6 +1027,10 @@ fn remover_page(app: &mut CleanApp, ui: &mut Ui) {
             );
             return;
         }
+        Phase::Done(_, Action::UninstallApps) => {
+            batch_done(app, ui);
+            return;
+        }
         Phase::Done(..) => {
             done(app, ui);
             return;
@@ -640,11 +1059,18 @@ fn remover_page(app: &mut CleanApp, ui: &mut Ui) {
     }
     if app.apps.selected.is_some() {
         detail(app, ui);
+    } else if app.apps.batch.is_some() {
+        batch_review(app, ui);
     } else {
         browse(app, ui);
     }
-    if let Phase::Confirm(action) = app.apps.phase {
-        confirm(app, ui, action);
+    match app.apps.phase {
+        Phase::Confirm(Action::UninstallApps) => batch_confirm(app, ui),
+        Phase::Confirm(action) => confirm(app, ui, action),
+        _ => {}
+    }
+    if app.apps.confirm_all.is_some() {
+        confirm_select_all(app, ui);
     }
 }
 
@@ -659,12 +1085,7 @@ fn visible_apps(st: &State, settings: &cleancraft_core::Settings) -> Vec<AppInfo
         .flatten()
         .filter(|a| st.group.has(a, now))
         .filter(|a| !settings.is_ignored(&a.path))
-        .filter(|a| {
-            q.is_empty()
-                || a.name.to_lowercase().contains(&q)
-                || a.bundle_id.to_lowercase().contains(&q)
-                || a.vendor.to_lowercase().contains(&q)
-        })
+        .filter(|a| q.is_empty() || matches_search(a, &q))
         .cloned()
         .collect();
     match st.sort {
@@ -719,6 +1140,157 @@ fn group_count(st: &State, g: Group) -> (usize, u64) {
         .flatten()
         .filter(|a| g.has(a, now))
         .fold((0, 0), |(n, s), a| (n + 1, s + a.size))
+}
+
+/// The apps of group `g` that can be ticked (not part of macOS, not on the ignore list).
+/// While searching, only the apps shown.
+fn group_apps(st: &State, settings: &cleancraft_core::Settings, g: Group) -> Vec<PathBuf> {
+    let now = now();
+    let q = st.search.trim().to_lowercase();
+    st.list
+        .iter()
+        .flatten()
+        .filter(|a| g.has(a, now) && pickable(a) && !settings.is_ignored(&a.path))
+        .filter(|a| q.is_empty() || st.group != g || matches_search(a, &q))
+        .map(|a| a.path.clone())
+        .collect()
+}
+
+fn matches_search(a: &AppInfo, q: &str) -> bool {
+    a.name.to_lowercase().contains(q)
+        || a.bundle_id.to_lowercase().contains(q)
+        || a.vendor.to_lowercase().contains(q)
+}
+
+/// The "select all in this group" box of a group row: (enabled, on, mixed, name).
+fn group_check(
+    st: &State,
+    settings: &cleancraft_core::Settings,
+    g: Group,
+) -> Option<(bool, bool, bool, String)> {
+    let name = format!("Select all in {}", g.short_title());
+    if let Some(cat) = g.category() {
+        let plan = st.extras.as_ref()?;
+        let free: Vec<_> = plan
+            .items
+            .iter()
+            .filter(|i| i.category == cat && i.locked.is_none())
+            .collect();
+        let on = free.iter().filter(|i| i.selected).count();
+        return Some((
+            !free.is_empty(),
+            !free.is_empty() && on == free.len(),
+            on > 0 && on < free.len(),
+            name,
+        ));
+    }
+    let apps = group_apps(st, settings, g);
+    let on = apps.iter().filter(|p| st.picked.contains(*p)).count();
+    Some((
+        !apps.is_empty(),
+        !apps.is_empty() && on == apps.len(),
+        on > 0 && on < apps.len(),
+        name,
+    ))
+}
+
+/// Tick or untick a whole group. Ticking every app (All Apps) asks first, with the count.
+fn select_group(app: &mut CleanApp, g: Group, on: bool) {
+    if let Some(cat) = g.category() {
+        if let Some(p) = app.apps.extras.as_mut() {
+            p.set_category_selected(cat, on);
+        }
+        return;
+    }
+    let apps = group_apps(&app.apps, &app.settings, g);
+    if on && g == Group::All {
+        app.apps.confirm_all = Some(apps);
+        return;
+    }
+    set_picked(app, &apps, on);
+}
+
+/// "Select all 130 apps?": ticking every app is never one click.
+fn confirm_select_all(app: &mut CleanApp, ui: &mut Ui) {
+    let t = app.t;
+    let Some(apps) = app.apps.confirm_all.clone() else {
+        return;
+    };
+    let n = apps.len();
+    let (mut go, mut close) = (false, false);
+    let resp = kit::modal(egui::Id::new("apps-select-all"), &t).show(ui.ctx(), |ui| {
+        ui.set_width(460.0);
+        kit::dialog_head(
+            ui,
+            &t,
+            Icon::Remover,
+            t.sec_a,
+            &format!("Select all {n} apps?"),
+            "Every app listed is ticked for removal. Apps that are part of macOS stay unticked. Nothing is removed until you review and confirm.",
+        );
+        ui.add_space(space::L);
+        let (g, c) = kit::dialog_actions(ui, &t, &format!("Select {n} Apps"), kit::Kind::Primary);
+        go = g;
+        close = c;
+    });
+    if resp.should_close() {
+        close = true;
+    }
+    if go {
+        app.act();
+        app.apps.confirm_all = None;
+        set_picked(app, &apps, true);
+    } else if close {
+        app.act();
+        app.apps.confirm_all = None;
+    }
+}
+
+/// The ticked apps: how many, what they move with their leftovers, and the way on.
+fn apps_bottom_bar(app: &mut CleanApp, ui: &mut Ui) {
+    let t = app.t;
+    let n = app.apps.picked.len();
+    let apps_text = if n == 1 {
+        "1 app selected".to_string()
+    } else {
+        format!("{n} apps selected")
+    };
+    let size = picked_size(&app.apps);
+    let (figure, full) = match size {
+        Some(s) => (
+            human_size(s),
+            format!("{apps_text}, {} with their leftovers", human_size(s)),
+        ),
+        None => ("...".to_string(), format!("{apps_text}, measuring")),
+    };
+    kit::bottom_bar(ui, &t, egui::Id::new("apps-picked-bottom"), |ui| {
+        kit::bar_figure(
+            ui,
+            &t,
+            &figure,
+            &format!("{apps_text}, with their leftovers"),
+            &full,
+            size.is_none(),
+        );
+        ui.add_space(space::M);
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if kit::primary(ui, &t, "Review and Uninstall") {
+                app.act();
+                open_batch(app);
+            }
+            if kit::secondary(ui, &t, "Clear Selection") {
+                app.act();
+                app.apps.picked.clear();
+                app.apps.pick_sizes.clear();
+                app.apps.anchor = None;
+            }
+            kit::bar_hint(
+                ui,
+                &t,
+                "Shift-click selects a range. Each app's files are listed before anything moves.",
+            );
+        });
+    });
 }
 
 fn browse(app: &mut CleanApp, ui: &mut Ui) {
@@ -796,6 +1368,8 @@ fn browse(app: &mut CleanApp, ui: &mut Ui) {
     let file_group = app.apps.group.category().is_some();
     if file_group {
         files_bottom_bar(app, ui);
+    } else if !app.apps.picked.is_empty() {
+        apps_bottom_bar(app, ui);
     }
     let avail_h = ui.available_height() - 8.0;
     let body =
@@ -848,6 +1422,7 @@ fn browse(app: &mut CleanApp, ui: &mut Ui) {
                             } else {
                                 String::new()
                             };
+                            let check = group_check(&app.apps, &app.settings, g);
                             // Empty groups stay listed (so the list does not jump) but step back.
                             let r = ui
                                 .scope(|ui| {
@@ -864,10 +1439,14 @@ fn browse(app: &mut CleanApp, ui: &mut Ui) {
                                         size as f32 / total as f32,
                                         kit::series_color(&t, k),
                                         on,
-                                        None,
+                                        check,
                                     )
                                 })
                                 .inner;
+                            if let Some(v) = r.check_changed {
+                                app.act();
+                                select_group(app, g, v);
+                            }
                             if r.row_clicked {
                                 app.act();
                                 app.apps.group = g;
@@ -920,33 +1499,80 @@ fn apps_list(app: &mut CleanApp, ui: &mut Ui, h: f32) {
     }
     let now = now();
     let mut open = None;
+    // (row index, how: plain toggle, or Shift range).
+    let mut pick: Option<(usize, bool)> = None;
     let fade_out = egui::ScrollArea::vertical()
         .id_salt("apps-list")
         .max_height(h)
         .auto_shrink([false, false])
         .show_rows(ui, APP_ROW_H, rows.len(), |ui, range| {
             ui.spacing_mut().item_spacing.y = 0.0;
-            for a in &rows[range] {
+            for (k, a) in rows.iter().enumerate().skip(range.start).take(range.len()) {
                 let w = ui.available_width();
-                let (r, resp) = ui.allocate_exact_size(vec2(w, APP_ROW_H), Sense::click());
+                // A stable id: the keyboard focus stays on the row when the selection bar
+                // comes or goes.
+                let (r, _) = ui.allocate_exact_size(vec2(w, APP_ROW_H), Sense::hover());
+                let resp = ui.interact(r, egui::Id::new(("apps-row", &a.path)), Sense::click());
                 resp.widget_info(|| {
                     egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &a.name)
                 });
+                let picked = app.apps.picked.contains(&a.path);
+                // The row opens the app; Cmd-click ticks it, Shift-click ticks a range, and
+                // Space on the focused row ticks it (Return opens it).
                 if resp.clicked() {
-                    open = Some(a.path.clone());
+                    let (m, space) = ui.input(|i| (i.modifiers, i.key_pressed(Key::Space)));
+                    if space && resp.has_focus() {
+                        if pickable(a) {
+                            pick = Some((k, false));
+                        }
+                    } else if m.shift && pickable(a) {
+                        pick = Some((k, true));
+                    } else if m.command && pickable(a) {
+                        pick = Some((k, false));
+                    } else {
+                        open = Some(a.path.clone());
+                    }
                 }
                 let feel = kit::feel_ring(ui, &t, &resp, r.shrink(2.0), 10.0);
                 let hov = feel.hov;
                 let p = ui.painter().clone();
-                if hov > 0.0 || feel.down > 0.0 {
+                if picked {
+                    p.rect_filled(
+                        r.shrink(2.0),
+                        10.0,
+                        t.sec_a.gamma_multiply(0.07 + 0.04 * hov + 0.04 * feel.down),
+                    );
+                } else if hov > 0.0 || feel.down > 0.0 {
                     p.rect_filled(
                         r.shrink(2.0),
                         10.0,
                         Color32::from_white_alpha((10.0 * hov + 8.0 * feel.down) as u8),
                     );
                 }
+                // The checkbox; a padlock for an app that is part of macOS.
+                let cb_rect =
+                    Rect::from_center_size(pos2(r.left() + 20.0, r.center().y), vec2(22.0, 22.0));
+                let mut on = picked;
+                let cb = kit::check_or_lock(
+                    ui,
+                    &t,
+                    cb_rect,
+                    &mut on,
+                    &format!("Select {}", a.name),
+                    !pickable(a),
+                );
+                if cb.changed() {
+                    let shift = ui.input(|i| i.modifiers.shift);
+                    pick = Some((k, shift));
+                }
+                if !pickable(a) {
+                    cb.on_disabled_hover_text(format!(
+                        "{} is part of macOS and cannot be removed",
+                        a.name
+                    ));
+                }
                 let tile = Rect::from_center_size(
-                    pos2(r.left() + 30.0, r.center().y),
+                    pos2(r.left() + 62.0, r.center().y),
                     egui::Vec2::splat(crate::theme::icon::APP_ROW + 4.0),
                 );
                 kit::app_icon(ui, tile, &a.name, Some(&a.path));
@@ -1019,6 +1645,33 @@ fn apps_list(app: &mut CleanApp, ui: &mut Ui, h: f32) {
             }
         });
     kit::scroll_fade(ui, &fade_out, t.glass_solid());
+    if let Some((k, range)) = pick {
+        app.act();
+        let target = rows[k].path.clone();
+        let anchor = app
+            .apps
+            .anchor
+            .as_ref()
+            .and_then(|a| rows.iter().position(|r| &r.path == a));
+        match (range, anchor) {
+            (true, Some(from)) => {
+                // Shift: the range takes the anchor's state (ticked unless it was unticked).
+                let on = app.apps.picked.contains(&rows[from].path) || from == k;
+                let (lo, hi) = (from.min(k), from.max(k));
+                let paths: Vec<PathBuf> = rows[lo..=hi]
+                    .iter()
+                    .filter(|a| pickable(a))
+                    .map(|a| a.path.clone())
+                    .collect();
+                set_picked(app, &paths, on);
+            }
+            _ => {
+                let on = !app.apps.picked.contains(&target);
+                set_picked(app, std::slice::from_ref(&target), on);
+                app.apps.anchor = Some(target);
+            }
+        }
+    }
     if let Some(p) = open {
         app.act();
         open_app(app, &p);
@@ -1379,6 +2032,10 @@ fn block_of(app: &CleanApp, plan: &Plan, path: &Path) -> Option<Block> {
     if plan.notes.is_empty() {
         return None;
     }
+    // An app already in the Trash (the Trash offer): only running blocks its leftovers.
+    if cleancraft_core::watch::in_trash(&app.env, path) {
+        return app.apps.running.then_some(Block::Running);
+    }
     if app.settings.is_ignored(path) {
         return Some(Block::Ignored(plan.notes[0].clone()));
     }
@@ -1475,107 +2132,125 @@ fn detail(app: &mut CleanApp, ui: &mut Ui) {
         block_banner(app, ui, b, &name, &path);
         ui.add_space(space::S);
     }
-    let shared_lock = plan.notes.first().cloned();
+    let trashed = cleancraft_core::watch::in_trash(&app.env, &path);
+    // The lock every row carries (the banner says it once).
+    let shared_lock = plan
+        .items
+        .first()
+        .and_then(|i| i.locked.clone())
+        .filter(|l| {
+            plan.items
+                .iter()
+                .all(|i| i.locked.as_deref() == Some(l.as_str()))
+        });
+    if trashed && let Some(note) = plan.notes.first() {
+        kit::strip(ui, Icon::Trash, t.text_dim, note);
+        ui.add_space(space::S);
+    }
     let files_sel = plan
         .selected()
         .filter(|i| i.category != uninstaller::CAT_APP)
         .count();
-    kit::bottom_bar(ui, &t, egui::Id::new("apps-detail-bottom"), |ui| {
-        // The same bar as every page with a selection (REVIEW-C C19): the size, the count,
-        // the hint in the room left, the buttons.
-        let n = plan.selected_count();
-        let size = plan.selected_size();
-        kit::bar_figure(
-            ui,
-            &t,
-            &human_size(size),
-            &format!("{} selected", cleancraft_core::fsutil::items(n)),
-            &format!("{n} selected, {}", human_size(size)),
-            block.is_some(),
-        );
-        ui.add_space(space::M);
-        let hint = match &block {
-            Some(Block::Running) => Some(format!("Quit {name} to choose what to remove.")),
-            Some(Block::System(_)) => Some("macOS keeps this app.".to_string()),
-            Some(Block::Ignored(_)) => Some("On your ignore list.".to_string()),
-            None if files_sel == 0 => Some("Select files to reset the app.".to_string()),
-            None => None,
-        };
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            // A blocked action is a quiet, disabled button (a pale red one reads as broken).
-            let can_uninstall = block.is_none()
-                && plan
-                    .items
-                    .iter()
-                    .any(|i| i.category == uninstaller::CAT_APP && i.locked.is_none());
-            let kind = if can_uninstall {
-                kit::Kind::Danger
-            } else {
-                kit::Kind::Secondary
+    if trashed {
+        trashed_bar(app, ui, &plan, block.is_some(), &name);
+    } else {
+        kit::bottom_bar(ui, &t, egui::Id::new("apps-detail-bottom"), |ui| {
+            // The same bar as every page with a selection (REVIEW-C C19): the size, the count,
+            // the hint in the room left, the buttons.
+            let n = plan.selected_count();
+            let size = plan.selected_size();
+            kit::bar_figure(
+                ui,
+                &t,
+                &human_size(size),
+                &format!("{} selected", cleancraft_core::fsutil::items(n)),
+                &format!("{n} selected, {}", human_size(size)),
+                block.is_some(),
+            );
+            ui.add_space(space::M);
+            let hint = match &block {
+                Some(Block::Running) => Some(format!("Quit {name} to choose what to remove.")),
+                Some(Block::System(_)) => Some("macOS keeps this app.".to_string()),
+                Some(Block::Ignored(_)) => Some("On your ignore list.".to_string()),
+                None if files_sel == 0 => Some("Select files to reset the app.".to_string()),
+                None => None,
             };
-            let un = ui
-                .add_enabled_ui(can_uninstall, |ui| {
-                    kit::pill(ui, &t, "Uninstall", kind, None)
-                })
-                .inner;
-            let why_not = match &block {
-                Some(Block::Running) => format!("Quit {name} first."),
-                Some(Block::System(s) | Block::Ignored(s)) => s.clone(),
-                None => String::new(),
-            };
-            let un = un.on_disabled_hover_text(&why_not);
-            if un.clicked() && can_uninstall {
-                app.act();
-                app.apps.pending = app.apps.detail.clone();
-                app.apps.phase = Phase::Confirm(Action::Uninstall);
-            }
-            let can_reset = block.is_none() && files_sel > 0;
-            let rs = ui.add_enabled_ui(can_reset, |ui| {
-                kit::pill(ui, &t, "Reset App...", kit::Kind::Secondary, None)
-            });
-            let rs = rs
-                .inner
-                .on_hover_text("Remove the app's settings and data, keep the app")
-                .on_disabled_hover_text(if block.is_some() {
-                    why_not.as_str()
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                // A blocked action is a quiet, disabled button (a pale red one reads as broken).
+                let can_uninstall = block.is_none()
+                    && plan
+                        .items
+                        .iter()
+                        .any(|i| i.category == uninstaller::CAT_APP && i.locked.is_none());
+                let kind = if can_uninstall {
+                    kit::Kind::Danger
                 } else {
-                    "Select the files to remove first. The app stays."
-                });
-            if rs.clicked() && can_reset {
-                app.act();
-                match uninstaller::uninstall_plan(&app.env, &app.settings, &path, true) {
-                    Ok(mut p) => {
-                        copy_selection(&plan, &mut p);
-                        app.apps.pending = Some(p);
-                        app.apps.phase = Phase::Confirm(Action::Reset);
-                    }
-                    Err(e) => app.apps.error = Some(format!("{e:#}")),
+                    kit::Kind::Secondary
+                };
+                let un = ui
+                    .add_enabled_ui(can_uninstall, |ui| {
+                        kit::pill(ui, &t, "Uninstall", kind, None)
+                    })
+                    .inner;
+                let why_not = match &block {
+                    Some(Block::Running) => format!("Quit {name} first."),
+                    Some(Block::System(s) | Block::Ignored(s)) => s.clone(),
+                    None => String::new(),
+                };
+                let un = un.on_disabled_hover_text(&why_not);
+                if un.clicked() && can_uninstall {
+                    app.act();
+                    app.apps.pending = app.apps.detail.clone();
+                    app.apps.phase = Phase::Confirm(Action::Uninstall);
                 }
-            }
-            if kit::pill(ui, &t, "Scan Again", kit::Kind::Secondary, None)
-                .on_hover_text("Look at the app's files again")
-                .clicked()
-            {
-                app.act();
-                rebuild_detail(app, Some(&plan));
-            }
-            if !app.settings.is_ignored(&path) && !matches!(block, Some(Block::System(_))) {
-                let ig = kit::secondary_resp(ui, &t, "Hide from List");
-                if ig
-                    .on_hover_text("Never offer this app for removal (Settings > Ignore list)")
+                let can_reset = block.is_none() && files_sel > 0;
+                let rs = ui.add_enabled_ui(can_reset, |ui| {
+                    kit::pill(ui, &t, "Reset App...", kit::Kind::Secondary, None)
+                });
+                let rs = rs
+                    .inner
+                    .on_hover_text("Remove the app's settings and data, keep the app")
+                    .on_disabled_hover_text(if block.is_some() {
+                        why_not.as_str()
+                    } else {
+                        "Select the files to remove first. The app stays."
+                    });
+                if rs.clicked() && can_reset {
+                    app.act();
+                    match uninstaller::uninstall_plan(&app.env, &app.settings, &path, true) {
+                        Ok(mut p) => {
+                            copy_selection(&plan, &mut p);
+                            app.apps.pending = Some(p);
+                            app.apps.phase = Phase::Confirm(Action::Reset);
+                        }
+                        Err(e) => app.apps.error = Some(format!("{e:#}")),
+                    }
+                }
+                if kit::pill(ui, &t, "Scan Again", kit::Kind::Secondary, None)
+                    .on_hover_text("Look at the app's files again")
                     .clicked()
                 {
                     app.act();
-                    app.settings.ignore.push(path.clone());
-                    app.save_settings();
-                    close_detail(app);
+                    rebuild_detail(app, Some(&plan));
                 }
-            }
-            if let Some(h) = &hint {
-                kit::bar_hint(ui, &t, h);
-            }
+                if !app.settings.is_ignored(&path) && !matches!(block, Some(Block::System(_))) {
+                    let ig = kit::secondary_resp(ui, &t, "Hide from List");
+                    if ig
+                        .on_hover_text("Never offer this app for removal (Settings > Ignore list)")
+                        .clicked()
+                    {
+                        app.act();
+                        app.settings.ignore.push(path.clone());
+                        app.save_settings();
+                        close_detail(app);
+                    }
+                }
+                if let Some(h) = &hint {
+                    kit::bar_hint(ui, &t, h);
+                }
+            });
         });
-    });
+    }
     ui.add_space(space::XS);
     let h = ui.available_height() - 4.0;
     let mut toggles = Vec::new();
@@ -1619,6 +2294,50 @@ fn detail(app: &mut CleanApp, ui: &mut Ui) {
     if app.apps.confirm_admin {
         confirm_admin(app, ui, &name);
     }
+}
+
+/// The bar of an app already in the Trash: its leftovers only (Remove Leftovers).
+fn trashed_bar(app: &mut CleanApp, ui: &mut Ui, plan: &Plan, blocked: bool, name: &str) {
+    let t = app.t;
+    let n = plan.selected_count();
+    let size = plan.selected_size();
+    kit::bottom_bar(ui, &t, egui::Id::new("apps-trashed-bottom"), |ui| {
+        kit::bar_figure(
+            ui,
+            &t,
+            &human_size(size),
+            &format!("{} selected", cleancraft_core::fsutil::items(n)),
+            &format!("{n} selected, {}", human_size(size)),
+            blocked,
+        );
+        ui.add_space(space::M);
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let can = !blocked && n > 0;
+            let kind = if can {
+                kit::Kind::Danger
+            } else {
+                kit::Kind::Secondary
+            };
+            let r = ui
+                .add_enabled_ui(can, |ui| kit::pill(ui, &t, "Remove Leftovers", kind, None))
+                .inner
+                .on_disabled_hover_text(if blocked {
+                    format!("Quit {name} first.")
+                } else {
+                    "Select the files to remove first.".to_string()
+                });
+            if r.clicked() && can {
+                app.act();
+                app.apps.pending = app.apps.detail.clone();
+                app.apps.phase = Phase::Confirm(Action::RemoveFiles);
+            }
+            if blocked {
+                kit::bar_hint(ui, &t, &format!("Quit {name} to remove its files."));
+            } else if n == 0 {
+                kit::bar_hint(ui, &t, "Tick the files to remove.");
+            }
+        });
+    });
 }
 
 /// A group of the app's files: a dot in the group's colour, its title, size and count, and
@@ -1944,7 +2663,7 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, action: Action) {
     let headline = match action {
         Action::Uninstall => format!("Uninstall {name}? {n} ({size}) {verb} to {dest}."),
         Action::Reset => format!("Reset {name}? {n} ({size}) {verb} to {dest}. The app stays."),
-        Action::RemoveFiles => format!("Move {n} ({size}) to {dest}?"),
+        Action::RemoveFiles | Action::UninstallApps => format!("Move {n} ({size}) to {dest}?"),
     };
     let mut go = false;
     let mut close = false;
@@ -2028,7 +2747,7 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
     let what = match action {
         Action::Uninstall => "Uninstalled. ",
         Action::Reset => "Reset done. ",
-        Action::RemoveFiles => "",
+        Action::RemoveFiles | Action::UninstallApps => "",
     };
     let summary = format!(
         "{what}{}",
@@ -2084,6 +2803,1042 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
             }
         },
     );
+}
+
+// ---------- several apps: review, confirmation, result ----------
+
+/// The review of the ticked apps: every app's files in its own group (folded on request),
+/// a Quit banner for each running app, and one Uninstall for the apps that can go.
+fn batch_review(app: &mut CleanApp, ui: &mut Ui) {
+    let t = app.t;
+    let quiet = matches!(app.apps.phase, Phase::Browse)
+        && app
+            .apps
+            .batch
+            .as_ref()
+            .is_some_and(|b| b.confirm_force.is_none() && b.confirm_admin.is_none());
+    let esc = quiet && ui.input(|i| i.key_pressed(Key::Escape));
+    let back = kit::pill(ui, &t, "Back to Apps", kit::Kind::Ghost, Some(Icon::Back)).clicked();
+    if esc || back {
+        app.act();
+        app.apps.batch = None;
+        return;
+    }
+    let Some(b) = app.apps.batch.as_ref() else {
+        return;
+    };
+    let plan = b.plan.clone();
+    let apps = b.apps.clone();
+    let running: Vec<PathBuf> = apps
+        .iter()
+        .filter(|a| a.running)
+        .map(|a| a.path.clone())
+        .collect();
+    let quitting: Vec<PathBuf> = b.quitting.as_ref().map(|q| q.0.clone()).unwrap_or_default();
+    let free = apps.len() - running.len();
+    ui.add_space(space::S);
+    // Headline: how many apps, what moves.
+    ui.horizontal(|ui| {
+        let total = human_size(plan.selected_size());
+        let total_font = font(size::NUMBER, Weight::Bold);
+        let total_w = kit::galley(ui, &total, total_font.clone(), t.text).size().x + 8.0;
+        ui.vertical(|ui| {
+            ui.set_max_width((ui.available_width() - total_w - 16.0).max(120.0));
+            ui.spacing_mut().item_spacing.y = 3.0;
+            ui.label(
+                RichText::new(if apps.len() == 1 {
+                    "Uninstall 1 app".to_string()
+                } else {
+                    format!("Uninstall {} apps", apps.len())
+                })
+                .font(font(size::TITLE, Weight::Bold))
+                .color(t.text),
+            );
+            ui.add(
+                egui::Label::new(
+                    RichText::new(
+                        "Each app with the files named after it, selected for you. Check the rest before you tick it.",
+                    )
+                    .font(font(size::CALLOUT, Weight::Regular))
+                    .color(t.text_dim),
+                )
+                .wrap(),
+            );
+        });
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.label(RichText::new(total).font(total_font).color(icons::lerp(
+                t.sec_a,
+                Color32::WHITE,
+                0.15,
+            )));
+        });
+    });
+    ui.add_space(space::S);
+    // Running apps: said once at the top, with Quit All; each app's group has its own banner.
+    if running.len() > 1 {
+        let names: Vec<String> = apps
+            .iter()
+            .filter(|a| a.running)
+            .map(|a| a.name.clone())
+            .collect();
+        let text = format!(
+            "{} are running. {}",
+            join_names(&names),
+            if free > 0 {
+                "Quit them to uninstall them too. The other apps can be uninstalled now."
+            } else {
+                "Quit them to uninstall them."
+            }
+        );
+        let quit_all = if quitting.is_empty() {
+            kit::banner(ui, &t, Icon::Warning, t.warning, &text, "Quit All")
+        } else {
+            kit::strip(ui, Icon::Warning, t.warning, &text);
+            false
+        };
+        if quit_all {
+            app.act();
+            ask_batch_quit(app, running.clone());
+        }
+        ui.add_space(space::S);
+    }
+    let selected_apps = apps
+        .iter()
+        .filter(|a| {
+            plan.selected().any(|i| {
+                i.category == uninstaller::CAT_APP && i.group.as_deref() == Some(a.group.as_str())
+            })
+        })
+        .count();
+    kit::bottom_bar(ui, &t, egui::Id::new("apps-batch-bottom"), |ui| {
+        let n = plan.selected_count();
+        kit::bar_figure(
+            ui,
+            &t,
+            &human_size(plan.selected_size()),
+            &format!(
+                "{} selected from {}",
+                cleancraft_core::fsutil::items(n),
+                if selected_apps == 1 {
+                    "1 app".to_string()
+                } else {
+                    format!("{selected_apps} apps")
+                }
+            ),
+            &format!(
+                "{n} selected from {selected_apps} apps, {}",
+                human_size(plan.selected_size())
+            ),
+            selected_apps == 0,
+        );
+        ui.add_space(space::M);
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let can = selected_apps > 0;
+            let label = if selected_apps == 1 {
+                "Uninstall 1 App".to_string()
+            } else {
+                format!("Uninstall {selected_apps} Apps")
+            };
+            let kind = if can {
+                kit::Kind::Danger
+            } else {
+                kit::Kind::Secondary
+            };
+            let un = ui
+                .add_enabled_ui(can, |ui| kit::pill(ui, &t, &label, kind, None))
+                .inner
+                .on_disabled_hover_text("Quit the running apps first.");
+            if un.clicked() && can {
+                app.act();
+                app.apps.pending = app.apps.batch.as_ref().map(|b| b.plan.clone());
+                app.apps.phase = Phase::Confirm(Action::UninstallApps);
+            }
+            if kit::pill(ui, &t, "Scan Again", kit::Kind::Secondary, None)
+                .on_hover_text("Look at the apps' files again")
+                .clicked()
+            {
+                app.act();
+                rebuild_batch(app);
+            }
+            if !can {
+                kit::bar_hint(ui, &t, "Quit the running apps to uninstall them.");
+            } else if !running.is_empty() {
+                kit::bar_hint(ui, &t, "Running apps stay until you quit them.");
+            }
+        });
+    });
+    ui.add_space(space::XS);
+    let h = ui.available_height() - 4.0;
+    let mut toggles = Vec::new();
+    let mut fold = None;
+    let mut quit_one = None;
+    let mut force_one = None;
+    let mut leave = None;
+    kit::card(&t)
+        .inner_margin(egui::Margin::symmetric(8, 8))
+        .show(ui, |ui| {
+            ui.set_min_size(egui::vec2(ui.available_width(), h - 18.0));
+            let fade_out = egui::ScrollArea::vertical()
+                .id_salt("apps-batch")
+                .max_height(h - 18.0)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    for (k, a) in apps.iter().enumerate() {
+                        let items: Vec<&cleancraft_core::Item> = plan
+                            .items
+                            .iter()
+                            .filter(|i| i.group.as_deref() == Some(a.group.as_str()))
+                            .collect();
+                        ui.add_space(if k == 0 { 4.0 } else { 14.0 });
+                        let open = !app
+                            .apps
+                            .batch
+                            .as_ref()
+                            .is_some_and(|b| b.collapsed.contains(&a.path));
+                        let acts =
+                            batch_app_head(app, ui, a, &items, open, quitting.contains(&a.path));
+                        if acts.fold {
+                            fold = Some(a.path.clone());
+                        }
+                        if acts.quit {
+                            quit_one = Some(a.path.clone());
+                        }
+                        if acts.force {
+                            force_one = Some(a.path.clone());
+                        }
+                        if acts.leave {
+                            leave = Some(a.path.clone());
+                        }
+                        if !open {
+                            continue;
+                        }
+                        for it in items {
+                            if let Some(on) = file_row(app, ui, it, a.lock.as_deref(), true) {
+                                toggles.push((it.id, on));
+                            }
+                        }
+                    }
+                    ui.add_space(4.0);
+                });
+            kit::scroll_fade(ui, &fade_out, t.glass_solid());
+        });
+    for (id, on) in toggles {
+        app.act();
+        if let Some(b) = app.apps.batch.as_mut() {
+            b.plan.set_selected(id, on);
+        }
+    }
+    if let Some(p) = fold {
+        app.act();
+        if let Some(b) = app.apps.batch.as_mut()
+            && !b.collapsed.remove(&p)
+        {
+            b.collapsed.insert(p);
+        }
+    }
+    if let Some(p) = quit_one {
+        app.act();
+        ask_batch_quit(app, vec![p]);
+    }
+    if let Some(p) = force_one {
+        app.act();
+        if let Some(b) = app.apps.batch.as_mut() {
+            b.confirm_force = Some(p);
+        }
+    }
+    if let Some(p) = leave {
+        app.act();
+        leave_out(app, &p);
+    }
+    batch_force_dialog(app, ui);
+    batch_admin_dialog(app, ui);
+}
+
+#[derive(Default)]
+struct HeadActs {
+    fold: bool,
+    quit: bool,
+    force: bool,
+    leave: bool,
+}
+
+/// An app's group in the review: fold button, icon, name, what is selected, its state, and
+/// (while it runs) its Quit banner.
+fn batch_app_head(
+    app: &CleanApp,
+    ui: &mut Ui,
+    a: &uninstaller::BatchApp,
+    items: &[&cleancraft_core::Item],
+    open: bool,
+    quitting: bool,
+) -> HeadActs {
+    let t = app.t;
+    let mut acts = HeadActs::default();
+    let sel: Vec<&&cleancraft_core::Item> = items
+        .iter()
+        .filter(|i| i.selected && i.locked.is_none())
+        .collect();
+    let sel_size: u64 = sel.iter().map(|i| i.size).sum();
+    let admin = sel.iter().any(|i| i.needs_admin);
+    ui.horizontal(|ui| {
+        ui.set_min_height(44.0);
+        ui.add_space(4.0);
+        let label = if open {
+            format!("Hide files of {}", a.name)
+        } else {
+            format!("Show files of {}", a.name)
+        };
+        let (fr, fresp) = ui.allocate_exact_size(vec2(26.0, 26.0), Sense::click());
+        fresp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
+        let feel = kit::feel_ring(ui, &t, &fresp, fr, 6.0);
+        if feel.hov > 0.0 {
+            ui.painter()
+                .rect_filled(fr, 6.0, Color32::from_white_alpha((12.0 * feel.hov) as u8));
+        }
+        // The chevron points right when folded, down when open.
+        let cr = Rect::from_center_size(fr.center(), vec2(12.0, 12.0));
+        let ink = icons::lerp(t.text_dim, t.text, feel.hov);
+        if open {
+            let c = cr.center();
+            ui.painter().line(
+                vec![
+                    pos2(c.x - 4.0, c.y - 2.0),
+                    pos2(c.x, c.y + 2.5),
+                    pos2(c.x + 4.0, c.y - 2.0),
+                ],
+                egui::Stroke::new(1.8, ink),
+            );
+        } else {
+            icons::paint(ui.painter(), cr, Icon::Chevron, ink);
+        }
+        if fresp.clicked() {
+            acts.fold = true;
+        }
+        ui.add_space(4.0);
+        let (ir, _) = ui.allocate_exact_size(egui::Vec2::splat(32.0), Sense::hover());
+        kit::app_icon(ui, ir, &a.name, Some(&a.path));
+        ui.add_space(6.0);
+        ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = 1.0;
+            ui.label(
+                RichText::new(&a.name)
+                    .font(font(size::BODY, Weight::SemiBold))
+                    .color(t.text),
+            );
+            let line = if a.running {
+                "Running: its files stay until it quits".to_string()
+            } else {
+                format!(
+                    "{} selected, {}{}",
+                    cleancraft_core::fsutil::items(sel.len()),
+                    human_size(sel_size),
+                    if admin { "  ·  needs password" } else { "" }
+                )
+            };
+            ui.label(
+                RichText::new(line)
+                    .font(font(size::FOOTNOTE, Weight::Regular))
+                    .color(if a.running { t.warning } else { t.text_dim }),
+            );
+        });
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let r = kit::ghost(ui, &t, "Leave Out", None);
+            r.widget_info(|| {
+                egui::WidgetInfo::labeled(
+                    egui::WidgetType::Button,
+                    true,
+                    format!("Leave Out {}", a.name),
+                )
+            });
+            if r.on_hover_text(format!("Keep {} and remove it from this list", a.name))
+                .clicked()
+            {
+                acts.leave = true;
+            }
+        });
+    });
+    if a.running {
+        let note = app
+            .apps
+            .batch
+            .as_ref()
+            .and_then(|b| b.quit_notes.get(&a.path).cloned());
+        let parts = app
+            .apps
+            .batch
+            .as_ref()
+            .and_then(|b| b.parts.get(&a.path).cloned());
+        let (head, line) = match (&note, quitting) {
+            (_, true) => (
+                format!("Waiting for {} to quit...", a.name),
+                format!("{} may ask you to save your work first.", a.name),
+            ),
+            (Some((h, l)), false) => (h.clone(), l.clone()),
+            (None, false) => (
+                parts
+                    .as_ref()
+                    .map(|s| s.headline())
+                    .filter(|h| !h.is_empty())
+                    .unwrap_or_else(|| format!("{} is open", a.name)),
+                "Quit it to uninstall it with the others. Its files unlock as soon as it closes."
+                    .to_string(),
+            ),
+        };
+        ui.horizontal(|ui| {
+            ui.add_space(36.0);
+            egui::Frame::new()
+                .fill(t.warning.gamma_multiply(0.10))
+                .stroke(egui::Stroke::new(1.0, t.warning.gamma_multiply(0.35)))
+                .corner_radius(egui::CornerRadius::same(crate::theme::radius::M))
+                .inner_margin(egui::Margin::symmetric(14, 10))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width() - 8.0);
+                    ui.horizontal(|ui| {
+                        let (r, _) =
+                            ui.allocate_exact_size(egui::Vec2::splat(18.0), Sense::hover());
+                        icons::paint(ui.painter(), r, Icon::Warning, t.warning);
+                        ui.add_space(space::XS);
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if quitting {
+                                let (r, _) =
+                                    ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
+                                let time = ui.input(|i| i.time);
+                                kit::progress_ring(ui.painter(), r.center(), 16.0, &t, time);
+                                ui.ctx().request_repaint();
+                            } else {
+                                let label = if note.is_some() {
+                                    format!("Try Again to Quit {}", a.name)
+                                } else {
+                                    format!("Quit {}", a.name)
+                                };
+                                if kit::pill(ui, &t, &label, kit::Kind::Primary, None).clicked() {
+                                    acts.quit = true;
+                                }
+                                if note.is_some() {
+                                    ui.add_space(space::XS);
+                                    let f =
+                                        kit::pill(ui, &t, "Force Quit", kit::Kind::Secondary, None);
+                                    f.widget_info(|| {
+                                        egui::WidgetInfo::labeled(
+                                            egui::WidgetType::Button,
+                                            true,
+                                            format!("Force Quit {}", a.name),
+                                        )
+                                    });
+                                    if f.on_hover_text(format!("Stop {} at once", a.name))
+                                        .clicked()
+                                    {
+                                        acts.force = true;
+                                    }
+                                }
+                            }
+                            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                                ui.vertical(|ui| {
+                                    ui.spacing_mut().item_spacing.y = 2.0;
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(&head)
+                                                .font(font(size::CALLOUT, Weight::SemiBold))
+                                                .color(icons::lerp(
+                                                    t.warning,
+                                                    Color32::WHITE,
+                                                    0.55,
+                                                )),
+                                        )
+                                        .truncate(),
+                                    );
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(&line)
+                                                .font(font(size::FOOTNOTE, Weight::Regular))
+                                                .color(t.text_dim),
+                                        )
+                                        .wrap(),
+                                    );
+                                    if let Some(st) = &parts {
+                                        let lines: Vec<String> = st
+                                            .running()
+                                            .filter(|p| p.kind != app_quit::PartKind::App)
+                                            .map(|p| format!("{}  ·  {}", p.name, p.role()))
+                                            .collect();
+                                        for l in lines.iter().take(3) {
+                                            kit::dim(ui, &t, l);
+                                        }
+                                        if lines.len() > 3 {
+                                            kit::dim(
+                                                ui,
+                                                &t,
+                                                &format!("and {} more", lines.len() - 3),
+                                            );
+                                        }
+                                    }
+                                });
+                            });
+                        });
+                    });
+                });
+        });
+        ui.add_space(4.0);
+    }
+    acts
+}
+
+/// Force Quit one app of the review, after its confirmation.
+fn batch_force_dialog(app: &mut CleanApp, ui: &mut Ui) {
+    let t = app.t;
+    let Some(path) = app
+        .apps
+        .batch
+        .as_ref()
+        .and_then(|b| b.confirm_force.clone())
+    else {
+        return;
+    };
+    let name = app_name(&path);
+    let (mut go, mut close) = (false, false);
+    let resp = kit::modal(egui::Id::new("apps-batch-force"), &t).show(ui.ctx(), |ui| {
+        ui.set_width(480.0);
+        crate::images::dialog_head_app(
+            ui,
+            &t,
+            &path,
+            &format!("Force quit {name}?"),
+            "It stops at once, without asking to save. Work you have not saved in it is lost.",
+        );
+        ui.add_space(space::L);
+        let (g, c) = kit::dialog_actions(ui, &t, "Force Quit", kit::Kind::Danger);
+        go = g;
+        close = c;
+    });
+    if resp.should_close() {
+        close = true;
+    }
+    if go || close {
+        app.act();
+        if let Some(b) = app.apps.batch.as_mut() {
+            b.confirm_force = None;
+        }
+    }
+    if go {
+        let admin = app
+            .apps
+            .batch
+            .as_ref()
+            .and_then(|b| b.parts.get(&path))
+            .is_some_and(|s| s.needs_admin());
+        start_batch_quit(app, vec![path], true, admin);
+    }
+}
+
+/// A system service of an app to quit runs as root: stopping it asks for the password.
+fn batch_admin_dialog(app: &mut CleanApp, ui: &mut Ui) {
+    let t = app.t;
+    let Some(paths) = app
+        .apps
+        .batch
+        .as_ref()
+        .and_then(|b| b.confirm_admin.clone())
+    else {
+        return;
+    };
+    let questions: Vec<String> = app
+        .apps
+        .batch
+        .as_ref()
+        .map(|b| {
+            paths
+                .iter()
+                .filter_map(|p| b.parts.get(p).and_then(|s| s.admin_question()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let names: Vec<String> = paths.iter().map(|p| app_name(p)).collect();
+    let (mut all, mut rest, mut close) = (false, false, false);
+    let resp = kit::modal(egui::Id::new("apps-batch-admin"), &t).show(ui.ctx(), |ui| {
+        ui.set_width(520.0);
+        kit::dialog_head(
+            ui,
+            &t,
+            Icon::Warning,
+            t.warning,
+            &format!("Quit {}?", join_names(&names)),
+            &questions.join(" "),
+        );
+        ui.add_space(space::L);
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if kit::primary(ui, &t, "Quit and Enter Password") {
+                all = true;
+            }
+            if kit::secondary(ui, &t, "Quit the Rest") {
+                rest = true;
+            }
+            if kit::secondary(ui, &t, "Cancel") {
+                close = true;
+            }
+        });
+    });
+    if resp.should_close() {
+        close = true;
+    }
+    if all || rest || close {
+        app.act();
+        if let Some(b) = app.apps.batch.as_mut() {
+            b.confirm_admin = None;
+        }
+    }
+    if all || rest {
+        start_batch_quit(app, paths, false, all);
+    }
+}
+
+/// The one confirmation for several apps: every file, under its app, and the password note
+/// once (one dialog for all of them).
+fn batch_confirm(app: &mut CleanApp, ui: &mut Ui) {
+    let t = app.t;
+    let (Some(plan), Some(apps)) = (
+        app.apps.pending.clone(),
+        app.apps.batch.as_ref().map(|b| b.apps.clone()),
+    ) else {
+        app.apps.phase = Phase::Browse;
+        return;
+    };
+    let dest = match app.settings.method {
+        Method::Trash => "the Trash",
+        Method::Quarantine | Method::AdminQuarantine => "the CleanCraft quarantine",
+    };
+    let going: Vec<&uninstaller::BatchApp> = apps
+        .iter()
+        .filter(|a| {
+            plan.selected().any(|i| {
+                i.category == uninstaller::CAT_APP && i.group.as_deref() == Some(a.group.as_str())
+            })
+        })
+        .collect();
+    let n = cleancraft_core::fsutil::items(plan.selected_count());
+    let size = human_size(plan.selected_size());
+    let verb = if plan.selected_count() == 1 {
+        "moves"
+    } else {
+        "move"
+    };
+    let headline = format!(
+        "Uninstall {}? {n} ({size}) {verb} to {dest}.",
+        if going.len() == 1 {
+            going[0].name.clone()
+        } else {
+            format!("{} apps", going.len())
+        }
+    );
+    let staying: Vec<String> = apps
+        .iter()
+        .filter(|a| a.running)
+        .map(|a| a.name.clone())
+        .collect();
+    let (mut go, mut close) = (false, false);
+    let width = (ui.ctx().content_rect().width() - 120.0).clamp(420.0, 680.0);
+    let max_list = (ui.ctx().content_rect().height() - 360.0).clamp(120.0, 380.0);
+    let resp = kit::modal(egui::Id::new("apps-batch-confirm"), &t).show(ui.ctx(), |ui| {
+        ui.set_width(width);
+        kit::dialog_head(
+            ui,
+            &t,
+            Icon::Remover,
+            t.sec_a,
+            &headline,
+            "These exact files will be moved. You can put them back from History, all at once or app by app.",
+        );
+        ui.add_space(space::M);
+        if let Some(note) =
+            super::plan_page::admin_note(cleancraft_core::features::admin_count(&plan))
+        {
+            kit::strip(ui, Icon::Warning, t.warning, &note);
+            ui.add_space(space::S);
+        }
+        if !staying.is_empty() {
+            kit::strip(
+                ui,
+                Icon::Lock,
+                t.text_dim,
+                &format!(
+                    "{} {} running and {} until you quit {}.",
+                    join_names(&staying),
+                    if staying.len() == 1 { "is" } else { "are" },
+                    if staying.len() == 1 { "stays" } else { "stay" },
+                    if staying.len() == 1 { "it" } else { "them" }
+                ),
+            );
+            ui.add_space(space::S);
+        }
+        kit::well(&t).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            egui::ScrollArea::vertical()
+                .id_salt("apps-batch-confirm-list")
+                .max_height(max_list)
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    for a in &going {
+                        let rows: Vec<&cleancraft_core::Item> = plan
+                            .selected()
+                            .filter(|i| i.group.as_deref() == Some(a.group.as_str()))
+                            .collect();
+                        let sz: u64 = rows.iter().map(|i| i.size).sum();
+                        ui.add_space(6.0);
+                        ui.label(
+                            RichText::new(format!(
+                                "{}  ·  {}, {}",
+                                a.name,
+                                cleancraft_core::fsutil::items(rows.len()),
+                                human_size(sz)
+                            ))
+                            .font(font(size::CALLOUT, Weight::SemiBold))
+                            .color(t.text),
+                        );
+                        for it in rows {
+                            kit::confirm_line(
+                                ui,
+                                &t,
+                                &it.path,
+                                &app.env.display(&it.path),
+                                &it.reason,
+                                &human_size(it.size),
+                            );
+                        }
+                    }
+                });
+        });
+        ui.add_space(space::L);
+        let label = match app.settings.method {
+            Method::Trash => "Move to Trash",
+            Method::Quarantine | Method::AdminQuarantine => "Move to Quarantine",
+        };
+        let (g, c) = kit::dialog_actions(ui, &t, label, kit::Kind::Danger);
+        go = g;
+        close = c;
+    });
+    if resp.should_close() {
+        close = true;
+    }
+    if go {
+        app.act();
+        start_action(app, Action::UninstallApps);
+        poll(app);
+    } else if close {
+        app.act();
+        app.apps.pending = None;
+        app.apps.phase = Phase::Browse;
+    }
+}
+
+/// The result of several apps: what moved, per app, with Undo All and Undo per app.
+fn batch_done(app: &mut CleanApp, ui: &mut Ui) {
+    let Phase::Done(rep, _) = &app.apps.phase else {
+        return;
+    };
+    let rep = rep.clone();
+    let results = app
+        .apps
+        .batch
+        .as_ref()
+        .map(|b| b.results.clone())
+        .unwrap_or_default();
+    let undone = app
+        .apps
+        .batch
+        .as_ref()
+        .map(|b| b.undone.clone())
+        .unwrap_or_default();
+    let running: BTreeSet<PathBuf> = app
+        .apps
+        .batch
+        .as_ref()
+        .map(|b| {
+            b.apps
+                .iter()
+                .filter(|a| a.running)
+                .map(|a| a.path.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    let removed = results.iter().filter(|r| r.removed).count();
+    let summary = format!(
+        "{} {} uninstalled. {}",
+        removed,
+        if removed == 1 { "app" } else { "apps" },
+        kit::moved_summary(rep.moved.len(), rep.skipped.len())
+    );
+    let t = app.t;
+    let started = kit::first_seen(ui, ("done", &rep.plan_id));
+    let id = egui::Id::new(("batch-done", &rep.plan_id));
+    let mut undo_all = false;
+    let mut undo_one: Option<PathBuf> = None;
+    let mut history = false;
+    let mut finish = false;
+    kit::centered_block(ui, id, |ui| {
+        let d = if ui.available_height() < 560.0 {
+            110.0
+        } else {
+            150.0
+        };
+        kit::done_hero(ui, &t, FeatureId::Uninstaller, d, started);
+        ui.add_space(space::M);
+        ui.label(
+            RichText::new(features::moved_text([&rep]))
+                .font(font(size::LARGE_TITLE, Weight::Bold))
+                .color(t.text),
+        );
+        ui.add_space(space::XS);
+        ui.label(
+            RichText::new(&summary)
+                .font(font(size::BODY_L, Weight::Regular))
+                .color(t.text_dim),
+        );
+        ui.add_space(space::L);
+        kit::centered_row(ui, id.with("buttons"), |ui| {
+            let any = rep.moved.len()
+                > results
+                    .iter()
+                    .filter(|r| undone.contains(&r.path))
+                    .map(|r| r.moved.len())
+                    .sum::<usize>();
+            if any
+                && kit::pill(ui, &t, "Undo All", kit::Kind::Secondary, Some(Icon::Undo))
+                    .on_hover_text("Put back every app and file of this uninstall")
+                    .clicked()
+            {
+                undo_all = true;
+            }
+            if kit::pill(
+                ui,
+                &t,
+                "Show History",
+                kit::Kind::Secondary,
+                Some(Icon::History),
+            )
+            .clicked()
+            {
+                history = true;
+            }
+            if kit::primary(ui, &t, "Done") {
+                finish = true;
+            }
+        });
+        ui.add_space(space::L);
+        let h = (ui.available_height() - 40.0).max(160.0);
+        kit::card(&t)
+            .inner_margin(egui::Margin::symmetric(12, 10))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width().min(760.0));
+                egui::ScrollArea::vertical()
+                    .id_salt("apps-batch-results")
+                    .max_height(h)
+                    .show(ui, |ui| {
+                        for r in &results {
+                            if result_row(
+                                app,
+                                ui,
+                                r,
+                                undone.contains(&r.path),
+                                running.contains(&r.path),
+                            ) {
+                                undo_one = Some(r.path.clone());
+                            }
+                        }
+                    });
+            });
+    });
+    if undo_all || history || finish || undo_one.is_some() {
+        app.act();
+    }
+    if let Some(p) = undo_one {
+        let (n, errs) = uninstaller::undo_batch_app(&app.env, &rep.plan_id, &p);
+        report_undo(app, n, &errs);
+        if let Some(b) = app.apps.batch.as_mut() {
+            b.undone.insert(p);
+        }
+        app.files_back(&[]);
+        start_load(app);
+    }
+    if undo_all {
+        let (n, errs) = executor::undo_plan(&app.env, &rep.plan_id);
+        report_undo(app, n, &errs);
+        app.files_back(&CleanApp::moved_paths(&rep));
+        app.apps.phase = Phase::Browse;
+        app.apps.batch = None;
+        start_load(app);
+    }
+    if history {
+        app.apps.phase = Phase::Browse;
+        app.apps.batch = None;
+        app.navigate("history");
+    }
+    if finish {
+        app.apps.phase = Phase::Browse;
+        app.apps.batch = None;
+    }
+}
+
+fn report_undo(app: &mut CleanApp, n: usize, errs: &[(String, executor::UndoError)]) {
+    if errs.is_empty() {
+        app.tell(format!("{} put back.", cleancraft_core::fsutil::items(n)));
+    } else {
+        app.warn(format!(
+            "{} put back, {} could not be: {}",
+            cleancraft_core::fsutil::items(n),
+            errs.len(),
+            errs[0].1
+        ));
+    }
+}
+
+/// One app's result: uninstalled or not, what moved, every file that stayed with the
+/// reason, and Undo for it. Returns true when its Undo was clicked.
+fn result_row(
+    app: &CleanApp,
+    ui: &mut Ui,
+    r: &uninstaller::AppResult,
+    undone: bool,
+    was_running: bool,
+) -> bool {
+    let t = app.t;
+    let mut undo = false;
+    ui.horizontal(|ui| {
+        ui.set_min_height(42.0);
+        let (ir, _) = ui.allocate_exact_size(egui::Vec2::splat(30.0), Sense::hover());
+        kit::app_icon(ui, ir, &r.name, Some(&r.path));
+        ui.add_space(6.0);
+        let (state, color) = if undone {
+            ("Put back".to_string(), t.text_dim)
+        } else if r.removed {
+            (
+                format!(
+                    "Uninstalled  ·  {} moved, {}",
+                    cleancraft_core::fsutil::items(r.moved.len()),
+                    human_size(r.moved_size)
+                ),
+                t.success,
+            )
+        } else if r.moved.is_empty() && was_running {
+            (
+                "Not removed: it was running. Quit it, then uninstall it.".to_string(),
+                t.warning,
+            )
+        } else if r.moved.is_empty() {
+            ("Not removed".to_string(), t.warning)
+        } else {
+            (
+                format!(
+                    "Kept: the app itself did not move  ·  {} moved",
+                    cleancraft_core::fsutil::items(r.moved.len())
+                ),
+                t.warning,
+            )
+        };
+        ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = 1.0;
+            ui.label(
+                RichText::new(&r.name)
+                    .font(font(size::BODY, Weight::SemiBold))
+                    .color(t.text),
+            );
+            ui.label(
+                RichText::new(&state)
+                    .font(font(size::FOOTNOTE, Weight::Medium))
+                    .color(color),
+            );
+        });
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if !undone && !r.moved.is_empty() {
+                let b = kit::pill(ui, &t, "Undo", kit::Kind::Secondary, Some(Icon::Undo));
+                b.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Button,
+                        true,
+                        format!("Undo {}", r.name),
+                    )
+                });
+                if b.on_hover_text(format!("Put back {} and its files", r.name))
+                    .clicked()
+                {
+                    undo = true;
+                }
+            }
+        });
+    });
+    for (p, why) in &r.skipped {
+        ui.horizontal(|ui| {
+            ui.add_space(42.0);
+            let (ir, _) = ui.allocate_exact_size(egui::Vec2::splat(14.0), Sense::hover());
+            icons::paint(ui.painter(), ir, Icon::Warning, t.warning);
+            let shown = app.env.display(p);
+            let line = format!("{}: {why}", short_name(&shown));
+            let r = ui.add(
+                egui::Label::new(
+                    RichText::new(&line)
+                        .font(font(size::FOOTNOTE, Weight::Regular))
+                        .color(t.text_dim),
+                )
+                .truncate(),
+            );
+            r.on_hover_text(format!("{shown}: {why}"));
+        });
+    }
+    ui.add_space(6.0);
+    undo
+}
+
+fn short_name(shown: &str) -> &str {
+    split_shown(shown).1
+}
+
+/// In History, an uninstall of several apps: one line per app with its own Undo (the card's
+/// Undo All puts back everything at once).
+pub fn history_batch_rows(app: &mut CleanApp, ui: &mut Ui, plan_id: &str) {
+    if !plan_id.starts_with(uninstaller::BATCH_PREFIX) {
+        return;
+    }
+    let t = app.t;
+    let entries = uninstaller::batch_entries(&app.env, plan_id);
+    let mut undo = None;
+    for e in &entries {
+        let ids = uninstaller::batch_app_records(&app.env, plan_id, &e.path);
+        ui.horizontal(|ui| {
+            ui.add_space(36.0);
+            let (ir, _) = ui.allocate_exact_size(egui::Vec2::splat(22.0), Sense::hover());
+            kit::app_icon(ui, ir, &e.name, Some(&e.path));
+            ui.label(
+                RichText::new(&e.name)
+                    .font(font(size::CALLOUT, Weight::Medium))
+                    .color(t.text),
+            );
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ids.is_empty() {
+                    kit::dim(ui, &t, "Put back");
+                    return;
+                }
+                let b = kit::pill(ui, &t, "Undo", kit::Kind::Ghost, Some(Icon::Undo));
+                b.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Button,
+                        true,
+                        format!("Undo {}", e.name),
+                    )
+                });
+                if b.on_hover_text(format!("Put back {} and its files", e.name))
+                    .clicked()
+                {
+                    undo = Some(e.path.clone());
+                }
+            });
+        });
+    }
+    if let Some(p) = undo {
+        app.act();
+        let (n, errs) = uninstaller::undo_batch_app(&app.env, plan_id, &p);
+        report_undo(app, n, &errs);
+        app.files_back(&[]);
+        app.history.reload(&app.env);
+    }
 }
 
 // ---------- updates ----------
