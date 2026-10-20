@@ -94,7 +94,7 @@ pub const CATEGORIES: &[(&str, &str, &str)] = &[
     ),
 ];
 
-pub const LOCK_TRACKED: &str = "Git tracks files in this folder, so it is part of your project. To clean it here, take it out of git (git rm -r --cached and the folder name), list it in .gitignore, then scan again";
+pub const LOCK_TRACKED: &str = "Git tracks files in this folder, so it is part of your project. To clean it here, stop tracking it in git, list it in .gitignore, then scan again";
 pub const LOCK_UNCHECKED: &str = "CleanCraft could not ask git whether it tracks files here, and .gitignore does not list it, so it is kept. List it in the project's .gitignore (or install the command line tools with xcode-select --install), then scan again";
 pub const LOCK_NOT_ALLOWED: &str = "Not inside one of your code folders. Add its folder under Developer Clutter in Settings, then scan again";
 pub const LOCK_OWN_GIT: &str = "It holds its own git repository (.git), so it may be work of yours. Look inside it in Finder before you remove it yourself";
