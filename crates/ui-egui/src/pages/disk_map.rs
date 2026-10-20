@@ -123,11 +123,13 @@ fn start_map(app: &mut CleanApp, root: PathBuf, fresh: bool) {
     let cancel = st.cancel.clone();
     st.root = Some(root.clone());
     st.current = Some(root.clone());
+    // Before measuring: the first play writes the sound into CleanCraft's cache folder
+    // (in Library), which the map would otherwise miss.
+    crate::sound::play(&app.env, crate::sound::Cue::ScanStart);
     let job = Job::start(app.sync, move |status| {
         space::build(&root, &cancel, &|n, _| status(&format!("{n} files")))
     });
     app.disk_map.phase = Phase::Scanning(job);
-    crate::sound::play(&app.env, crate::sound::Cue::ScanStart);
 }
 
 /// Finish background work. Returns true while something runs.
@@ -136,6 +138,7 @@ pub fn poll(app: &mut CleanApp) -> bool {
     let mut notice: Option<(String, bool)> = None;
     // Tell the other pages (plan pages, Quick Sweep) what moved or came back.
     let mut moved: Option<Vec<PathBuf>> = None;
+    let mut done_scan = false;
     let mut came_back = false;
     let busy = match &mut st.phase {
         Phase::Scanning(job) => {
@@ -146,7 +149,7 @@ pub fn poll(app: &mut CleanApp) -> bool {
                 } else if let Some(r) = st.root.clone() {
                     st.trees.insert(r, tree);
                     st.phase = Phase::Map;
-                    crate::sound::play(&app.env, crate::sound::Cue::ScanDone);
+                    done_scan = true;
                 }
                 st.watch.prime(&app.env);
                 false
@@ -222,9 +225,12 @@ pub fn poll(app: &mut CleanApp) -> bool {
         }
         _ => false,
     };
+    if done_scan {
+        play(app, crate::sound::Cue::ScanDone);
+    }
     if let Some(m) = moved {
         app.files_moved(&m);
-        crate::sound::play(&app.env, crate::sound::Cue::CleanDone);
+        play(app, crate::sound::Cue::CleanDone);
     }
     if came_back {
         app.files_back(&[]);
@@ -237,6 +243,16 @@ pub fn poll(app: &mut CleanApp) -> bool {
         }
     }
     busy
+}
+
+/// Play a sound, then measure CleanCraft's sound cache again: the first play of a cue writes
+/// its file there (in Library), and the map must not miss it.
+fn play(app: &mut CleanApp, cue: crate::sound::Cue) {
+    crate::sound::play(&app.env, cue);
+    let dir = crate::sound::cache_dir(&app.env);
+    for t in app.disk_map.trees.values_mut() {
+        t.refresh(&dir);
+    }
 }
 
 /// Moves and undos made elsewhere (another page, History, an agent) since the map was
