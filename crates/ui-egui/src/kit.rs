@@ -62,6 +62,20 @@ pub fn feel(ui: &Ui, resp: &Response) -> Feel {
     }
 }
 
+const TAP_KEY: &str = "cleancraft-tap";
+
+/// A switch or checkbox was toggled this frame: the shell plays the Tap cue once (only when
+/// "Click sounds on switches" is on, see `sound::play`). Kit widgets have no `Env`.
+pub fn note_tap(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(TAP_KEY), true));
+}
+
+/// Whether a toggle happened since the last call (the shell asks once per frame).
+pub fn take_tap(ctx: &egui::Context) -> bool {
+    ctx.data_mut(|d| d.remove_temp::<bool>(egui::Id::new(TAP_KEY)))
+        .unwrap_or(false)
+}
+
 /// The pointing hand over an enabled, hovered control. Disabled controls keep the arrow.
 pub fn pointer(resp: &Response) {
     if resp.enabled() && resp.hovered() && resp.sense.senses_click() {
@@ -94,6 +108,33 @@ pub fn feel_ring(ui: &Ui, t: &Tokens, resp: &Response, shape: Rect, round: f32) 
         focus_ring(ui.painter(), t, shape, round);
     }
     f
+}
+
+/// A tooltip that never covers the row it describes: it opens under `row` (above it near
+/// the bottom of the window), after the usual hover delay, while `resp` is hovered. Use it
+/// for paths, reasons and tags inside list rows instead of `on_hover_text`.
+pub fn row_tip(resp: &Response, row: Rect, text: &str) {
+    let mut tip = egui::Tooltip::for_enabled(resp);
+    tip.popup = tip
+        .popup
+        .anchor(row)
+        .align(egui::RectAlign::BOTTOM_START)
+        .align_alternatives(&[egui::RectAlign::TOP_START])
+        .gap(4.0);
+    tip.show(|ui| {
+        ui.label(text);
+    });
+}
+
+/// The Done screen's summary: "3 items moved." and, only when some did not move, "2
+/// skipped." (REVIEW-C C31: no "0 skipped").
+pub fn moved_summary(moved: usize, skipped: usize) -> String {
+    let m = cleancraft_core::fsutil::items(moved);
+    if skipped == 0 {
+        format!("{m} moved.")
+    } else {
+        format!("{m} moved. {skipped} skipped.")
+    }
 }
 
 /// A slider in CleanCraft's style (egui's slider with the pointing hand over it).
@@ -190,14 +231,34 @@ pub fn pill(ui: &mut Ui, t: &Tokens, label: &str, kind: Kind, icon: Option<Icon>
         focus_ring(ui.painter(), t, rect, rect.height() / 2.0);
     }
     let p = ui.painter().clone();
-    let p = if enabled {
-        p
-    } else {
-        let mut q = p;
-        q.set_opacity(0.4);
-        q
-    };
     let round = r.height() / 2.0;
+    // Disabled: one clear style for every kind, a flat outlined pill with faint text (a pale
+    // gradient read as broken). The label and its icon stay readable.
+    if !enabled {
+        if kind != Kind::Ghost {
+            p.rect_filled(r, round, Color32::from_white_alpha(8));
+            p.rect_stroke(
+                r,
+                round,
+                Stroke::new(1.0, Color32::from_white_alpha(22)),
+                egui::StrokeKind::Inside,
+            );
+        }
+        let color = t.text_faint;
+        let content_w = galley.size().x + icon_w;
+        let mut x = r.center().x - content_w / 2.0;
+        if let Some(ic) = icon {
+            let ir =
+                Rect::from_center_size(pos2(x + fs / 2.0, r.center().y), Vec2::splat(fs + 1.0));
+            icons::paint(&p, ir, ic, color);
+            x += icon_w;
+        }
+        let g = ui
+            .painter()
+            .layout_no_wrap(label.to_string(), font(fs, weight), color);
+        p.galley(pos2(x, r.center().y - g.size().y / 2.0), g, color);
+        return resp;
+    }
     let text_color = match kind {
         Kind::Primary => {
             if hov > 0.0 {
@@ -1723,11 +1784,27 @@ pub fn sparkline(p: &egui::Painter, r: Rect, values: &[f64], slots: usize, color
     }
 }
 
+/// A reason tag's colour says one thing only, how careful to be (REVIEW-C C18): ordinary
+/// reasons (rebuilt on its own) are neutral; amber when something is lost; a deeper amber for
+/// the person's own files. Never red: red means an error. [`risk_note`] explains it.
 pub fn risk_color(t: &Tokens, r: cleancraft_core::Risk) -> Color32 {
     match r {
-        cleancraft_core::Risk::Low => t.success,
+        cleancraft_core::Risk::Low => t.text_dim,
         cleancraft_core::Risk::Medium => t.warning,
-        cleancraft_core::Risk::High => t.danger,
+        cleancraft_core::Risk::High => icons::lerp(t.warning, t.danger, 0.3),
+    }
+}
+
+/// What a tag's colour means, for its tooltip.
+pub fn risk_note(r: cleancraft_core::Risk) -> &'static str {
+    match r {
+        cleancraft_core::Risk::Low => "Safe to move: macOS or the app makes it again when needed.",
+        cleancraft_core::Risk::Medium => {
+            "Check first: something is lost if it moves (history, downloaded copies)."
+        }
+        cleancraft_core::Risk::High => {
+            "Your own files: never selected for you. Look before you move them."
+        }
     }
 }
 
@@ -1792,6 +1869,9 @@ pub fn switch(ui: &mut Ui, t: &Tokens, on: bool, name: &str) -> Response {
     let enabled = ui.is_enabled();
     resp.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, enabled, on, name));
     let r = Rect::from_center_size(outer.center(), vec2(38.0, 22.0));
+    if resp.clicked() && enabled {
+        note_tap(ui.ctx());
+    }
     let k = anim(ui.ctx(), resp.id.with("on"), on, motion::HOVER * 1.5);
     let f = feel(ui, &resp);
     let mut p = ui.painter().clone();
@@ -1995,6 +2075,59 @@ pub fn strip(ui: &mut Ui, icon: Icon, color: Color32, text: &str) {
         });
 }
 
+/// A banner like [`strip`] with an action button inside it, right-aligned and centred on the
+/// banner (REVIEW-C C22). Returns true when the button was clicked. The text wraps in the
+/// room the button leaves.
+pub fn banner(
+    ui: &mut Ui,
+    t: &Tokens,
+    icon: Icon,
+    color: Color32,
+    text: &str,
+    action: &str,
+) -> bool {
+    let mut clicked = false;
+    Frame::new()
+        .fill(color.gamma_multiply(0.12))
+        .stroke(Stroke::new(1.0, color.gamma_multiply(0.35)))
+        .corner_radius(CornerRadius::same(radius::M))
+        .inner_margin(Margin {
+            left: 14,
+            right: 8,
+            top: 6,
+            bottom: 6,
+        })
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            let btn_w = pill_size(ui, action, Kind::Secondary, false).x;
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                let (r, _) = ui.allocate_exact_size(Vec2::splat(isz::INLINE), Sense::hover());
+                icons::paint(ui.painter(), r, icon, color);
+                ui.add_space(space::XS);
+                let text_w = (ui.available_width() - btn_w - space::M).max(120.0);
+                ui.allocate_ui_with_layout(
+                    vec2(text_w, 0.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        ui.set_max_width(text_w);
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(text)
+                                    .font(font(size::CALLOUT, Weight::Regular))
+                                    .color(icons::lerp(color, Color32::WHITE, 0.55)),
+                            )
+                            .wrap(),
+                        );
+                    },
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    clicked = secondary(ui, t, action);
+                });
+            });
+        });
+    clicked
+}
+
 /// A label placed in `r`, showing `shown` but announcing `full` to accessibility (and
 /// tests), so shortened paths keep their real text.
 pub fn text_at(
@@ -2102,10 +2235,40 @@ pub fn check(ui: &mut Ui, t: &Tokens, on: &mut bool, name: &str) -> Response {
     if resp.clicked() && enabled {
         *on = !*on;
         resp.mark_changed();
+        note_tap(ui.ctx());
     }
     let state = *on;
     resp.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, enabled, state, name));
     paint_check(ui, t, r, &resp, state, enabled);
+    resp
+}
+
+/// A row's checkbox, or for a locked row a padlock in its place (dimmed; the reason goes in
+/// the row's tag or a banner, once). The padlock is still a disabled checkbox named `name`
+/// for VoiceOver and tests. `r` is the 22 pt box. Returns the checkbox response.
+pub fn check_or_lock(
+    ui: &mut Ui,
+    t: &Tokens,
+    r: Rect,
+    on: &mut bool,
+    name: &str,
+    locked: bool,
+) -> Response {
+    let resp = place(ui, r, |ui| {
+        if locked {
+            ui.multiply_opacity(0.0);
+        }
+        ui.add_enabled_ui(!locked, |ui| check(ui, t, on, name))
+            .inner
+    });
+    if locked {
+        icons::paint(
+            ui.painter(),
+            Rect::from_center_size(r.center(), Vec2::splat(isz::INLINE + 2.0)),
+            Icon::Lock,
+            t.text_faint,
+        );
+    }
     resp
 }
 
@@ -2117,6 +2280,7 @@ pub fn check_mixed(ui: &mut Ui, t: &Tokens, on: &mut bool, mixed: bool, name: &s
     if resp.clicked() && enabled {
         *on = !*on;
         resp.mark_changed();
+        note_tap(ui.ctx());
     }
     let state = *on;
     resp.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, enabled, state, name));
@@ -2195,6 +2359,7 @@ pub fn check_text_font(
     if resp.clicked() && enabled {
         *on = !*on;
         resp.mark_changed();
+        note_tap(ui.ctx());
     }
     let state = *on;
     resp.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, enabled, state, text));

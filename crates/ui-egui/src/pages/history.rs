@@ -43,6 +43,11 @@ pub struct JournalWatch {
 }
 
 impl JournalWatch {
+    /// Whether [`JournalWatch::prime`] ran.
+    pub fn is_primed(&self) -> bool {
+        self.stamp.is_some()
+    }
+
     /// Remember the log as it is now (the page's data reflects it).
     pub fn prime(&mut self, env: &cleancraft_core::Env) {
         self.stamp = Some(journal_stamp(env));

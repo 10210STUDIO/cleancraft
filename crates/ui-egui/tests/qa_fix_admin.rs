@@ -91,7 +91,7 @@ fn threat_in_a_root_folder_moves_with_the_password_and_comes_back() {
         &h,
         &format!("{} moved to the CleanCraft quarantine", human_size(size))
     ));
-    assert!(has(&h, "1 item moved. 0 skipped."));
+    assert!(has(&h, "1 item moved."));
     click(&mut h, "Undo");
     assert!(daemon.exists(), "put back");
     assert!(!stored.exists());

@@ -102,6 +102,9 @@ pub struct CleanApp {
     pub disk_epoch: u64,
     /// The original paths the last cleanup moved (empty after an Undo).
     pub last_moved: Vec<std::path::PathBuf>,
+    /// CleanCraft's action log as last seen: moves and Undos from any page (App Remover,
+    /// Disk Map, History, Startup) reach the plan pages and Quick Sweep through it.
+    journal: pages::history::JournalWatch,
 }
 
 /// Sidebar entry height.
@@ -136,6 +139,7 @@ impl CleanApp {
             section_tool: BTreeMap::new(),
             disk_epoch: 0,
             last_moved: Vec::new(),
+            journal: Default::default(),
         }
     }
 
@@ -210,6 +214,33 @@ impl CleanApp {
         self.last_moved = moved.to_vec();
     }
 
+    /// Apply what the action log says changed since the last look: items moved away by any
+    /// page leave every list; items put back make the lists scan again.
+    fn follow_journal(&mut self) {
+        let env = self.env.clone();
+        let Some(changed) = self.journal.changes(&env) else {
+            if !self.journal_primed() {
+                self.journal.prime(&env);
+            }
+            return;
+        };
+        let moved = pages::history::moved_paths(&changed);
+        let gone: Vec<std::path::PathBuf> =
+            moved.iter().filter(|m| !m.2).map(|m| m.0.clone()).collect();
+        let back: Vec<std::path::PathBuf> =
+            moved.iter().filter(|m| m.2).map(|m| m.0.clone()).collect();
+        if !gone.is_empty() {
+            self.files_moved(&gone);
+        }
+        if !back.is_empty() {
+            self.files_back(&back);
+        }
+    }
+
+    fn journal_primed(&self) -> bool {
+        self.journal.is_primed()
+    }
+
     /// The original paths a cleanup report moved.
     pub fn moved_paths(rep: &cleancraft_core::executor::Report) -> Vec<std::path::PathBuf> {
         rep.moved
@@ -273,6 +304,7 @@ impl CleanApp {
         busy |= pages::tasks::poll(self);
         busy |= pages::disk_map::poll(self);
         busy |= pages::monitor::poll(self);
+        self.follow_journal();
         if busy {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
@@ -287,6 +319,10 @@ impl CleanApp {
     }
 
     pub fn ui(&mut self, ui: &mut Ui) {
+        // A switch or checkbox toggled last frame: its click sound (when turned on).
+        if kit::take_tap(ui.ctx()) {
+            crate::sound::play(&self.env, crate::sound::Cue::Tap);
+        }
         self.t = self.t.for_section(self.section());
         let t = self.t;
         let full = ui.max_rect();

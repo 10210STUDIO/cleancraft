@@ -157,9 +157,9 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     }
     let t = app.t;
     let (icon, _) = kit::feature_look(&t, f);
-    if !matches!(app.sweep.phase, Phase::Idle) {
-        kit::header(ui, &t, icon, f.title(), SUBTITLE);
-    }
+    // One title row in every phase, at the same place (REVIEW-A 18, REVIEW-C C15): the start
+    // screen's large headline says what the scan does instead of repeating the name.
+    kit::header(ui, &t, icon, f.title(), "");
     match &app.sweep.phase {
         Phase::Idle => idle(app, ui),
         Phase::Scanning(j) => {
@@ -251,7 +251,7 @@ fn idle(app: &mut CleanApp, ui: &mut Ui) {
         &t,
         FeatureId::SmartCare,
         kit::HeroText {
-            title: FeatureId::SmartCare.title(),
+            title: "One scan for your whole Mac",
             desc: SUBTITLE,
             covers: &[],
             action: "Scan",
@@ -316,8 +316,11 @@ fn results(app: &mut CleanApp, ui: &mut Ui) {
             let rows_full = res.tiles.len().div_ceil(per_full) as f32;
             let scrolls = rows_full * TILE_MIN_H + gap * (rows_full - 1.0) > ui.available_height();
             let w = if scrolls { full - 14.0 } else { full };
-            let per_row = (((w + gap) / (236.0 + gap)).floor() as usize).clamp(1, 4);
-            let tile_w = (w - gap * (per_row as f32 - 1.0)) / per_row as f32;
+            let fit = (((w + gap) / (236.0 + gap)).floor() as usize).clamp(1, 4);
+            // As few rows as fit, with the tiles shared evenly between them (5 tiles: 3 + 2,
+            // never 4 + 1); a shorter last row widens its tiles, so no cell stays empty.
+            let rows = res.tiles.len().div_ceil(fit).max(1);
+            let per_row = res.tiles.len().div_ceil(rows).max(1);
             // Tiles share the height of the page, so the grid fills it instead of leaving
             // an empty lower half.
             let n_rows = res.tiles.len().div_ceil(per_row) as f32;
@@ -336,6 +339,7 @@ fn results(app: &mut CleanApp, ui: &mut Ui) {
                 if i > 0 {
                     ui.add_space(gap);
                 }
+                let tile_w = (w - gap * (chunk.len() as f32 - 1.0)) / chunk.len() as f32;
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = gap;
                     for (j, tile) in chunk.iter().enumerate() {
@@ -701,12 +705,20 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
                                         match &r.result {
                                             Ok(rep) => {
                                                 ui.label(
-                                                    RichText::new(format!(
-                                                        "{} moved, {} skipped, {}",
-                                                        rep.moved.len(),
-                                                        rep.skipped.len(),
-                                                        human_size(rep.freed)
-                                                    ))
+                                                    RichText::new(if rep.skipped.is_empty() {
+                                                        format!(
+                                                            "{} moved, {}",
+                                                            rep.moved.len(),
+                                                            human_size(rep.freed)
+                                                        )
+                                                    } else {
+                                                        format!(
+                                                            "{} moved, {} skipped, {}",
+                                                            rep.moved.len(),
+                                                            rep.skipped.len(),
+                                                            human_size(rep.freed)
+                                                        )
+                                                    })
                                                     .font(font(size::CALLOUT, Weight::Regular))
                                                     .color(t.text_dim),
                                                 );
