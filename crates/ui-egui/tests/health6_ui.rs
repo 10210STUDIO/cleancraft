@@ -12,7 +12,7 @@ use cleancraft_core::{FeatureId, mcp_setup};
 use cleancraft_ui_egui::app::Page;
 use cleancraft_ui_egui::pages::health::{self, Read};
 use common::{H, click, harness, has, has_text, steps};
-use egui_kittest::kittest::{NodeT, Queryable};
+use egui_kittest::kittest::Queryable;
 
 /// Click the first widget with this label (the sidebar entry before the switcher segment).
 fn click_first(h: &mut H, label: &str) {

@@ -447,7 +447,10 @@ fn task_01_first_launch_welcome_and_ai_step_not_now() {
     let mut t = Task::new("first launch: welcome, Full Disk Access, AI apps step, Not Now");
     dump(&h, "first screen");
     if h.state().page == Page::ConnectAi {
-        t.doubt("U7-5", "the first thing a new user sees is an AI connection page");
+        t.doubt(
+            "U7-5",
+            "the first thing a new user sees is an AI connection page",
+        );
     }
     t.see(&h, "Welcome to CleanCraft");
     t.click(&mut h, "Continue");
@@ -459,7 +462,10 @@ fn task_01_first_launch_welcome_and_ai_step_not_now() {
         t.doubt("U7-9", "the AI page title is not announced");
     }
     if has(&h, "Done") && has(&h, "Not Now") {
-        t.doubt("U7-9", "Done and Not Now both close the step with nothing connected");
+        t.doubt(
+            "U7-9",
+            "Done and Not Now both close the step with nothing connected",
+        );
     }
     t.click(&mut h, "Not Now");
     dump(&h, "after Not Now");

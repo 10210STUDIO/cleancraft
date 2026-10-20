@@ -3225,11 +3225,10 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
         .find(|(p, _)| is_app_bundle(p) && action == Action::Uninstall)
         .map(|(p, why)| (p.clone(), why.to_string()));
     let what = match (action, &kept) {
-        (Action::Uninstall, Some((p, why))) => format!(
-            "{} was not removed: {why}. {} ",
-            app_name(p),
-            app_kept_help(why)
-        ),
+        // The reason is in the "Not moved" card below; here what it means and what to do.
+        (Action::Uninstall, Some((p, why))) => {
+            format!("{} was not removed. {} ", app_name(p), app_kept_help(why))
+        }
         (Action::Uninstall, None) => "Uninstalled. ".into(),
         (Action::Reset, _) => "Reset done. ".into(),
         (Action::RemoveFiles | Action::UninstallApps, _) => String::new(),

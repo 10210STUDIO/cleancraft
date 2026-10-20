@@ -208,12 +208,13 @@ fn scan_select_three_review_confirm_all_gone_then_undo() {
     }
     assert!(has_text(&h, "5 items put back."));
     settle(&mut h);
-    let all = [&m.editor, &m.viewer, &m.jotter, &m.safari]
+    // lists7: apps that are part of macOS (Safari) are hidden from the groups by default.
+    let all = [&m.editor, &m.viewer, &m.jotter]
         .iter()
         .map(|p| tree_size(p).0)
         .sum::<u64>();
     assert!(
-        has_text(&h, &format!("All Apps  4  ·  {}", human_size(all))),
+        has_text(&h, &format!("All Apps  3  ·  {}", human_size(all))),
         "counts recalculated after Undo"
     );
 }

@@ -244,7 +244,14 @@ fn scenes() -> Vec<(&'static str, Box<dyn Fn() -> (FakeMac, H)>)> {
                 let m = th::troubled_mac_now();
                 base(&m);
                 let mut h = harness(&m, Access::Granted);
-                h.state_mut().launch_checks();
+                // Mac Health read once, as at launch, then back on Quick Sweep.
+                h.state_mut()
+                    .open_route(&cleancraft_core::route::AppRoute::Health);
+                settle(&mut h);
+                h.state_mut()
+                    .open_route(&cleancraft_core::route::AppRoute::Feature(
+                        FeatureId::SmartCare,
+                    ));
                 settle(&mut h);
                 click(&mut h, "App Updates");
                 (m, h)

@@ -1,6 +1,6 @@
 # fix7, round 7: the 18 findings of REVIEW-U7, and the lead's additions
 
-Branch agent7/fix7 (main dc7e109 + usab7, then main ee262b2 with qa7 and sfix7 merged). Every
+Branch agent7/fix7 (main dc7e109 + usab7, then main ee262b2 with qa7 and sfix7, then agent7/lists7 426c8eb merged). Every
 proof `u7_01..u7_18` in `crates/ui-egui/tests/review_usability7.rs` runs without `#[ignore]` and
 passes; the 13 walkthroughs (`--ignored task_`) all end in SUCCESS. Renders:
 `docs/screens/v2/r7/*-1280x820.png` (written by `crates/ui-egui/tests/fix7_render.rs` with
@@ -31,14 +31,18 @@ CLEANCRAFT_SNAPSHOTS=1), looked at one by one.
 
 ## Lead's additions
 
-- **App Store apps still listed (user bug).** Cause: Numbers and Pages are root-owned bundles, so they move only with the administrator password, and on macOS 13 and later even the administrator move is refused without App Management ("Operation not permitted"). The leftovers moved, the app stayed, and the single-app Done screen still said "Uninstalled." The list itself was right (inventory reads the disk, never Spotlight; the Trash and the quarantine are never listed). Fixed: "Numbers was not removed: <why>. <next step>", Show in Finder and Open App Management Settings; batch rows "Still installed. ..." and the headline "No app was uninstalled" when none was. Tests `fix7_app_store.rs` (moved: drops at once and matches a fresh inventory; refused; mixed batch; Trash/quarantine never listed). Posted on the board. MAC-CHECK: the App Management refusal and pane.
+- **App Store apps still listed (user bug).** Cause: Numbers and Pages are root-owned bundles, so they move only with the administrator password, and on macOS 13 and later even the administrator move is refused without App Management ("Operation not permitted"). The leftovers moved, the app stayed, and the single-app Done screen still said "Uninstalled." The list itself was right (inventory reads the disk, never Spotlight; the Trash and the quarantine are never listed). Fixed: "Numbers was not removed. <next step>" (the reason stays in the Not moved card), Show in Finder and Open App Management Settings; batch rows "Still installed. ..." and the headline "No app was uninstalled" when none was. Tests `fix7_app_store.rs` (moved: drops at once and matches a fresh inventory; refused; mixed batch; Trash/quarantine never listed). Posted on the board. MAC-CHECK: the App Management refusal and pane.
 - **Quick Sweep module chips.** The start screen's chips are toggles (filled with a check mark when on, outline with an empty circle when off, pointer, focus ring, Space/Enter, VoiceOver checkbox named after the module) writing `Settings::sweep_skip`, the same choice as each tile's Include; a module left out is not scanned at all (core `sweep::scan`); the button says "Scan 3 of 5"; none on disables Scan with "Choose at least one module above to scan." Tests `fix7_sweep_chips.rs`.
 - **Quick Sweep Done next step.** Each file that stayed shows the same next step as the module pages ("Quit the app that uses it, then Try Again.") and the module card has "Try Again <module>", which opens the confirmation with exactly those files. Test `fix7_sweep_chips::done_shows_the_next_step_and_try_again_moves_what_stayed`.
 - **First launch once** (user requirement): see U7-5.
 
 ## Other tests changed (behaviour changed on purpose)
 
-health6 (routes now scan, battery route, retention keeps the first of each day), health6_ui (routes, Why list, first launch, What grew link), tray_schedule and agent (menu bar hint), files_r6 and qa_files_r6 (top folder wording and contents selection), qa_apps_batch (bar wording), qa_sweep / qa_fix_sweep / fix5_review / fix6_defaults / review_usability (tile controls are named per module; a test that swaps the sweep sources lets the start screen lay out once before clicking, since the chip lines can change), qa_shell / fix5_review (AI switch wording), review_usability7 u7_09 and the walkthroughs (the AI step now follows the welcome).
+health6 (routes now scan, battery route, retention keeps the first of each day), health6_ui (routes, Why list, first launch, What grew link), tray_schedule and agent (menu bar hint), files_r6 and qa_files_r6 (top folder wording and contents selection), qa_apps_batch (bar wording), qa_sweep / qa_fix_sweep / fix5_review / fix6_defaults / review_usability (tile controls are named per module; a test that swaps the sweep sources lets the start screen lay out once before clicking, since the chip lines can change), qa_shell / fix5_review (AI switch wording), review_usability7 u7_09 and the walkthroughs (the AI step now follows the welcome), qa7_dev_clutter (rows read "tool / .venv", "app / target"), qa_apps_batch (after lists7, All Apps counts 3: macOS apps such as Safari are hidden by default).
+
+## Checks
+
+Last full `cargo test --workspace --no-fail-fast` on the merged tree: 120 targets green, one failing (qa_apps_batch, the lists7 count above), fixed and re-run with qa7_dev_clutter, fix7_app_store and fix7_render. `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --all` clean (Linux: the macOS-only files tray.rs and native_notify.rs are not compiled here). target/ deleted.
 
 ## Not done / open
 
