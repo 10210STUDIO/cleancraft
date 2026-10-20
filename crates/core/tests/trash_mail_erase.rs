@@ -68,7 +68,7 @@ fn unnamed_account_gets_a_short_name_and_on_my_mac_is_local() {
     );
     assert_eq!(by(&local).group.as_deref(), Some("Mail trash, On My Mac"));
     assert!(by(&local).reason.contains("stored only on this Mac"));
-    // Not named: Mail's "In All Accounts" is used, and the dialog says every account.
+    // Not named: no Erase (Mail's "In All Accounts" would erase more than is shown, SAF6-7).
     let (acct, _, _) = trash::mail_group(&m.env, &p, "Mail trash, account BDEB6609").unwrap();
     assert_eq!(acct, None);
     let (acct, _, _) = trash::mail_group(&m.env, &p, "Mail trash, On My Mac").unwrap();
@@ -147,28 +147,60 @@ fn erase_errors_are_explained() {
         stdout: String::new(),
         stderr: stderr.into(),
     };
+    let call = erase_call(Some("Work"));
     f.answer_full(
-        &erase_call(None),
+        &call,
         fail("System Events got an error: osascript is not allowed assistive access. (-1719)"),
     );
-    let out = trash::erase_in_mail(&m.env, None);
+    let out = trash::erase_in_mail(&m.env, Some("Work"));
     assert!(!out.ok && out.needs_accessibility);
     assert!(out.message.contains("Accessibility"), "{}", out.message);
-    assert!(
-        out.message
-            .contains("Mailbox > Erase Deleted Items > In All Accounts")
-    );
+    assert!(out.message.contains("Mailbox > Erase Deleted Items > Work"));
     f.answer_full(
-        &erase_call(None),
+        &call,
         fail("Not authorized to send Apple events to System Events. (-1743)"),
     );
-    let out = trash::erase_in_mail(&m.env, None);
+    let out = trash::erase_in_mail(&m.env, Some("Work"));
     assert!(out.needs_automation && out.message.contains("Automation"));
-    f.answer_full(&erase_call(None), fail("User canceled. (-128)"));
-    let out = trash::erase_in_mail(&m.env, None);
+    f.answer_full(&call, fail("User canceled. (-128)"));
+    let out = trash::erase_in_mail(&m.env, Some("Work"));
     assert!(!out.ok && out.message.contains("cancelled"));
+    // No menu item with that name: nothing else is clicked, and it says so.
+    f.answer_full(
+        &call,
+        fail("System Events got an error: Can't get menu item \"Work\". (-1728)"),
+    );
+    let out = trash::erase_in_mail(&m.env, Some("Work"));
+    assert!(
+        !out.ok && out.message.contains("nothing was erased"),
+        "{}",
+        out.message
+    );
     // Every attempt is in the log.
-    assert_eq!(executor::history(&m.env).len(), 3);
+    assert_eq!(executor::history(&m.env).len(), 4);
+}
+
+#[test]
+fn unnamed_account_only_opens_mail() {
+    let m = FakeMac::new();
+    let f = m.env.fake_sys().unwrap();
+    f.answer(&erase_call(None), "");
+    let script = trash::erase_script(None).join("\n");
+    assert!(!script.contains("In All Accounts") && !script.contains("click"));
+    let out = trash::erase_in_mail(&m.env, None);
+    assert!(!out.ok, "nothing was erased");
+    assert!(
+        out.message.contains("Choose Mailbox > Erase Deleted Items"),
+        "{}",
+        out.message
+    );
+    for named in [Some("iCloud"), Some("On My Mac")] {
+        assert!(
+            !trash::erase_script(named)
+                .join("\n")
+                .contains("In All Accounts")
+        );
+    }
 }
 
 #[test]

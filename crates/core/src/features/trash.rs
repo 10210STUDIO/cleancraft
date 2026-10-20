@@ -447,6 +447,11 @@ pub fn empty_trash_in_finder(env: &Env) -> EmptyOutcome {
         )
     } else if output.contains("-1743") || output.contains("Not authorized") {
         "macOS did not let CleanCraft ask Finder. Allow it in System Settings > Privacy & Security > Automation, then try again.".to_string()
+    } else if output.contains("-1728")
+        || output.contains("Can\u{2019}t get")
+        || output.contains("Can't get")
+    {
+        "Mail's menu has no item named like this account, so nothing was erased. In Mail, choose Mailbox > Erase Deleted Items and pick the account.".to_string()
     } else if output.contains("-128") {
         "Emptying the Trash was cancelled.".to_string()
     } else {
@@ -478,24 +483,28 @@ fn quoted(s: &str) -> String {
     format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
-/// The lines of the script that chooses Mail's Mailbox > Erase Deleted Items > `account`
-/// ("In All Accounts" when `account` is None), each passed with its own `-e`.
+/// The lines of the script that chooses Mail's Mailbox > Erase Deleted Items > `account`,
+/// each passed with its own `-e`. Without an account name the script only opens Mail: Mail's
+/// "In All Accounts" would erase more than the person confirmed (safety6 SAF6-7), so it is
+/// never used. When Mail's menu has no item with that name, the click fails (-1728) and the
+/// error says so; nothing else is clicked.
 pub fn erase_script(account: Option<&str>) -> Vec<String> {
-    let item = quoted(account.unwrap_or("In All Accounts"));
-    vec![
-        "tell application \"Mail\" to activate".into(),
+    let mut v = vec!["tell application \"Mail\" to activate".to_string()];
+    let Some(name) = account else {
+        return v;
+    };
+    let item = quoted(name);
+    v.extend([
         "delay 1".into(),
         "tell application \"System Events\"".into(),
         "tell process \"Mail\"".into(),
-        "set m to menu 1 of menu bar item \"Mailbox\" of menu bar 1".into(),
-        "try".into(),
-        format!("click menu item {item} of menu 1 of menu item \"Erase Deleted Items\" of m"),
-        "on error number -1728".into(),
-        "click menu item \"Erase Deleted Items\" of m".into(),
-        "end try".into(),
+        format!(
+            "click menu item {item} of menu 1 of menu item \"Erase Deleted Items\" of menu 1 of menu bar item \"Mailbox\" of menu bar 1"
+        ),
         "end tell".into(),
         "end tell".into(),
-    ]
+    ]);
+    v
 }
 
 /// Ask Mail to erase the deleted messages of `account` (as Mail names it in the menu) with its
@@ -557,9 +566,17 @@ pub fn erase_in_mail(env: &Env, account: Option<&str>) -> EraseOutcome {
     let logged = executor::append_journal(env, &rec);
     let menu = format!(
         "Mailbox > Erase Deleted Items > {}",
-        account.unwrap_or("In All Accounts")
+        account.unwrap_or("the account")
     );
-    out.message = if ok {
+    out.message = if account.is_none() {
+        // Mail was only opened: the person picks the account in Mail's own menu.
+        out.ok = false;
+        if ok {
+            format!("Mail is open. Choose {menu} there, then Scan Again here.")
+        } else {
+            format!("Mail could not be opened ({output}). In Mail, choose {menu}.")
+        }
+    } else if ok {
         format!(
             "Mail is erasing the deleted messages ({menu}). If Mail asks, confirm in its window; the list updates in a few seconds."
         )

@@ -18,7 +18,6 @@ use cleancraft_core::testkit::{FakeMac, age};
 use cleancraft_core::{Fault, FeatureId, Plan, Settings};
 use cleancraft_ui_egui::app::Page;
 use common::*;
-use egui_kittest::kittest::Queryable;
 
 fn blob(seed: u8, n: usize) -> Vec<u8> {
     (0..n)

@@ -138,7 +138,7 @@ pub fn record_at(env: &Env, loc: &MapLocation, tree: &Tree, taken: i64) -> std::
     f.version = VERSION;
     f.snapshots.push(snap);
     // Newest first, then at most KEEP per location.
-    f.snapshots.sort_by(|a, b| b.taken.cmp(&a.taken));
+    f.snapshots.sort_by_key(|s| std::cmp::Reverse(s.taken));
     let mut seen: std::collections::HashMap<String, usize> = Default::default();
     f.snapshots.retain(|s| {
         let n = seen.entry(s.location.clone()).or_default();
@@ -155,7 +155,7 @@ pub fn record_at(env: &Env, loc: &MapLocation, tree: &Tree, taken: i64) -> std::
 /// Every kept snapshot, newest first (at most two per location), with env paths.
 pub fn saved(env: &Env) -> Vec<Snapshot> {
     let mut v = load_file(env).snapshots;
-    v.sort_by(|a, b| b.taken.cmp(&a.taken));
+    v.sort_by_key(|s| std::cmp::Reverse(s.taken));
     for s in &mut v {
         s.root = restored(env, &s.root);
         for e in &mut s.entries {
