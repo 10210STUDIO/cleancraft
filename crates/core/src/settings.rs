@@ -46,6 +46,11 @@ pub struct Settings {
     pub disk_low_percent: u8,
     /// The menu bar agent shows no notifications while this is on.
     pub notifications_paused: bool,
+    /// Developer Clutter: code folders to look in besides the usual ones (~/Projects...).
+    pub dev_roots: Vec<PathBuf>,
+    /// Developer Clutter: a project with no file changed for this many days is inactive and
+    /// its build folders are selected for you.
+    pub dev_inactive_days: u64,
 }
 
 /// Interface sounds start at this loudness (0.0 to 1.0).
@@ -75,6 +80,8 @@ impl Default for Settings {
             scan_weekday: 1,
             disk_low_percent: DEFAULT_DISK_LOW_PERCENT,
             notifications_paused: false,
+            dev_roots: Vec::new(),
+            dev_inactive_days: 30,
         }
     }
 }

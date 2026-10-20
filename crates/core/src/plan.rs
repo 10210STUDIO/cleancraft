@@ -42,10 +42,11 @@ pub enum FeatureId {
     #[serde(rename = "disk_map", alias = "space_lens")]
     SpaceLens,
     Monitor,
+    DevClutter,
 }
 
 impl FeatureId {
-    pub const ALL: [FeatureId; 15] = [
+    pub const ALL: [FeatureId; 16] = [
         FeatureId::SmartCare,
         FeatureId::SystemJunk,
         FeatureId::MailAttachments,
@@ -61,6 +62,7 @@ impl FeatureId {
         FeatureId::Privacy,
         FeatureId::SpaceLens,
         FeatureId::Monitor,
+        FeatureId::DevClutter,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -80,6 +82,7 @@ impl FeatureId {
             FeatureId::Privacy => "privacy",
             FeatureId::SpaceLens => "disk_map",
             FeatureId::Monitor => "monitor",
+            FeatureId::DevClutter => "dev_clutter",
         }
     }
 
@@ -111,6 +114,7 @@ impl FeatureId {
             FeatureId::Privacy => "Privacy Traces",
             FeatureId::SpaceLens => "Disk Map",
             FeatureId::Monitor => "Live Monitor",
+            FeatureId::DevClutter => "Developer Clutter",
         }
     }
 }

@@ -30,6 +30,7 @@ pub const GROUPS: &[(&str, &[FeatureId])] = &[
             FeatureId::SystemJunk,
             FeatureId::MailAttachments,
             FeatureId::TrashBins,
+            FeatureId::DevClutter,
         ],
     ),
     ("Protect", &[FeatureId::Malware, FeatureId::Privacy]),
