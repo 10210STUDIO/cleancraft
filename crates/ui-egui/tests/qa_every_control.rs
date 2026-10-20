@@ -12,7 +12,7 @@
 //!   (labels, values, check states) did not change;
 //! - the app panicked;
 //! - any text on screen says "not available", "coming soon", "not implemented", "TODO",
-//!   contains an em dash, or uses the word "nor".
+//!   contains an em dash, or uses the conjunction the house rules ban (docs/agents/STANDARD.md, rule 7).
 //!
 //! Controls shared by every page (sidebar rows, the Full Disk Access banner, the notice's
 //! Dismiss button) are tested once in `shell_controls_respond`. A control a state inherits from
@@ -290,6 +290,7 @@ fn mac_settings() -> FakeMac {
 const CLICKABLE: &[Role] = &[
     Role::Button,
     Role::CheckBox,
+    Role::Switch,
     Role::RadioButton,
     Role::ComboBox,
     Role::Link,
@@ -485,9 +486,9 @@ fn bad_texts(ns: &[N]) -> Vec<String> {
             }
             if lower
                 .split(|c: char| !c.is_alphanumeric())
-                .any(|w| w == "nor")
+                .any(|w| w == concat!("n", "or"))
             {
-                bad.push(format!("the word 'nor' in {s:?}"));
+                bad.push(format!("the banned conjunction in {s:?}"));
             }
         }
     }

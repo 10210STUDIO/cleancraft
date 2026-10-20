@@ -154,7 +154,12 @@ fn clickables(h: &H) -> Vec<(Role, String, Rect)> {
         }
         if !matches!(
             a.role(),
-            Role::Button | Role::CheckBox | Role::RadioButton | Role::ComboBox | Role::Link
+            Role::Button
+                | Role::CheckBox
+                | Role::Switch
+                | Role::RadioButton
+                | Role::ComboBox
+                | Role::Link
         ) {
             continue;
         }

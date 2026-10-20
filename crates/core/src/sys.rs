@@ -143,6 +143,15 @@ pub trait Sys: Send + Sync {
     fn run_admin(&self, shell_command: &str) -> io::Result<CmdOut>;
     /// Every file currently open by any process this user can see.
     fn open_files(&self) -> io::Result<HashSet<PathBuf>>;
+    /// [`Sys::open_files`] with the name of a process holding each file open ("Safari"),
+    /// empty when unknown, so a skipped item can say which app to quit (REVIEW-U U9).
+    fn open_files_by(&self) -> io::Result<Vec<(PathBuf, String)>> {
+        Ok(self
+            .open_files()?
+            .into_iter()
+            .map(|p| (p, String::new()))
+            .collect())
+    }
     /// Apps currently running.
     fn running_apps(&self) -> Vec<RunningApp>;
     /// Free bytes on the volume holding `path`.
@@ -266,6 +275,15 @@ impl Sys for RealSys {
         Ok(parse_lsof(&out.stdout))
     }
 
+    fn open_files_by(&self) -> io::Result<Vec<(PathBuf, String)>> {
+        // +c 0: whole command names; -F pcn: "p<pid>", "c<command>", "n<path>" lines.
+        let args = ["+c", "0", "-F", "pcn", "-w"];
+        let out = self
+            .run("/usr/sbin/lsof", &args)
+            .or_else(|_| self.run("lsof", &args))?;
+        Ok(parse_lsof_by(&out.stdout))
+    }
+
     fn running_apps(&self) -> Vec<RunningApp> {
         let Ok(out) = self.run("/bin/ps", &["-axo", "pid=,comm="]) else {
             return Vec::new();
@@ -336,6 +354,40 @@ pub fn parse_lsof(stdout: &str) -> HashSet<PathBuf> {
     set
 }
 
+/// `lsof +c 0 -F pcn` output: each open path with the command holding it, both readings of
+/// a trailing " (...)" as in [`parse_lsof`]. A helper process is named after its app
+/// ("Google Chrome Helper (Renderer)" holds it for "Google Chrome").
+pub fn parse_lsof_by(stdout: &str) -> Vec<(PathBuf, String)> {
+    let mut out = Vec::new();
+    let mut cmd = String::new();
+    for l in stdout.lines() {
+        if let Some(c) = l.strip_prefix('c') {
+            cmd = app_of_command(c);
+        } else if l.starts_with('p') {
+            cmd.clear();
+        } else if let Some(p) = l.strip_prefix('n').filter(|p| p.starts_with('/')) {
+            out.push((PathBuf::from(p), cmd.clone()));
+            if p.ends_with(')')
+                && let Some(i) = p.rfind(" (")
+                && i > 0
+            {
+                out.push((PathBuf::from(&p[..i]), cmd.clone()));
+            }
+        }
+    }
+    out
+}
+
+/// The app a process belongs to, by its command name: "Safari" stays "Safari", "Google
+/// Chrome Helper (GPU)" and "Slack Helper" give "Google Chrome" and "Slack".
+pub fn app_of_command(c: &str) -> String {
+    let c = c.trim();
+    match c.find(" Helper") {
+        Some(i) if i > 0 => c[..i].to_string(),
+        _ => c.to_string(),
+    }
+}
+
 /// `ps -axo pid=,comm=` lines: "  123 /Applications/Safari.app/Contents/MacOS/Safari".
 pub fn parse_ps(stdout: &str) -> Vec<RunningApp> {
     stdout
@@ -397,6 +449,8 @@ pub struct FakeState {
     /// Answers by exact "program arg arg" or by program alone.
     pub answers: BTreeMap<String, CmdOut>,
     pub open_files: HashSet<PathBuf>,
+    /// Who holds an open file, for the ones set with [`FakeSys::set_open_by`].
+    pub open_by: BTreeMap<PathBuf, String>,
     pub running: Vec<RunningApp>,
     pub free_space: Option<u64>,
     pub opened_urls: Vec<String>,
@@ -522,6 +576,14 @@ impl FakeSys {
 
     pub fn set_open(&self, path: &Path) {
         self.with(|s| s.open_files.insert(path.to_path_buf()));
+    }
+
+    /// `path` is open in `app` (lsof's command name).
+    pub fn set_open_by(&self, path: &Path, app: &str) {
+        self.with(|s| {
+            s.open_files.insert(path.to_path_buf());
+            s.open_by.insert(path.to_path_buf(), app.to_string())
+        });
     }
 
     /// Make a command (exact line, short line or program) run past its time limit.
@@ -679,6 +741,15 @@ impl Sys for FakeSys {
         Ok(self.with(|s| s.open_files.clone()))
     }
 
+    fn open_files_by(&self) -> io::Result<Vec<(PathBuf, String)>> {
+        Ok(self.with(|s| {
+            s.open_files
+                .iter()
+                .map(|p| (p.clone(), s.open_by.get(p).cloned().unwrap_or_default()))
+                .collect()
+        }))
+    }
+
     fn running_apps(&self) -> Vec<RunningApp> {
         self.with(|s| s.running.clone())
     }
@@ -710,6 +781,22 @@ impl Sys for FakeSys {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lsof_lines_name_the_holder() {
+        let v = parse_lsof_by(
+            "p12\ncSafari\nn/Users/a/x.db\nnlocalhost:443\np40\ncGoogle Chrome Helper (Renderer)\nn/Users/a/c (deleted)\n",
+        );
+        assert!(v.contains(&(PathBuf::from("/Users/a/x.db"), "Safari".into())));
+        assert!(v.contains(&(
+            PathBuf::from("/Users/a/c (deleted)"),
+            "Google Chrome".into()
+        )));
+        assert!(v.contains(&(PathBuf::from("/Users/a/c"), "Google Chrome".into())));
+        assert_eq!(v.len(), 3);
+        assert_eq!(app_of_command("Slack Helper"), "Slack");
+        assert_eq!(app_of_command("Helper"), "Helper");
+    }
 
     #[test]
     fn lsof_lines() {

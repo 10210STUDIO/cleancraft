@@ -186,22 +186,59 @@ Top 5: U1/U2 (running app or helper: dead end), U17 (stale Quick Sweep), U4 (no 
 
 ## Verification
 
-Method: the owner's branch checked out, this branch's `review_usability.rs` copied in, `cargo test -p cleancraft-ui-egui --test review_usability -- --ignored` run (proofs and walkthroughs together).
+### Final verification on main d50de53 (design4 374a583, ux4 919987b, apps4 f35df8f)
+
+Method: `git merge main` in this worktree, then `cargo test -p cleancraft-ui-egui --test review_usability -- --include-ignored --nocapture` (all 17 walkthroughs and all 20 proofs together): **36 of 37 pass**; only `u05` fails. The owners removed the `#[ignore]` of the proofs they fixed and did not change any assertion (checked with `git diff cc1530b HEAD -- crates/ui-egui/tests/review_usability.rs`: only `#[ignore]` lines removed). Items without a proof were checked in the source and in fresh renders (`review-u/main-*.png`, the same scenes as the round 3 `review-u/u*.png`).
+
+**Tasks on main: 17 of 17 pass** (was 15 of 17). Task 7 (running app) now succeeds in 3 steps with no doubt, task 17 (recover from errors) succeeds with Try Again and Open Privacy Settings on the Done screen, task 16 has no doubt left. Doubts left: task 1 (the Quick Sweep Trash tile still says "Emptied from its own page" and the Quick Sweep Done screen has no Empty Trash) and task 14 (the History walkthrough still counts per-file Undo buttons inside the cards: 5, down from 27, next to Undo All).
+
+| Item | Status | Evidence |
+|---|---|---|
+| U1 S1 running app: Quit in place | Fixed | `u01` passes; `task_07` success; `review-u/main-u01-running-app.png` ("Editor is open", Quit Editor, rows unlock after it quits) |
+| U2 S1 helper named | Fixed | `u02` passes (EditorHelper is named) |
+| U3 S2 Trash Bins dead selection | Fixed | `u03` passes (no "Tick the items", no Select All, no Ignore on Trash rows) |
+| U4 S2 no space freed | Partly | `u04` passes: module Done screens have "Empty Trash..." and "The space comes back when the Trash is emptied." (`main-u09-not-moved.png`). Open: Quick Sweep Done has no Empty Trash (buttons Show History, Done, Undo per module) and its Trash tile still says "Emptied from its own page" (`main-u17-stale-sweep.png`); Live Monitor "Free Up Space" still opens Quick Sweep |
+| U5 S2 quarantine | Partly | `u05` fails: Settings shows the quarantine size and "Show Quarantine in Finder", but nothing empties it in the app |
+| U6 S2 History per cleanup | Fixed | `u06` passes (Undo All per action) |
+| U7 S2 Undo for emptied items | Fixed | `u07` passes |
+| U8 S2 Ignore without way back | Fixed | `u08` passes; notice "Demo-abc is on the ignore list now. Stop Ignoring on its row puts it back." (`main-u08-after-ignore.png`) |
+| U9 S2 skipped items | Partly | `u09` passes: next step per reason, Try Again, Open Privacy Settings (`main-u09-not-moved.png`). Open: "open in a running app" still does not name the app ("Quit the app that uses it") |
+| U10 S2 keyboard | Fixed | `u10_return_confirms_the_dialog` and `u10_standard_shortcuts` pass (Return, Cmd+F, Cmd+,) |
+| U11 S2 duplicates keeper | Fixed | `u11` passes ("Keep This One" per row) |
+| U12 S2 ignore list picker | Fixed | `u12` passes ("Choose Folder...") |
+| U13 S3 rescan names | Fixed | `u13` passes (one name on every page) |
+| U14 S3 notices and FDA banner | Fixed | both `u14` proofs pass (notices clear on navigation; banner only where needed, with Not Now) |
+| U15 S3 action names | Partly | App Updates has "Download Only"; App Remover still "Reset" and "Ignore" (source apps.rs) |
+| U16 S2 pointer | Fixed | `u16` passes |
+| U17 S2 stale Quick Sweep | Fixed, with a new issue N1 | `u17` passes (System Junk tile follows the cleanup) |
+| U18 S3 sort by age | Fixed | `u18` passes |
+| U19 S3 raw errors | Fixed | `u19` passes: "CleanCraft needs permission to control System Events. Turn it on in System Settings > Privacy & Security > Automation, then try again." (`main-u19-raw-error.png`); no Open button in that notice (nit) |
+| U20 S2 privacy preselection | Partly | the confirmation now says "You will be signed out of websites in ..." (plan_page.rs); cookies are still preselected (core `COOKIES.selected = true`) |
+| U21 S3 startup rows | Partly | rows lead with the program name ("ExampleHelper com.example.helper"); "Ad hoc signature (no developer identity)" and Remove beside the switch unchanged (`main-u19-raw-error.png`) |
+| U22 S3 Live Monitor duplicates | Open | "Free Up RAM" and "Free Up Space" unchanged (monitor.rs; Free Up Space now has a tooltip) |
+| U23 S3 failed tile retry | Fixed | Threat Check tile has "Try Again" (`main-u17-stale-sweep.png`) |
+| U24 S3 Disk Map links | Open | "app data in Library (use System Junk or App Remover)" is still plain text |
+| U25 S3 "0 skipped" | Partly | plan pages and App Remover use `kit::moved_summary` (no "0 skipped"); Disk Map still prints "{n} moved. {m} skipped." always |
+| U26 S3 Settings wording | Partly | slider values named and log scale for sizes; "Let AI agents (MCP) carry out confirmed cleanups" still a checkbox |
+| U27 S3 row actions per module | Fixed | Trash rows have no Ignore or Reveal (`u03`, plan_page.rs) |
+| U28 S3 Tune-up bottom bar | Fixed | tasks.rs uses `kit::bottom_bar`; `task_11` success in 4 steps |
+
+**Counts on main:** fixed 18 (U1, U2, U3, U6, U7, U8, U10, U11, U12, U13, U14, U16, U17, U18, U19, U23, U27, U28), partly 8 (U4, U5, U9, U15, U20, U21, U25, U26), open 2 (U22, U24). By severity: S1 2 of 2 fixed; S2 9 of 13 fixed, 4 partly (U4, U5, U9, U20); S3 7 of 13 fixed, 4 partly, 2 open.
+
+### New usability problems found on main
+
+**N1 S3 Quick Sweep: a cleaned module becomes an empty tile** (design4: sweep.rs). After cleaning System Junk from its page, the tile reads "0 KB · 0 of 0 items selected" with an empty bar and an active Include checkbox (`main-u17-stale-sweep.png`). Recommendation: "Cleaned just now" with Scan Again, no Include.
+
+**N2 S2 Quick Sweep: the Trash tile does not follow moves into the Trash** (design4: sweep.rs). After 13.3 MB of System Junk moved to the Trash, the Trash Bins tile still says 803 KB (`main-u17-stale-sweep.png`), so the one tile that tells the user how much space Empty Trash would free is wrong right when it matters (ties to U4). Recommendation: refresh the Trash tile from the action log like the module tiles (JournalWatch), and put "Empty Trash..." on it.
+
+**N3 S3 Ignore notice has no Undo button** (design4: plan_page.rs). The notice explains "Stop Ignoring on its row puts it back", and the row action appears only on hover; an Undo in the notice is the shorter path (`main-u08-after-ignore.png`).
+
+**N4 S3 text rule** (design4: plan_page.rs comment near the row actions for U27 uses the word the house rules ban). It is a code comment, not user-facing; reword when touched.
+
+### Earlier passes
 
 | Item | Branch and commit | Result |
 |---|---|---|
-| U16 pointer over buttons | agent4/design4 3645e69 | Fixed: `u16_pointing_hand_over_buttons` passes |
-| U17 Quick Sweep tiles after a module cleanup | agent4/design4 3645e69 | Fixed: `u17_quick_sweep_tiles_follow_a_module_cleanup` passes |
-| Walkthroughs task_01..17 | agent4/design4 3645e69 | All 17 still pass (no regression in the flows) |
-| U1..U15, U18, U19 | agent4/design4 3645e69 | Still failing (not claimed yet) |
-| U1 running app: Quit in place | agent4/ux4 ae18abe | Fixed: banner "Editor is open" with "Quit Editor", then Try Again and Force Quit while it stays open; once the app quits the rows unlock and Uninstall is enabled (`u01_running_app_offers_quit_in_place` passes, rewritten to test the behaviour and not the old wording; `task_07` succeeds). The unlock without a click runs on a timer and is not measured by the test |
-| U2 helper named | agent4/ux4 ae18abe | Still failing: with only EditorHelper running the page never names it (needs apps4's `app_quit::running_parts` headline; agent4/apps4 has no commit yet) |
-| U6 History per cleanup | agent4/ux4 ae18abe | Fixed: one card per action with Undo All (`u06` passes). Note: the per-file Undo buttons are still all on screen (27 for one cleanup in `task_14`); a collapsed file list would be lighter |
-| U7 Undo for emptied items | agent4/ux4 ae18abe | Fixed (`u07` passes) |
-| U12 Ignore list folder picker | agent4/ux4 ae18abe | Fixed: "Choose Folder..." (`u12` passes) |
-| U28 Tune-up bottom bar | agent4/ux4 ae18abe | Claimed; `task_11` still succeeds in 4 steps; no proof test (layout) |
-| U16, U17 | agent4/ux4 ae18abe | Fail on this branch only because design4 is not merged into it yet; fixed on agent4/design4 |
-| U2 helper named | agent4/apps4 f35df8f | Core only (`app_quit::running_parts` lists helpers, login items and launchd jobs inside the bundle; quit and force quit); the App Remover page does not use it yet, so `u02` still fails there. Open: ux4 wires the headline into the banner |
-| Combined state | agent4/design4 86e756c (design4 with ux4 merged) | 23 of 37 pass: all 17 walkthroughs, and U1, U6, U7, U12, U16, U17. Still failing: U2, U3, U4, U5, U8, U9, U10 (both proofs), U11, U13, U14 (both proofs), U18, U19 |
-
-Summary at the end of this pass: fixed and verified U1, U6, U7, U12, U16, U17 (6 of 28); claimed without a proof test U28 (task flow fine); open U2 (S1), U3, U4, U5, U8, U9, U10, U11, U20 (S2), and the S3 items.
+| U16, U17 | agent4/design4 3645e69 | Fixed then |
+| U1, U6, U7, U12 | agent4/ux4 ae18abe | Fixed then; U2 failed then (apps4 core only) |
+| Combined | agent4/design4 86e756c | 23 of 37 passed then |

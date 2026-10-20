@@ -312,7 +312,7 @@ fn startup_items_use_one_switch() {
     h.state_mut().navigate("login_items");
     settle(&mut h);
     let switches: Vec<_> = h
-        .get_all_by_role(Role::CheckBox)
+        .get_all_by_role(Role::Switch)
         .filter(|n| {
             let l = n.accesskit_node().label().unwrap_or_default();
             l.starts_with("Turn Off ") || l.starts_with("Turn On ")
@@ -373,7 +373,7 @@ fn empty_result_keeps_notes_behind_details() {
         .expect("plan")
         .notes
         .clone();
-    assert!(has(&h, "Nothing to clean here."));
+    assert!(has(&h, "Nothing to clean here"));
     let texts = painted(&h);
     assert!(!texts.iter().any(|t| t == "0 KB" || t == "Zero KB"));
     if notes.is_empty() {

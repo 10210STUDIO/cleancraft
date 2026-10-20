@@ -321,3 +321,29 @@ fn ignore_list_is_honoured() {
             .any(|i| i.path.ends_with("com.example.Browser"))
     );
 }
+
+/// REVIEW-U U9: a file open in an app says which app, so the user knows what to quit.
+#[test]
+fn a_file_open_in_an_app_names_the_app() {
+    let m = FakeMac::sample();
+    let plan = junk_plan(&m);
+    let held = plan.items[0].path.clone();
+    let inner = if held.is_dir() {
+        let f = held.join("in-use.db");
+        m.write(&f, b"x");
+        f
+    } else {
+        held.clone()
+    };
+    let plan = junk_plan(&m);
+    m.env.fake_sys().unwrap().set_open_by(&inner, "Safari");
+    let r = run(&m, &plan);
+    let why = r
+        .skipped
+        .iter()
+        .find(|(p, _)| *p == held)
+        .map(|(_, w)| w.clone());
+    assert_eq!(why, Some(SkipReason::InUseBy("Safari".into())));
+    assert_eq!(why.unwrap().to_string(), "open in Safari");
+    assert!(held.exists(), "an open file never moves");
+}

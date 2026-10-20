@@ -87,6 +87,8 @@ pub struct CleanApp {
     pub fda: Access,
     /// A message at the top of the page: (text, is_error).
     pub notice: Option<(String, bool)>,
+    /// What the notice's Undo button does, when it has one (REVIEW-U N3, U5).
+    notice_undo: Option<NoticeUndo>,
     actions: u64,
     fonts_installed: bool,
     fonts_pass: u64,
@@ -108,6 +110,10 @@ pub struct CleanApp {
     /// "Not Now" on the Full Disk Access banner (for this session).
     pub fda_dismissed: bool,
 }
+
+/// The action behind a notice's Undo button.
+/// Its accessible name says what it takes back ("Undo Ignore").
+struct NoticeUndo(String, Box<dyn FnOnce(&mut CleanApp)>);
 
 /// Sidebar entry height.
 const NAV_ROW: f32 = 44.0;
@@ -133,6 +139,7 @@ impl CleanApp {
             monitor: Default::default(),
             fda,
             notice: settings_warning.map(|m| (m, true)),
+            notice_undo: None,
             actions: 0,
             fonts_installed: false,
             fonts_pass: 0,
@@ -163,10 +170,24 @@ impl CleanApp {
 
     pub fn tell(&mut self, msg: impl Into<String>) {
         self.notice = Some((msg.into(), false));
+        self.notice_undo = None;
+    }
+
+    /// A notice with an Undo button that runs `undo` (and closes the notice). The button
+    /// reads "Undo" and is announced "Undo <what>".
+    pub fn tell_undo(
+        &mut self,
+        msg: impl Into<String>,
+        what: &str,
+        undo: impl FnOnce(&mut CleanApp) + 'static,
+    ) {
+        self.notice = Some((msg.into(), false));
+        self.notice_undo = Some(NoticeUndo(format!("Undo {what}"), Box::new(undo)));
     }
 
     pub fn warn(&mut self, msg: impl Into<String>) {
         self.notice = Some((msg.into(), true));
+        self.notice_undo = None;
         crate::sound::play(&self.env, crate::sound::Cue::Error);
     }
 
@@ -211,9 +232,23 @@ impl CleanApp {
         if let Some(res) = self.sweep.result.as_mut() {
             for tile in &mut res.tiles {
                 if let cleancraft_core::sweep::TileData::Plan(plan) = &mut tile.data {
+                    let had = !plan.items.is_empty();
                     pages::plan_page::drop_paths(plan, moved);
+                    // Emptied by this cleanup: the tile says so (REVIEW-U N1).
+                    if had && plan.items.is_empty() && !self.sweep.cleaned.contains(&tile.id) {
+                        self.sweep.cleaned.push(tile.id);
+                    }
                 }
             }
+        }
+        // What moved may now sit in the Trash: the Trash tile and the Trash Bins list are
+        // measured again (REVIEW-U N2).
+        self.sweep.refresh_tile(FeatureId::TrashBins);
+        if let Some(st) = self.plans.get_mut(&FeatureId::TrashBins)
+            && st.plan.is_some()
+            && !st.is_busy()
+        {
+            st.stale = true;
         }
         self.disk_epoch += 1;
         self.last_moved = moved.to_vec();
@@ -636,6 +671,9 @@ impl CleanApp {
                 });
             ui.add_space(8.0);
         }
+        if self.notice.is_none() {
+            self.notice_undo = None;
+        }
         if let Some((msg, err)) = self.notice.clone() {
             let color = if err { t.danger } else { t.success };
             egui::Frame::new()
@@ -661,6 +699,26 @@ impl CleanApp {
                             if kit::ghost(ui, &t, "Dismiss", None).clicked() {
                                 self.act();
                                 self.notice = None;
+                                self.notice_undo = None;
+                            }
+                            if let Some(name) = self.notice_undo.as_ref().map(|u| u.0.clone()) {
+                                let r = kit::pill(
+                                    ui,
+                                    &t,
+                                    "Undo",
+                                    kit::Kind::Secondary,
+                                    Some(Icon::Undo),
+                                );
+                                r.widget_info(|| {
+                                    egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name)
+                                });
+                                if r.clicked() {
+                                    self.act();
+                                    self.notice = None;
+                                    if let Some(NoticeUndo(_, undo)) = self.notice_undo.take() {
+                                        undo(self);
+                                    }
+                                }
                             }
                             ui.with_layout(
                                 egui::Layout::left_to_right(egui::Align::Center),

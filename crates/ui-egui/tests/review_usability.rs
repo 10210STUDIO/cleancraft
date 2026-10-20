@@ -491,7 +491,7 @@ fn task_08_reset_an_app() {
     let mut t = Task::new("reset Editor");
     go(&mut t, &mut h, "Apps", Some("App Remover"));
     t.click(&mut h, "Editor");
-    t.click(&mut h, "Reset");
+    t.click(&mut h, "Reset App...");
     eprintln!(
         "      dialog: {:?}",
         texts(&h)
@@ -815,7 +815,6 @@ fn u04_done_offers_to_empty_the_trash() {
 }
 
 #[test]
-#[ignore = "U5: the quarantine can never be emptied from the app"]
 fn u05_quarantine_can_be_seen_and_emptied() {
     let mac = junk();
     Settings {
@@ -829,10 +828,29 @@ fn u05_quarantine_can_be_seen_and_emptied() {
     h.state_mut().navigate("settings");
     settle(&mut h);
     let b = buttons(&h);
+    // The lead named the action "Move Quarantine to Trash..." (fix5): CleanCraft never
+    // deletes for good, so the quarantine goes to the Trash and Finder empties it.
     assert!(
-        b.iter().any(|l| l.contains("Empty Quarantine")),
+        b.iter().any(|l| l.contains("Move Quarantine to Trash")),
         "nothing shows or empties the quarantine; buttons: {b:?}"
     );
+    let (bytes, items) = executor::quarantine_size(&mac.env);
+    assert!(items > 0 && has_text(&h, "The quarantine holds"));
+    h.get_by_label("Move Quarantine to Trash...").click();
+    settle(&mut h);
+    h.get_by_label("Move to Trash").click();
+    settle(&mut h);
+    assert_eq!(
+        executor::quarantine_size(&mac.env),
+        (0, 0),
+        "{bytes} bytes left"
+    );
+    assert!(has_text(&h, "The quarantine is empty."));
+    assert!(has_text(&h, "moved from the quarantine to the Trash"));
+    // Undo in the notice puts it back.
+    h.get_by_label("Undo Move to Trash").click();
+    settle(&mut h);
+    assert_eq!(executor::quarantine_size(&mac.env), (bytes, items));
 }
 
 #[test]
@@ -1016,6 +1034,12 @@ fn u14_notice_clears_on_page_change() {
     let mut h = open_junk_results(&mac);
     clean_junk(&mut h);
     h.state_mut().navigate("history");
+    settle(&mut h);
+    // The files of a cleanup wait behind a disclosure next to Undo All (fix5).
+    h.get_all_by_label_contains(" items of System Junk")
+        .next()
+        .expect("disclosure")
+        .click();
     settle(&mut h);
     h.get_all_by_label("Undo").next().expect("Undo").click();
     settle(&mut h);

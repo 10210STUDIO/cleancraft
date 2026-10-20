@@ -191,7 +191,7 @@ fn reset_keeps_the_app() {
     let m = mac();
     let mut h = harness(&m.mac);
     click(m_h(&mut h), "Editor");
-    click(&mut h, "Reset");
+    click(&mut h, "Reset App...");
     assert!(has_text(&h, "Reset Editor? 3 items"));
     assert_eq!(
         count(&h, &shown(&m, &m.editor)),

@@ -68,30 +68,45 @@ fn location_picker(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         ui.set_width(ui.available_width().min(600.0));
         ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
         ui.spacing_mut().item_spacing.y = 4.0;
-        ui.label(
-            RichText::new("Where to look")
-                .font(crate::theme::font(crate::theme::size::TITLE3, crate::theme::Weight::SemiBold))
-                .color(t.text),
-        );
         let mut choices: Vec<Location> = Location::PRESETS.to_vec();
         if f == FeatureId::LargeOldFiles {
             choices.push(Location::DownloadsBySource);
         }
-        ui.horizontal_wrapped(|ui| {
-            for loc in choices {
-                let on = !p.other && current == loc;
-                if kit::radio(ui, &t, on, &loc.label(&app.env)).clicked() {
-                    app.act();
-                    p.other = false;
-                    p.error = None;
-                    save_location(app, f, loc);
+        let folder_on = p.other || matches!(current, Location::Folder(_));
+        let shown = if folder_on {
+            "Another folder".to_string()
+        } else {
+            current.label(&app.env)
+        };
+        // One row: the question and a pop-up with the places (REVIEW-C C38: the radio rows
+        // pushed the start screen's object out at 680 pt and wrapped raggedly).
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new("Where to look")
+                    .font(crate::theme::font(crate::theme::size::BODY, crate::theme::Weight::SemiBold))
+                    .color(t.text),
+            );
+            let r = kit::menu_pill(ui, &t, &shown, |ui| {
+                ui.set_min_width(220.0);
+                for loc in &choices {
+                    let on = !folder_on && current == *loc;
+                    if kit::menu_choice(ui, &loc.label(&app.env), on) {
+                        app.act();
+                        p.other = false;
+                        p.error = None;
+                        save_location(app, f, loc.clone());
+                        ui.close();
+                    }
                 }
-            }
-            let folder_on = p.other || matches!(current, Location::Folder(_));
-            if kit::radio(ui, &t, folder_on, "Another folder").clicked() {
+                if kit::menu_choice(ui, "Another folder", folder_on) {
+                    app.act();
+                    p.other = true;
+                    p.error = None;
+                    ui.close();
+                }
+            });
+            if r.response.clicked() {
                 app.act();
-                p.other = true;
-                p.error = None;
             }
         });
         if p.other || matches!(current, Location::Folder(_)) {

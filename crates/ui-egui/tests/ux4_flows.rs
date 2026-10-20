@@ -163,6 +163,12 @@ fn uninstall_updates_every_list_and_undo_brings_it_back() {
     // History: the uninstall is the newest action, with each file.
     click(&mut h, "History");
     assert!(has_text(&h, "App Remover"));
+    // The files of an action wait behind a disclosure next to Undo All (fix5).
+    h.get_all_by_label_contains(" items of App Remover")
+        .next()
+        .expect("disclosure")
+        .click();
+    steps(&mut h);
     assert!(has(&h, &m.mac.env.display(&m.editor)));
     assert!(has(&h, "Undo All"));
     click(&mut h, "Undo All");

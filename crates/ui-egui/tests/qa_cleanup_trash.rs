@@ -153,6 +153,6 @@ fn empty_trash_button_only_when_finder_has_something() {
     assert!(!has(&h, "Empty Trash in Finder"));
     let mac = FakeMac::new();
     let h = open(&mac);
-    assert!(has(&h, "Nothing to clean here."));
+    assert!(has(&h, "Nothing to clean here"));
     assert!(!has(&h, "Empty Trash in Finder"));
 }

@@ -1973,6 +1973,9 @@ pub fn switch(ui: &mut Ui, t: &Tokens, on: bool, name: &str) -> Response {
     let (outer, resp) = ui.allocate_exact_size(vec2(44.0, hit::MIN), Sense::click());
     let enabled = ui.is_enabled();
     resp.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, enabled, on, name));
+    // VoiceOver says "switch", not "checkbox" (REVIEW-C C33).
+    ui.ctx()
+        .accesskit_node_builder(resp.id, |b| b.set_role(egui::accesskit::Role::Switch));
     let r = Rect::from_center_size(outer.center(), vec2(38.0, 22.0));
     if resp.clicked() && enabled {
         note_tap(ui.ctx());
@@ -2484,10 +2487,41 @@ pub fn check_text_font(
     resp
 }
 
+/// The left of every bottom action bar (REVIEW-C C19): the figure at 24 pt, then its line
+/// ("27 items selected") at 13 pt, announced as `full`.
+pub fn bar_figure(ui: &mut Ui, t: &Tokens, figure: &str, line: &str, full: &str, dim: bool) {
+    ui.label(
+        RichText::new(figure)
+            .font(font(size::NUMBER_S, Weight::Bold))
+            .color(if dim { t.text_dim } else { t.text }),
+    );
+    ui.add_space(space::XS);
+    quiet_label(ui, t, line, full);
+}
+
+/// A dim hint in the room left on a bottom bar (laid out right to left after the buttons),
+/// shortened at its end, the whole text in its tooltip; nothing when under 100 pt are left.
+pub fn bar_hint(ui: &mut Ui, t: &Tokens, hint: &str) {
+    let fid = font(size::FOOTNOTE, Weight::Regular);
+    let room = ui.available_width() - space::S;
+    if room < 100.0 {
+        return;
+    }
+    let shown = truncate_end(ui.ctx(), hint, &fid, room);
+    let r = ui.label(RichText::new(&shown).font(fid).color(t.text_faint));
+    if shown != hint {
+        r.on_hover_text(hint);
+    }
+}
+
+/// Height of the bottom action bar: 44 pt of content, its 10 pt margins and its edge.
+pub const BAR_H: f32 = 44.0 + 2.0 * 10.0 + 2.0;
+
 /// The floating action bar pinned to the bottom of the page (stays visible at 680 pt).
 pub fn bottom_bar(ui: &mut Ui, t: &Tokens, id: egui::Id, add: impl FnOnce(&mut Ui)) {
     egui::Panel::bottom(id)
         .show_separator_line(false)
+        .default_size(10.0 + BAR_H)
         .frame(Frame::new().inner_margin(Margin {
             left: 0,
             right: 0,
@@ -2746,15 +2780,24 @@ pub fn menu_pill<R>(
 
 /// A plain text field in CleanCraft's style (`FIELD` tall, rounded). The caller names it.
 pub fn text_field(ui: &mut Ui, t: &Tokens, text: &mut String, hint: &str, width: f32) -> Response {
-    ui.add(
-        egui::TextEdit::singleline(text)
-            .hint_text(RichText::new(hint).color(t.text_faint))
-            .font(font(size::CALLOUT, Weight::Regular))
-            .desired_width(width)
-            .min_size(vec2(width, hit::FIELD))
-            .vertical_align(egui::Align::Center)
-            .margin(Margin::symmetric(12, 6)),
-    )
+    // Pill corners like the search field and the buttons beside it (REVIEW-C C29).
+    ui.scope(|ui| {
+        let round = CornerRadius::same((hit::FIELD / 2.0) as u8);
+        let w = &mut ui.visuals_mut().widgets;
+        for s in [&mut w.inactive, &mut w.hovered, &mut w.active, &mut w.open] {
+            s.corner_radius = round;
+        }
+        ui.add(
+            egui::TextEdit::singleline(text)
+                .hint_text(RichText::new(hint).color(t.text_faint))
+                .font(font(size::CALLOUT, Weight::Regular))
+                .desired_width(width)
+                .min_size(vec2(width, hit::FIELD))
+                .vertical_align(egui::Align::Center)
+                .margin(Margin::symmetric(14, 6)),
+        )
+    })
+    .inner
 }
 
 /// A secondary pill, returning its response (to rename it for accessibility).

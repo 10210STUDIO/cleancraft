@@ -178,12 +178,32 @@ fn parts() -> &'static Parts {
     })
 }
 
+/// Optical fit of an icon: (scale, shift right, shift up) in scene units.
+fn fit(icon: SectionIcon) -> (f32, f32, f32) {
+    match icon {
+        SectionIcon::QuickSweep => (0.945, 0.003, 0.054),
+        SectionIcon::Clean => (1.03, 0.044, 0.03),
+        SectionIcon::Protect => (0.97, -0.014, -0.032),
+        SectionIcon::Speed => (1.0, 0.012, 0.027),
+        SectionIcon::Apps => (0.959, -0.046, -0.042),
+        SectionIcon::Files => (0.925, -0.03, 0.036),
+        SectionIcon::Monitor => (1.05, -0.06, -0.056),
+        SectionIcon::History => (0.881, -0.031, -0.028),
+        SectionIcon::Settings => (1.0, -0.034, -0.03),
+    }
+}
+
 /// The scene for one icon, posed with a slight turn so it reads as an object.
 fn scene(icon: SectionIcon) -> Scene<'static> {
     let p = parts();
     let (a, b) = icon.colors();
     let mut sc = Scene::new(Camera::front(4.4, 0.22), Rig::studio(a));
-    let root = Xf::ID.rot_y(-0.32).rot_x(0.08);
+    // Each icon's scale and shift so they weigh alike and sit centred (REVIEW-C C24,
+    // measured by `sidebar_icons_weigh_alike_and_sit_centred`).
+    let (k, dx, dy) = fit(icon);
+    let root = Xf::scale(k)
+        .at(v3(dx, dy, 0.0))
+        .then(Xf::ID.rot_y(-0.32).rot_x(0.08));
     let ink = Material::gloss(WHITE, mix(WHITE, a, 0.25));
     let body = Material::gloss(mix(a, WHITE, 0.12), scale(b, 0.72));
     match icon {
@@ -443,6 +463,41 @@ mod tests {
 
     fn alpha_at(img: &ColorImage, x: usize, y: usize) -> u8 {
         img.pixels[y * img.size[0] + x].a()
+    }
+
+    /// REVIEW-C C24: the sidebar icons weigh alike (ink within 25 % of each other) and sit
+    /// centred (the box of what they paint within 0.5 pt of the square's centre at 22.5 pt).
+    #[test]
+    fn sidebar_icons_weigh_alike_and_sit_centred() {
+        let px = 90u32; // 22.5 pt at 4x, enough to measure
+        let pt = px as f32 / 22.5;
+        let n = px as usize;
+        let mut inks = Vec::new();
+        for icon in SectionIcon::ALL {
+            let img = image(icon, px);
+            let mut ink = 0.0f32;
+            let (mut x0, mut y0, mut x1, mut y1) = (n, n, 0, 0);
+            for y in 0..n {
+                for x in 0..n {
+                    let a = alpha_at(&img, x, y);
+                    ink += a as f32 / 255.0;
+                    if a > 128 {
+                        (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+                    }
+                }
+            }
+            let cx = ((x0 + x1 + 1) as f32 / 2.0 - n as f32 / 2.0) / pt;
+            let cy = ((y0 + y1 + 1) as f32 / 2.0 - n as f32 / 2.0) / pt;
+            let ink_pt = ink / (pt * pt);
+            eprintln!("{icon:?}: ink {ink_pt:.0} pt2, box centre off ({cx:.2}, {cy:.2}) pt");
+            inks.push((icon, ink_pt, cx.abs().max(cy.abs())));
+        }
+        let max = inks.iter().map(|i| i.1).fold(0.0, f32::max);
+        let min = inks.iter().map(|i| i.1).fold(f32::MAX, f32::min);
+        assert!(max / min <= 1.25, "ink spread {:.2}x: {inks:?}", max / min);
+        for (icon, _, off) in &inks {
+            assert!(*off <= 0.5, "{icon:?} sits {off:.2} pt off centre");
+        }
     }
 
     #[test]

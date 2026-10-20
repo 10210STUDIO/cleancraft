@@ -139,6 +139,8 @@ pub enum SkipReason {
     Refused(String),
     Missing,
     InUse,
+    /// Open in this app (named by the process that holds it).
+    InUseBy(String),
     AppRunning(String),
     PermissionDenied,
     DiskFull,
@@ -154,6 +156,7 @@ impl std::fmt::Display for SkipReason {
             SkipReason::Refused(r) => write!(f, "not allowed: {r}"),
             SkipReason::Missing => write!(f, "already gone"),
             SkipReason::InUse => write!(f, "open in a running app"),
+            SkipReason::InUseBy(a) => write!(f, "open in {a}"),
             SkipReason::AppRunning(a) => write!(f, "{a} is running"),
             SkipReason::PermissionDenied => write!(f, "permission denied"),
             SkipReason::DiskFull => write!(f, "the disk is full"),
@@ -249,7 +252,7 @@ pub fn execute_with(
         return Ok(report);
     }
     let mut used = used_ids(env);
-    let open = env.sys.open_files();
+    let open = env.sys.open_files_by();
     let running = env.sys.running_apps();
     let total = selected.len();
     let mut admin_batch: Vec<(&Item, u64)> = Vec::new();
@@ -302,7 +305,7 @@ fn check_item(
     env: &Env,
     allow: &[PathBuf],
     p: &Path,
-    open: &io::Result<HashSet<PathBuf>>,
+    open: &io::Result<Vec<(PathBuf, String)>>,
     running: &[RunningApp],
     by_admin: bool,
 ) -> Result<(), SkipReason> {
@@ -313,9 +316,9 @@ fn check_item(
         return Err(SkipReason::Missing);
     }
     match open {
-        Ok(set) => {
-            if is_open(set, p) {
-                return Err(SkipReason::InUse);
+        Ok(list) => {
+            if let Some(why) = in_use(list, p) {
+                return Err(why);
             }
         }
         Err(e) => return Err(SkipReason::InUseCheckFailed(e.to_string())),
@@ -525,9 +528,19 @@ fn admin_move(
 }
 
 /// Is `p` (or something inside it) open? Names compare like a default Mac volume: an edited
-/// plan may spell the path in another letter case than lsof reports it.
-fn is_open(set: &HashSet<PathBuf>, p: &Path) -> bool {
-    set.contains(p) || set.iter().any(|o| policy::starts_with_ci(o, p))
+/// plan may spell the path in another letter case than lsof reports it. The reason names the
+/// app holding it when lsof said which.
+fn in_use(list: &[(PathBuf, String)], p: &Path) -> Option<SkipReason> {
+    let mut found = false;
+    for (o, who) in list {
+        if o == p || policy::starts_with_ci(o, p) {
+            if !who.is_empty() {
+                return Some(SkipReason::InUseBy(who.clone()));
+            }
+            found = true;
+        }
+    }
+    found.then_some(SkipReason::InUse)
 }
 
 /// The Trash folder for `p`: the user's Trash on the startup disk, `/Volumes/X/.Trashes/<uid>`
@@ -847,6 +860,7 @@ pub fn undo(env: &Env, action_id: &str) -> Result<ActionRecord, UndoError> {
                 fs::create_dir_all(parent).map_err(|e| UndoError::Io(e.to_string()))?;
             }
             fs::rename(&stored, &original).map_err(|e| UndoError::Io(e.to_string()))?;
+            relink(&mut recs, i, &stored, &original);
         }
         ActionKind::Toggled {
             undo_command: Some(cmd),
@@ -934,6 +948,7 @@ fn undo_admin(env: &Env, ids: &[String]) -> (usize, Vec<(String, UndoError)>) {
     for (i, stored, original) in &ready {
         if fs::symlink_metadata(original).is_ok() && fs::symlink_metadata(stored).is_err() {
             recs[*i].undone = Some(now);
+            relink(&mut recs, *i, stored, original);
             ok += 1;
         } else {
             errs.push((
@@ -976,6 +991,216 @@ pub fn undo_plan(env: &Env, plan_id: &str) -> (usize, Vec<(String, UndoError)>) 
         errs.extend(e);
     }
     (ok, errs)
+}
+
+/// Plan id prefix of [`move_quarantine_to_trash`] runs. Their records move an item from the
+/// quarantine to the Trash; Undo puts it back in the quarantine.
+pub const QUARANTINE_TO_TRASH: &str = "quarantine-to-trash";
+
+/// Is this record a move from the quarantine to the Trash?
+pub fn is_relocation(r: &ActionRecord) -> bool {
+    r.plan_id.starts_with(QUARANTINE_TO_TRASH)
+}
+
+/// After record `i` moved its item from `from` back to `to` (an Undo), keep the other records
+/// that point at the same item true:
+/// - a quarantine-to-Trash move put back in the quarantine: the cleanup that put the item in
+///   the quarantine finds it there again (its stored place follows);
+/// - a cleanup put back from the Trash after the quarantine went to the Trash: that
+///   quarantine-to-Trash move is over too (the item left the Trash).
+fn relink(recs: &mut [ActionRecord], i: usize, from: &Path, to: &Path) {
+    let reloc = is_relocation(&recs[i]);
+    let now = chrono::Utc::now().timestamp();
+    for (j, r) in recs.iter_mut().enumerate() {
+        if j == i || r.undone.is_some() {
+            continue;
+        }
+        let other_reloc = is_relocation(r);
+        if let ActionKind::Moved {
+            stored, stored_id, ..
+        } = &mut r.kind
+            && stored.as_path() == from
+        {
+            if reloc && !other_reloc {
+                *stored = to.to_path_buf();
+                *stored_id = StoredId::of(to);
+            } else if !reloc && other_reloc {
+                r.undone = Some(now);
+            }
+        }
+    }
+}
+
+/// What the quarantine holds: each item a cleanup put there (the entries of its per-run
+/// folders), oldest folder first.
+pub fn quarantine_items(env: &Env) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let mut runs: Vec<PathBuf> = fs::read_dir(env.quarantine_dir())
+        .map(|d| d.filter_map(|e| e.ok().map(|e| e.path())).collect())
+        .unwrap_or_default();
+    runs.sort();
+    for run in runs {
+        if fs::symlink_metadata(&run).is_ok_and(|m| m.is_dir()) {
+            let mut inner: Vec<PathBuf> = fs::read_dir(&run)
+                .map(|d| d.filter_map(|e| e.ok().map(|e| e.path())).collect())
+                .unwrap_or_default();
+            inner.sort();
+            out.extend(inner);
+        } else {
+            out.push(run);
+        }
+    }
+    out
+}
+
+/// Bytes and items in the quarantine.
+pub fn quarantine_size(env: &Env) -> (u64, usize) {
+    let items = quarantine_items(env);
+    let mut counted = HashSet::new();
+    let bytes = items
+        .iter()
+        .map(|p| tree_size_once(p, &mut counted).0)
+        .sum();
+    (bytes, items.len())
+}
+
+/// Move everything in the quarantine to the Trash of the startup disk. Nothing is deleted:
+/// each item is renamed into the Trash and journaled under one run
+/// (`quarantine-to-trash-<time>`, so History's Undo All puts them all back in the quarantine).
+/// The cleanup that put an item in the quarantine now points at its place in the Trash, so
+/// its own Undo still brings it back where it came from. Items that cannot move (open,
+/// refused, a fault) are reported as skipped and stay in the quarantine. If the journal cannot
+/// be written nothing moves.
+pub fn move_quarantine_to_trash(
+    env: &Env,
+    progress: &mut dyn FnMut(usize, usize),
+) -> Result<Report, ExecError> {
+    ensure_journal(env).map_err(ExecError::Journal)?;
+    let plan_id = format!(
+        "{QUARANTINE_TO_TRASH}-{}",
+        chrono::Utc::now().format("%Y%m%d%H%M%S%3f")
+    );
+    let mut report = Report {
+        plan_id: plan_id.clone(),
+        ..Default::default()
+    };
+    let items = quarantine_items(env);
+    if items.is_empty() {
+        return Ok(report);
+    }
+    let trash = env.user_trash();
+    let qdir = env.quarantine_dir();
+    let mut used = used_ids(env);
+    let open = env.sys.open_files_by();
+    let total = items.len();
+    let mut counted = HashSet::new();
+    // (quarantine place, Trash place) of what moved and was journaled.
+    let mut moved: Vec<(PathBuf, PathBuf)> = Vec::new();
+    for (n, q) in items.iter().enumerate() {
+        progress(n, total);
+        let skip = if !q.starts_with(&qdir) || !env.contains(q) || !env.contains(&trash) {
+            Some(SkipReason::Refused(
+                "outside the CleanCraft quarantine".into(),
+            ))
+        } else {
+            match &open {
+                Ok(list) => in_use(list, q),
+                Err(e) => Some(SkipReason::InUseCheckFailed(e.to_string())),
+            }
+        }
+        .or(match env.fault_for(q) {
+            Some(Fault::PermissionDenied) => Some(SkipReason::PermissionDenied),
+            Some(Fault::InUse) => Some(SkipReason::InUse),
+            Some(Fault::DiskFull) => Some(SkipReason::DiskFull),
+            _ => None,
+        });
+        if let Some(why) = skip {
+            report.skipped.push((q.clone(), why));
+            continue;
+        }
+        let (size, _) = tree_size_once(q, &mut counted);
+        let name = q
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "item".into());
+        let is_dir = fs::symlink_metadata(q).is_ok_and(|m| m.is_dir());
+        let dest = match fs::create_dir_all(&trash) {
+            Ok(()) => free_name(&trash, &name, is_dir),
+            Err(e) => {
+                report.skipped.push((q.clone(), skip_for(&e)));
+                continue;
+            }
+        };
+        if let Err(e) = fs::rename(q, &dest) {
+            report.skipped.push((q.clone(), skip_for(&e)));
+            continue;
+        }
+        let rec = ActionRecord {
+            id: fresh_id(format!("{plan_id}#{n}"), &mut used),
+            plan_id: plan_id.clone(),
+            feature: None,
+            time: chrono::Utc::now().timestamp(),
+            size,
+            kind: ActionKind::Moved {
+                original: q.clone(),
+                stored_id: StoredId::of(&dest),
+                stored: dest.clone(),
+                method: Method::Trash,
+            },
+            undone: None,
+        };
+        if let Err(e) = append_journal(env, &rec) {
+            // No log line, no move: put it back.
+            let _ = fs::rename(&dest, q);
+            report.skipped.push((
+                q.clone(),
+                SkipReason::Other(format!("could not log the action: {e}")),
+            ));
+            continue;
+        }
+        report.freed += size;
+        report.moved.push(rec);
+        moved.push((q.clone(), dest));
+    }
+    progress(total, total);
+    if moved.is_empty() {
+        return Ok(report);
+    }
+    // The cleanups that put these items in the quarantine now find them in the Trash.
+    let mut recs = history(env);
+    for r in recs.iter_mut() {
+        if r.undone.is_some() || is_relocation(r) {
+            continue;
+        }
+        if let ActionKind::Moved {
+            stored, stored_id, ..
+        } = &mut r.kind
+            && let Some((_, dest)) = moved.iter().find(|(q, _)| q == stored)
+        {
+            *stored = dest.clone();
+            *stored_id = StoredId::of(dest);
+        }
+    }
+    if let Err(e) = rewrite_journal(env, &recs) {
+        // The log cannot say where they are: put every item back in the quarantine and
+        // mark the moves as undone, so History stays true.
+        let now = chrono::Utc::now().timestamp();
+        let mut recs = history(env);
+        for (q, dest) in &moved {
+            let _ = fs::rename(dest, q);
+            report.skipped.push((
+                q.clone(),
+                SkipReason::Other(format!("could not log the action: {e}")),
+            ));
+        }
+        for r in recs.iter_mut().filter(|r| r.plan_id == plan_id) {
+            r.undone = Some(now);
+        }
+        let _ = rewrite_journal(env, &recs);
+        report.moved.clear();
+        report.freed = 0;
+    }
+    Ok(report)
 }
 
 /// Explain a refusal for display.

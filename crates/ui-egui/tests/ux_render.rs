@@ -206,6 +206,8 @@ fn scenes() -> Vec<Scene> {
             name: "quick-sweep-scanning",
             mac: testkit_monitor::sweep_mac,
             go: |h| {
+                // The same modules as the idle and results scenes (REVIEW-C C15).
+                h.state_mut().sweep.sources = Some(testkit_monitor::sweep_sources());
                 h.state_mut().sweep.phase = sweep::Phase::Scanning(Job::waiting("System Junk"));
                 settle(h);
             },
@@ -761,6 +763,7 @@ fn every_control_shows_the_pointing_hand() {
             let kind = match role {
                 Role::Button
                 | Role::CheckBox
+                | Role::Switch
                 | Role::RadioButton
                 | Role::ComboBox
                 | Role::Link
