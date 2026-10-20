@@ -162,6 +162,10 @@ fn settings_are_saved_and_change_what_happens() {
 
     // Remove from the ignore list: saved, and the folder is proposed again.
     click(&mut h, "Settings");
+    // The page keeps its scroll position (the agents switch is lower down): scroll back.
+    h.get_by_label(&format!("Remove {}", mac.env.display(&browser)))
+        .scroll_to_me();
+    steps(&mut h);
     click(&mut h, &format!("Remove {}", mac.env.display(&browser)));
     assert!(Settings::load(&mac.env).ignore.is_empty());
     // The tool sits in the "Clean" section of the sidebar.

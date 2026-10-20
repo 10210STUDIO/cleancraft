@@ -61,6 +61,8 @@ pub struct State {
     pub error: Option<String>,
     pub folder_text: String,
     pub disk: Option<DiskUse>,
+    /// The action log as the trees reflect it: moves made on other pages update the map.
+    watch: super::history::JournalWatch,
 }
 
 impl State {
@@ -139,6 +141,7 @@ pub fn poll(app: &mut CleanApp) -> bool {
                     st.trees.insert(r, tree);
                     st.phase = Phase::Map;
                 }
+                st.watch.prime(&app.env);
                 false
             } else if job.is_dead() {
                 st.error = Some("Measuring stopped unexpectedly.".into());
@@ -152,6 +155,15 @@ pub fn poll(app: &mut CleanApp) -> bool {
             if let Some(out) = job.poll() {
                 if let Some(r) = st.root.clone() {
                     st.trees.insert(r, out.tree);
+                }
+                // Its own move or undo is in this tree already; other mapped folders catch up.
+                if let Some(ch) = st.watch.changes(&app.env) {
+                    let root = st.root.clone();
+                    for (k, t) in st.trees.iter_mut() {
+                        if Some(k) != root.as_ref() {
+                            t.refresh_after(&app.env, &ch);
+                        }
+                    }
                 }
                 st.disk = None;
                 // The shown folder may be gone now.
@@ -209,6 +221,33 @@ pub fn poll(app: &mut CleanApp) -> bool {
         }
     }
     busy
+}
+
+/// Moves and undos made elsewhere (another page, History, an agent) since the map was
+/// measured: measure just those places again, so moved blocks leave the map and the numbers
+/// match a new scan.
+fn catch_up(app: &mut CleanApp) {
+    let st = &mut app.disk_map;
+    if !matches!(st.phase, Phase::Idle | Phase::Map | Phase::Done(_)) || st.trees.is_empty() {
+        return;
+    }
+    let Some(ch) = st.watch.changes(&app.env) else {
+        return;
+    };
+    if super::history::moved_paths(&ch).is_empty() {
+        return;
+    }
+    for t in st.trees.values_mut() {
+        t.refresh_after(&app.env, &ch);
+    }
+    st.selected.retain(|p| std::fs::symlink_metadata(p).is_ok());
+    st.disk = None;
+    while let Some(c) = st.current.clone() {
+        if st.tree().and_then(|t| t.find(&c)).is_some() {
+            break;
+        }
+        st.current = c.parent().map(Path::to_path_buf);
+    }
 }
 
 fn start_remove(app: &mut CleanApp) {
@@ -274,6 +313,7 @@ const SUBTITLE: &str =
 
 pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: cleancraft_core::FeatureId) {
     let t = app.t;
+    catch_up(app);
     let (icon, _) = kit::feature_look(&t, f);
     let phase = match &app.disk_map.phase {
         Phase::Idle => 0,
@@ -705,7 +745,9 @@ fn treemap(app: &mut CleanApp, ui: &mut Ui, node: &Node, area: egui::Rect) {
             .as_ref()
             .is_some_and(|(p, _)| app.disk_map.selected.contains(p));
         let id = ui.id().with(("block", &label));
-        let resp = ui.interact(rect, id, Sense::click());
+        let resp = ui
+            .interact(rect, id, Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
         let name = format!("Block {label}");
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
         let p = ui.painter();
@@ -871,13 +913,20 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                         } else {
                             Color32::from_rgb(0x44, 0x48, 0x50)
                         };
-                        let ir =
-                            egui::Rect::from_center_size(dot + vec2(4.0, 0.0), vec2(18.0, 18.0));
-                        icons::paint(
-                            ui.painter(),
-                            ir,
-                            if c.is_dir { Icon::Folder } else { Icon::File },
+                        // The block's colour as a short bar, then the item's own kind icon
+                        // (folder, archive, picture...), like every other file list.
+                        ui.painter().rect_filled(
+                            egui::Rect::from_center_size(dot - vec2(6.0, 0.0), vec2(3.0, 22.0)),
+                            1.5,
                             color,
+                        );
+                        let ir =
+                            egui::Rect::from_center_size(dot + vec2(8.0, 0.0), vec2(26.0, 26.0));
+                        crate::images::paint_file_icon(
+                            ui,
+                            ir,
+                            &c.path,
+                            crate::file_icons::FileKind::of(&c.path),
                         );
                         let size_text = human_size(c.size);
                         let sf = font(size::BODY, Weight::SemiBold);
@@ -894,7 +943,7 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                             t.text,
                             Align::Max,
                         );
-                        let x0 = r.left() + 62.0;
+                        let x0 = r.left() + 70.0;
                         let name_w = (r.right() - size_w - 20.0 - x0).max(40.0);
                         let nf = font(size::BODY, Weight::Medium);
                         let name_s = kit::truncate_middle(ui.ctx(), &c.name, &nf, name_w);
@@ -939,11 +988,18 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                             // The whole reason when it fits; else its first clause (never a
                             // sentence cut mid-way with an open parenthesis); the tooltip
                             // has it all.
-                            let short = match why.split_once(" (") {
-                                Some((head, _)) => format!("Locked: {head}"),
-                                None => format!("Locked: {why}"),
+                            // The padlock says "locked"; the line says why, once.
+                            let cap = |s: &str| {
+                                let mut c = s.chars();
+                                c.next()
+                                    .map(|f| f.to_uppercase().chain(c).collect::<String>())
+                                    .unwrap_or_default()
                             };
-                            let full_shown = format!("Locked: {why}");
+                            let short = match why.split_once(" (") {
+                                Some((head, _)) => cap(head),
+                                None => cap(why),
+                            };
+                            let full_shown = cap(why);
                             let fits = |s: &str| {
                                 kit::galley(ui, s, lf.clone(), t.text_faint).size().x
                                     <= line.width()

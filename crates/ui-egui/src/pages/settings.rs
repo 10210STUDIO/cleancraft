@@ -81,6 +81,39 @@ fn slider_row(
 pub struct State {
     /// Text box for adding an ignore-list path.
     pub new_ignore: String,
+    /// The macOS folder dialog, while it is open.
+    pick: Option<crate::jobs::Job<Result<Option<std::path::PathBuf>, String>>>,
+}
+
+/// macOS's own folder dialog (through osascript and env.sys): the folder chosen, or None when
+/// the person cancels.
+pub fn choose_folder(
+    env: &cleancraft_core::Env,
+    prompt: &str,
+) -> Result<Option<std::path::PathBuf>, String> {
+    let script = format!(
+        "POSIX path of (choose folder with prompt \"{}\")",
+        prompt.replace('\\', "").replace('"', "")
+    );
+    let out = env
+        .sys
+        .run("/usr/bin/osascript", &["-e", &script])
+        .map_err(|e| format!("The folder dialog could not open: {e}"))?;
+    if out.status != 0 {
+        // -128: the person chose Cancel.
+        if out.stderr.contains("-128") {
+            return Ok(None);
+        }
+        return Err(format!(
+            "The folder dialog could not open: {}",
+            out.stderr.trim()
+        ));
+    }
+    let path = out.stdout.trim().trim_end_matches('/');
+    if path.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(env.sys_path(path)))
 }
 
 pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
@@ -90,10 +123,29 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
         &t,
         Icon::Settings,
         "Settings",
-        "Where removed items go, what scans leave alone, how big and old files are judged, and sounds.",
+        "Where removed items go, what scans leave alone, how big and old files are judged, and sounds. Changes are saved as you make them.",
     );
     let mut changed = false;
-    egui::ScrollArea::vertical()
+    // The folder dialog answered.
+    if let Some(job) = app.settings_page.pick.as_mut() {
+        if let Some(r) = job.poll() {
+            app.settings_page.pick = None;
+            match r {
+                Ok(Some(p)) if !app.settings.ignore.contains(&p) => {
+                    app.settings.ignore.push(p);
+                    changed = true;
+                }
+                Ok(_) => {}
+                Err(e) => app.warn(e),
+            }
+        } else if job.is_dead() {
+            app.settings_page.pick = None;
+        } else {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(200));
+        }
+    }
+    let out = egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
             kit::card(&t).show(ui, |ui| {
@@ -125,13 +177,30 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                     &t,
                     "Scans never propose these paths or anything inside them.",
                 );
+                ui.add_space(space::XS);
                 let list = app.settings.ignore.clone();
+                if list.is_empty() {
+                    ui.label(
+                        RichText::new("Nothing is ignored yet. Add a folder or file below, or choose Ignore on an app in App Remover.")
+                            .font(font(size::CALLOUT, Weight::Regular))
+                            .color(t.text_faint),
+                    );
+                }
                 for (i, p) in list.iter().enumerate() {
                     ui.horizontal(|ui| {
+                        ui.set_min_height(crate::theme::hit::FIELD);
                         let shown = app.env.display(p);
                         let (r, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
                         icons::paint(ui.painter(), r, Icon::Folder, t.text_dim);
-                        ui.label(RichText::new(&shown).color(t.text));
+                        // The path, shortened in the middle so the Remove button stays in
+                        // reach; the whole path in the tooltip and for VoiceOver.
+                        let fid = font(size::CALLOUT, Weight::Regular);
+                        let room = (ui.available_width() - 120.0).max(80.0);
+                        let short = kit::truncate_middle(ui.ctx(), &shown, &fid, room);
+                        let w = kit::galley(ui, &short, fid.clone(), t.text).size().x + 2.0;
+                        let (pr, _) = ui.allocate_exact_size(vec2(w, 20.0), Sense::hover());
+                        kit::text_at(ui, pr, &short, &shown, fid, t.text, egui::Align::Min)
+                            .on_hover_text(&shown);
                         let r = kit::ghost(ui, &t, "Remove", Some(Icon::Close));
                         r.widget_info(|| {
                             egui::WidgetInfo::labeled(
@@ -164,21 +233,47 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                     if r.changed() {
                         app.act();
                     }
-                    if kit::secondary(ui, &t, "Add to Ignore List") {
+                    let enter = r.lost_focus()
+                        && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                        && !app.settings_page.new_ignore.trim().is_empty();
+                    if kit::secondary(ui, &t, "Add to Ignore List") || enter {
                         let raw = app.settings_page.new_ignore.trim().to_string();
+                        app.act();
                         if raw.is_empty() {
-                            app.act();
                             app.warn("Type a path first.");
                         } else {
-                            let p = if let Some(rest) = raw.strip_prefix("~/") {
+                            let p = if raw == "~" {
+                                app.env.home().to_path_buf()
+                            } else if let Some(rest) = raw.strip_prefix("~/") {
                                 app.env.home_path(rest)
                             } else {
                                 app.env.sys_path(&raw)
                             };
-                            app.settings.ignore.push(p);
-                            app.settings_page.new_ignore.clear();
-                            changed = true;
+                            if std::fs::symlink_metadata(&p).is_err() {
+                                app.warn(format!(
+                                    "Nothing is at {raw}. Check the path, or use Choose Folder."
+                                ));
+                            } else if app.settings.ignore.contains(&p) {
+                                app.warn(format!("{raw} is on the list already."));
+                            } else {
+                                app.settings.ignore.push(p);
+                                app.settings_page.new_ignore.clear();
+                                changed = true;
+                            }
                         }
+                    }
+                    let picking = app.settings_page.pick.is_some();
+                    let ch = ui
+                        .add_enabled_ui(!picking, |ui| {
+                            kit::pill(ui, &t, "Choose Folder...", kit::Kind::Secondary, Some(Icon::Folder))
+                        })
+                        .inner;
+                    if ch.on_hover_text("Pick a folder in the macOS file dialog").clicked() && !picking {
+                        app.act();
+                        let env = app.env.clone();
+                        app.settings_page.pick = Some(crate::jobs::Job::start(app.sync, move |_| {
+                            choose_folder(&env, "Choose a folder CleanCraft should leave alone")
+                        }));
                     }
                 });
             });
@@ -216,6 +311,21 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                 {
                     changed = true;
                 }
+                ui.horizontal(|ui| {
+                    ui.add_space(28.0);
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(if app.settings.agents_may_clean {
+                                "Agents can move the items of a plan you confirmed. Everything they move is in History, with Undo."
+                            } else {
+                                "Off: agents can scan and propose, but nothing moves unless you clean here."
+                            })
+                            .font(font(size::FOOTNOTE, Weight::Regular))
+                            .color(t.text_faint),
+                        )
+                        .wrap(),
+                    );
+                });
             });
             ui.add_space(space::M);
             kit::card(&t).show(ui, |ui| {
@@ -244,7 +354,8 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                             egui::Slider::new(&mut v, 0.0..=1.0)
                                 .show_value(false)
                                 .trailing_fill(true),
-                        );
+                        )
+                        .on_hover_cursor(egui::CursorIcon::PointingHand);
                         let shown = v as f64;
                         r.widget_info(|| egui::WidgetInfo::slider(true, shown, "Volume"));
                         if r.changed() {
@@ -272,7 +383,9 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                     }
                 });
             });
+            ui.add_space(space::M);
         });
+    kit::scroll_fade_page(ui, &out, &t);
     if changed {
         app.act();
         app.save_settings();

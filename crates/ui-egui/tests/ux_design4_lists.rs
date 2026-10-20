@@ -424,3 +424,40 @@ fn undo_brings_items_back_on_every_page() {
     assert_eq!(paths(&mut h, FeatureId::LargeOldFiles), before);
     assert!(stale_items(&mut h).is_empty(), "{:?}", stale_items(&mut h));
 }
+
+/// Moves made anywhere else (App Remover, Disk Map, History, or CleanCraft's agent API) reach
+/// the plan pages through the action log: the list drops what moved; an Undo there makes the
+/// list scan again when it is shown.
+#[test]
+fn moves_from_other_pages_reach_the_lists_through_the_log() {
+    let mac = files_mac();
+    let mut h = harness(&mac);
+    go(&mut h, "large_old_files");
+    click(&mut h, "Scan");
+    let before = paths(&mut h, FeatureId::LargeOldFiles);
+    // Another page moves one of the listed files (same executor, same log).
+    let settings = Settings::load(&mac.env);
+    let mut plan = features::scan(&mac.env, &settings, FeatureId::LargeOldFiles).expect("scan");
+    let target = plan.items[0].path.clone();
+    assert!(before.contains(&target));
+    for i in 0..plan.items.len() {
+        plan.set_selected(i, i == 0);
+    }
+    let rep = features::run_plan(&mac.env, &settings, &plan, &plan.digest(), &mut |_, _| {})
+        .expect("move");
+    assert_eq!(rep.moved.len(), 1);
+    steps(&mut h);
+    let after = paths(&mut h, FeatureId::LargeOldFiles);
+    assert!(
+        !after.contains(&target),
+        "the list still shows the moved file"
+    );
+    assert_eq!(after.len(), before.len() - 1);
+    // Put back from elsewhere: the list scans again and shows it.
+    let (n, errs) = cleancraft_core::executor::undo_plan(&mac.env, &rep.plan_id);
+    assert_eq!((n, errs.len()), (1, 0));
+    steps(&mut h);
+    go(&mut h, "large_old_files");
+    steps(&mut h);
+    assert_eq!(paths(&mut h, FeatureId::LargeOldFiles), before);
+}

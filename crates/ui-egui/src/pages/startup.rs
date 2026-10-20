@@ -67,9 +67,12 @@ pub struct State {
     pub confirm_quit: Option<Proc>,
     /// Removal of an agent's file waiting for confirmation (a plan with that one item).
     pub confirm_remove: Option<Plan>,
+    /// The action log as the snapshot reflects it (an uninstall moves agents too).
+    watch: super::history::JournalWatch,
 }
 
 fn reload(app: &mut CleanApp) {
+    app.startup.watch.prime(&app.env);
     let env = app.env.clone();
     app.startup.loading = Some(Job::start(app.sync, move |_| read(&env)));
 }
@@ -238,23 +241,33 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     );
     if app.startup.data.is_none() && app.startup.loading.is_none() {
         reload(app);
-    }
-    if app.startup.busy.is_some() {
-        kit::progress(
-            ui,
-            &t,
-            f,
-            "Working... macOS may ask for your password.",
-            "",
-            0,
-            false,
-        );
-        return;
+    } else if app.startup.loading.is_none()
+        && app.startup.busy.is_none()
+        && app.startup.watch.changes(&app.env).is_some()
+    {
+        // Something changed elsewhere (an app removed with its agents, an undo in History).
+        reload(app);
     }
     let Some(data) = app.startup.data.clone() else {
         kit::progress(ui, &t, f, "Reading startup items...", "", 0, false);
         return;
     };
+    let busy = app.startup.busy.is_some() || app.startup.loading.is_some();
+    // A change in progress keeps the list on screen (no full-page flash for a switch).
+    if app.startup.busy.is_some() {
+        ui.horizontal(|ui| {
+            let (r, _) = ui.allocate_exact_size(egui::vec2(20.0, 20.0), egui::Sense::hover());
+            let time = ui.input(|i| i.time);
+            kit::progress_ring(ui.painter(), r.center(), 16.0, &t, time);
+            ui.label(
+                RichText::new("Working... macOS may ask for your password.")
+                    .font(font(size::CALLOUT, Weight::Medium))
+                    .color(t.text),
+            );
+        });
+        ui.ctx().request_repaint();
+        ui.add_space(space::XS);
+    }
     ui.horizontal(|ui| {
         let n_on = data.launch.iter().filter(|i| i.enabled).count()
             + data.login.as_ref().map(|l| l.len()).unwrap_or(0);
@@ -264,7 +277,12 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                 .color(t.text),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if kit::secondary(ui, &t, "Refresh") {
+            let r = ui
+                .add_enabled_ui(!busy, |ui| {
+                    kit::pill(ui, &t, "Refresh", kit::Kind::Secondary, None)
+                })
+                .inner;
+            if r.on_hover_text("Read the startup items again").clicked() && !busy {
                 app.act();
                 reload(app);
             }
@@ -277,11 +295,14 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         .id_salt("startup")
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            login_section(app, ui, &data);
-            for d in Domain::ALL {
-                launch_section(app, ui, &data, d);
-            }
-            heavy_section(app, ui, &data);
+            ui.add_enabled_ui(app.startup.busy.is_none(), |ui| {
+                login_section(app, ui, &data);
+                for d in Domain::ALL {
+                    launch_section(app, ui, &data, d);
+                }
+                heavy_section(app, ui, &data);
+                ui.add_space(space::M);
+            });
         });
     kit::scroll_fade_page(ui, &fade_out, &t);
     if app.startup.confirm_quit.is_some() {
@@ -315,10 +336,10 @@ fn login_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot) {
         ui.set_width(ui.available_width());
         match &data.login {
             Err(e) => {
-                ui.label(RichText::new(e).color(t.warning));
+                kit::strip(ui, crate::icons::Icon::Warning, t.warning, e);
             }
             Ok(list) if list.is_empty() && data.removed_login.is_empty() => {
-                ui.label("No login items.");
+                kit::dim(ui, &t, "No app opens when you log in.");
             }
             Ok(list) => {
                 for it in list {
@@ -411,7 +432,7 @@ fn launch_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot, d: Domain) {
     kit::card(&t).show(ui, |ui| {
         ui.set_width(ui.available_width());
         if items.is_empty() {
-            ui.label("None.");
+            kit::dim(ui, &t, "None on this Mac.");
         }
         let n = items.len();
         for (k, it) in items.into_iter().enumerate() {
@@ -536,10 +557,10 @@ fn heavy_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot) {
         ui.set_width(ui.available_width());
         match &data.heavy {
             Err(e) => {
-                ui.label(RichText::new(e).color(t.warning));
+                kit::strip(ui, crate::icons::Icon::Warning, t.warning, e);
             }
             Ok(v) if v.is_empty() => {
-                ui.label("No app is working hard right now.");
+                kit::dim(ui, &t, "No app is working hard right now.");
             }
             Ok(v) => {
                 for p in v {
@@ -621,7 +642,12 @@ fn confirm_quit(app: &mut CleanApp, ui: &mut Ui) {
         ui.add_space(10.0);
         kit::well(&t).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(RichText::new(cmd).monospace().size(crate::theme::size::FOOTNOTE).color(t.text_dim));
+            kit::eyebrow(ui, &t, "Command");
+            ui.label(
+                RichText::new(cmd)
+                    .font(font(size::FOOTNOTE, Weight::Medium))
+                    .color(t.text),
+            );
         });
         ui.add_space(14.0);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -673,7 +699,11 @@ fn confirm_remove(app: &mut CleanApp, ui: &mut Ui) {
         kit::well(&t).show(ui, |ui| {
             ui.set_width(ui.available_width());
             for it in plan.selected() {
-                ui.label(RichText::new(app.env.display(&it.path)).monospace().size(crate::theme::size::FOOTNOTE));
+                ui.label(
+                    RichText::new(app.env.display(&it.path))
+                        .font(font(size::CALLOUT, Weight::Medium))
+                        .color(t.text),
+                );
                 ui.label(
                     RichText::new(format!("{}  {}", human_size(it.size), it.reason))
                         .color(t.text_dim),
