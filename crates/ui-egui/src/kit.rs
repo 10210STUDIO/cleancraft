@@ -64,7 +64,7 @@ pub fn feel(ui: &Ui, resp: &Response) -> Feel {
 
 /// The pointing hand over an enabled, hovered control. Disabled controls keep the arrow.
 pub fn pointer(resp: &Response) {
-    if resp.enabled() && resp.hovered() {
+    if resp.enabled() && resp.hovered() && resp.sense.senses_click() {
         resp.ctx.set_cursor_icon(CursorIcon::PointingHand);
     }
 }
@@ -126,13 +126,46 @@ pub enum Kind {
     Ghost,
 }
 
-/// A pill button. Accessible name = `label`. Respects a disabled `ui`.
-pub fn pill(ui: &mut Ui, t: &Tokens, label: &str, kind: Kind, icon: Option<Icon>) -> Response {
-    let (h, fs, pad, min_w) = match kind {
+/// The size `pill` takes for this label.
+pub fn pill_size(ui: &Ui, label: &str, kind: Kind, icon: bool) -> Vec2 {
+    let (h, fs, pad, min_w) = pill_metrics(kind);
+    let weight = match kind {
+        Kind::Ghost | Kind::Secondary => Weight::Medium,
+        _ => Weight::SemiBold,
+    };
+    let gw = galley(ui, label, font(fs, weight), Color32::WHITE).size().x;
+    let icon_w = if icon { fs + 6.0 } else { 0.0 };
+    vec2((gw + icon_w + pad * 2.0).max(min_w), h)
+}
+
+fn pill_metrics(kind: Kind) -> (f32, f32, f32, f32) {
+    match kind {
         Kind::Primary | Kind::Danger => (hit::PRIMARY, size::BODY, 20.0, 104.0),
         Kind::Secondary => (hit::SECONDARY, size::CALLOUT, 16.0, 76.0),
         Kind::Ghost => (hit::GHOST, size::FOOTNOTE, 11.0, 0.0),
-    };
+    }
+}
+
+/// A dialog's buttons, right-aligned on one row: Cancel, then the action (`kind`: Primary
+/// or Danger). Laid out from the left so Tab reaches Cancel first, never the destructive
+/// button. Returns (action clicked, Cancel clicked).
+pub fn dialog_actions(ui: &mut Ui, t: &Tokens, action: &str, kind: Kind) -> (bool, bool) {
+    let icon = kind == Kind::Danger && action.contains("Trash");
+    let cancel_w = pill_size(ui, "Cancel", Kind::Secondary, false).x;
+    let go_w = pill_size(ui, action, kind, icon).x;
+    let gap = ui.spacing().item_spacing.x;
+    let mut out = (false, false);
+    ui.horizontal(|ui| {
+        ui.add_space((ui.available_width() - cancel_w - go_w - gap).max(0.0));
+        out.1 = secondary(ui, t, "Cancel");
+        out.0 = pill(ui, t, action, kind, icon.then_some(Icon::Trash)).clicked();
+    });
+    out
+}
+
+/// A pill button. Accessible name = `label`. Respects a disabled `ui`.
+pub fn pill(ui: &mut Ui, t: &Tokens, label: &str, kind: Kind, icon: Option<Icon>) -> Response {
+    let (h, fs, pad, min_w) = pill_metrics(kind);
     let weight = match kind {
         Kind::Ghost => Weight::Medium,
         Kind::Secondary => Weight::Medium,
@@ -236,15 +269,10 @@ pub fn pill(ui: &mut Ui, t: &Tokens, label: &str, kind: Kind, icon: Option<Icon>
     resp
 }
 
+/// The light on a pill's upper half: it follows the pill's outline (inset by half a point),
+/// so it has no hard edge anywhere.
 fn top_sheen(p: &egui::Painter, r: Rect, round: f32) {
-    let top = Rect::from_min_max(r.min, pos2(r.max.x, r.center().y));
-    let _ = round;
-    icons::vertical_gradient(
-        &p.with_clip_rect(top.shrink2(vec2(round * 0.6, 1.0)).intersect(p.clip_rect())),
-        top,
-        Color32::from_white_alpha(34),
-        Color32::from_white_alpha(0),
-    );
+    icons::sheen_tile(p, r.shrink(0.5), round - 0.5, Color32::from_white_alpha(30));
 }
 
 /// Animated 0..=1 toward `on`, honouring reduced motion.
@@ -525,8 +553,10 @@ pub fn display_count(
     let id = egui::Id::new(("display-count", key));
     let ctx = ui.ctx().clone();
     if ctx.data(|d| d.get_temp::<bool>(id.with("seen"))).is_none() {
+        // The first frame shows the exact figure, like every other number on the page
+        // (REVIEW-C C10); later changes (files that moved away) glide to the new value.
         ctx.data_mut(|d| d.insert_temp(id.with("seen"), true));
-        crate::motion::count_to(&ctx, id, 0.0, crate::motion::tr::COUNT);
+        crate::motion::count_to(&ctx, id, bytes as f64, crate::motion::tr::COUNT);
     }
     let v = crate::motion::count_to(&ctx, id, bytes as f64, crate::motion::tr::COUNT);
     let full = cleancraft_core::fsutil::human_size(bytes);
@@ -642,6 +672,32 @@ pub fn balanced_width(ui: &Ui, text: &str, fid: &FontId, max_w: f32) -> f32 {
         }
     }
     (hi + 2.0).min(max_w)
+}
+
+/// The widest width up to `max_w` at which `text` wraps without a one-word last line (a
+/// widow): the width narrows in 8 pt steps, at most to 60%, until the last line holds two
+/// words. Text on one line keeps `max_w`.
+pub fn no_widow_width(ui: &Ui, text: &str, fid: &FontId, max_w: f32) -> f32 {
+    let last_words = |w: f32| {
+        let mut job =
+            egui::text::LayoutJob::simple(text.to_string(), fid.clone(), Color32::WHITE, w);
+        job.wrap.max_width = w;
+        let g = ui.ctx().fonts_mut(|f| f.layout_job(job));
+        if g.rows.len() < 2 {
+            return usize::MAX;
+        }
+        let row = g.rows.last().expect("rows");
+        let s: String = row.glyphs.iter().map(|gl| gl.chr).collect();
+        s.split_whitespace().count()
+    };
+    let mut w = max_w;
+    while w > max_w * 0.6 {
+        if last_words(w) >= 2 {
+            return w;
+        }
+        w -= 8.0;
+    }
+    max_w
 }
 
 /// How far below the top of a `big` line a `small` line must start so both share one
@@ -1135,6 +1191,7 @@ pub fn hero(
             } else {
                 balanced_width(ui, text.desc, &fid, w)
             };
+            let bw = no_widow_width(ui, text.desc, &fid, bw);
             ui.set_max_width(bw);
             ui.label(RichText::new(text.desc).font(fid).color(t.text_dim));
         });
@@ -1265,8 +1322,16 @@ pub fn round_action(ui: &mut Ui, t: &Tokens, label: &str, d: f32) -> Response {
         vec2(label_w + 72.0, 56.0)
     };
     let pad = 22.0;
-    let (outer, _) = ui.allocate_exact_size(size + Vec2::splat(pad * 2.0), Sense::hover());
-    let rect = Rect::from_center_size(outer.center(), size);
+    // In a left-aligned column (the wide start screen) the button's edge sits on the column
+    // edge and its halo overhangs to the left; centred, the halo has room on both sides.
+    let left = ui.layout().horizontal_align() == egui::Align::Min && !ui.layout().is_horizontal();
+    let rect = if left {
+        let (outer, _) = ui.allocate_exact_size(size + vec2(pad, pad * 2.0), Sense::hover());
+        Rect::from_min_size(pos2(outer.left(), outer.top() + pad), size)
+    } else {
+        let (outer, _) = ui.allocate_exact_size(size + Vec2::splat(pad * 2.0), Sense::hover());
+        Rect::from_center_size(outer.center(), size)
+    };
     let resp = ui.interact(rect, ui.id().with(("round", label)), Sense::click());
     let enabled = ui.is_enabled();
     resp.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, label));
@@ -2083,7 +2148,8 @@ fn paint_box(ui: &Ui, t: &Tokens, r: Rect, resp: &Response, on: bool, mixed: boo
         5.0,
         Stroke::new(
             1.3,
-            icons::lerp(Color32::from_white_alpha(70), t.sec_a, hov.max(k)),
+            // Unchecked ring white 115: over 3:1 on the list card and a selected row.
+            icons::lerp(Color32::from_white_alpha(115), t.sec_a, hov.max(k)),
         ),
         egui::StrokeKind::Inside,
     );
@@ -2247,7 +2313,7 @@ pub fn search_field(
     hint: &str,
     width: f32,
 ) -> Response {
-    let (r, _) = ui.allocate_exact_size(vec2(width, hit::FIELD), Sense::hover());
+    let (r, bg) = ui.allocate_exact_size(vec2(width, hit::FIELD), Sense::hover());
     let p = ui.painter();
     p.rect_filled(r, r.height() / 2.0, Color32::from_black_alpha(70));
     p.rect_stroke(
@@ -2283,7 +2349,7 @@ pub fn search_field(
     );
     let resp = out.unwrap_or_else(|| ui.interact(r, ui.id().with(hint), Sense::hover()));
     // The I-beam over the whole field, the magnifier and its rounded ends included.
-    if ui.is_enabled() && ui.rect_contains_pointer(r) {
+    if ui.is_enabled() && (bg.contains_pointer() || resp.hovered()) {
         ui.ctx().set_cursor_icon(CursorIcon::Text);
     }
     if resp.has_focus() {

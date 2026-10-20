@@ -22,7 +22,7 @@ use cleancraft_ui_egui::CleanApp;
 use cleancraft_ui_egui::jobs::Job;
 use cleancraft_ui_egui::pages::{plan_page, sweep};
 use egui::epaint::Shape;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 
 type H = egui_kittest::Harness<'static, CleanApp>;
 
@@ -795,6 +795,47 @@ fn every_control_shows_the_pointing_hand() {
             let label = a.label().unwrap_or_default();
             targets.push((kind, a.is_disabled(), label, format!("{role:?}"), r));
         }
+        // A control is a target only where it is painted: rows scrolled out of a list keep
+        // their accessibility node but are clipped away.
+        let painted = |r: egui::Rect, h: &H| {
+            let c = r.center();
+            // Some shape of the control itself (inside its rect) is drawn with a clip that
+            // keeps the point the test hovers.
+            // Its text when it has some (the most reliable part to tell it is on screen).
+            let own: Vec<_> = h
+                .output()
+                .shapes
+                .iter()
+                .filter(|cs| {
+                    let b = cs.shape.visual_bounding_rect();
+                    !matches!(cs.shape, Shape::Noop)
+                        && b.intersects(r)
+                        && r.expand(4.0).contains_rect(b)
+                })
+                .collect();
+            let texts: Vec<_> = own
+                .iter()
+                .filter(|cs| matches!(cs.shape, Shape::Text(_)))
+                .collect();
+            if texts.is_empty() {
+                own.iter().any(|cs| cs.clip_rect.contains(c))
+            } else {
+                texts.iter().all(|cs| cs.clip_rect.contains(c))
+            }
+        };
+        let targets: Vec<_> = targets.into_iter().filter(|t| painted(t.4, &h)).collect();
+        // A disabled control drawn on an enabled clickable row (a locked category's checkbox)
+        // shows what the row does.
+        let on_row = |r: egui::Rect| {
+            targets
+                .iter()
+                .any(|t| t.0 == "click" && !t.1 && t.4 != r && t.4.contains_rect(r))
+        };
+        let targets: Vec<_> = targets
+            .iter()
+            .filter(|t| !(t.1 && on_row(t.4)))
+            .cloned()
+            .collect();
         for (kind, disabled, label, role, r) in targets {
             // Away first, so the hover starts fresh (no tooltip left over).
             h.remove_cursor();
@@ -807,8 +848,18 @@ fn every_control_shows_the_pointing_hand() {
                 _ => c == CursorIcon::PointingHand,
             };
             if !want_ok {
+                let clips: Vec<String> = h
+                    .output()
+                    .shapes
+                    .iter()
+                    .filter(|cs| {
+                        matches!(cs.shape, Shape::Text(_))
+                            && r.expand(4.0).contains_rect(cs.shape.visual_bounding_rect())
+                    })
+                    .map(|cs| format!("{:?}", cs.clip_rect))
+                    .collect();
                 problems.push(format!(
-                    "{}: {role} '{label}' (disabled {disabled}) at {r:?} shows {c:?}",
+                    "{}: {role} '{label}' (disabled {disabled}) at {r:?} shows {c:?} (text clips {clips:?})",
                     s.name
                 ));
             }
@@ -852,18 +903,13 @@ fn pages_use_kit_controls_only() {
     let mut bad = Vec::new();
     for f in files {
         let text = std::fs::read_to_string(&f).expect("read");
-        for (i, line) in text.lines().enumerate() {
+        let lines: Vec<&str> = text.lines().collect();
+        for (i, line) in lines.iter().enumerate() {
             let code = line.split("//").next().unwrap_or("");
             for b in BANNED {
                 // A slider is built with egui::Slider and handed to kit::slider.
                 if *b == "egui::Slider" && line.contains("egui::Slider::new") {
-                    let prev = text
-                        .lines()
-                        .take(i)
-                        .rev()
-                        .take(3)
-                        .collect::<Vec<_>>()
-                        .join(" ");
+                    let prev = lines[i.saturating_sub(3)..i].join(" ");
                     if prev.contains("kit::slider") {
                         continue;
                     }

@@ -74,7 +74,11 @@ pub fn drop_paths(plan: &mut Plan, gone: &[std::path::PathBuf]) -> bool {
             resized = true;
         }
     }
-    if plan.items.iter().any(|i| i.group.is_some()) {
+    let sets = matches!(
+        plan.feature,
+        Some(FeatureId::Duplicates | FeatureId::SimilarPhotos)
+    );
+    if sets {
         let mut count: std::collections::HashMap<String, usize> = Default::default();
         for g in plan.items.iter().filter_map(|i| i.group.clone()) {
             *count.entry(g).or_default() += 1;
@@ -1005,21 +1009,37 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
         .unwrap_or(false);
     let name = item_name(f, it);
     let w = ui.available_width();
-    let (r, resp) = ui.allocate_exact_size(vec2(w, ROW_H), Sense::hover());
+    let locked = it.locked.is_some();
+    // The whole row is a click target that toggles it (its checkbox, Reveal and Ignore sit on
+    // top and keep their own clicks). Not a Tab stop: the checkbox is the row's one stop.
+    let (r, row) = ui.allocate_exact_size(
+        vec2(w, ROW_H),
+        if locked { Sense::hover() } else { Sense::CLICK },
+    );
+    let feel = kit::feel(ui, &row);
+    // Over the row or anything on it (checkbox, Reveal, Ignore).
+    let row_hovered = ui.rect_contains_pointer(r);
     let hov = kit::anim(
         ui.ctx(),
         egui::Id::new(("row-hov", f.as_str(), id)),
-        resp.contains_pointer(),
+        row_hovered,
         crate::theme::motion::HOVER,
     );
     let p = ui.painter().clone();
     let card = r.shrink2(vec2(2.0, 2.0));
     if selected_now {
-        p.rect_filled(card, 12.0, t.sec_a.gamma_multiply(0.07 + 0.04 * hov));
-    } else if hov > 0.0 {
-        p.rect_filled(card, 12.0, Color32::from_white_alpha((9.0 * hov) as u8));
+        p.rect_filled(
+            card,
+            12.0,
+            t.sec_a.gamma_multiply(0.07 + 0.04 * hov + 0.04 * feel.down),
+        );
+    } else if hov > 0.0 || feel.down > 0.0 {
+        p.rect_filled(
+            card,
+            12.0,
+            Color32::from_white_alpha((9.0 * hov + 8.0 * feel.down) as u8),
+        );
     }
-    let locked = it.locked.is_some();
     // Checkbox, named after the file.
     let cb_rect = Rect::from_center_size(pos2(r.left() + 20.0, r.center().y), vec2(22.0, 22.0));
     let mut on = selected_now;
@@ -1039,7 +1059,11 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
             t.text_faint,
         );
     }
-    if cb.changed() {
+    let row_click = row.clicked() && !locked;
+    if row_click {
+        on = !selected_now;
+    }
+    if cb.changed() || row_click {
         app.act();
         let every_copy = on
             && keeps_a_copy(f)
@@ -1108,7 +1132,16 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
     );
     let shown = app.env.display(&it.path);
     let path_x = x0 + name_w + 12.0;
-    let path_w = (x0 + text_w - path_x).max(24.0);
+    // While the row is hovered its actions cover the end of line 1: the path is shortened
+    // again to end before them (a middle ellipsis, never a word cut by the buttons).
+    let actions_w = 150.0;
+    let actions_left = size_r.left() - 12.0 - actions_w;
+    let path_end = if row_hovered || hov > 0.0 {
+        (x0 + text_w).min(actions_left - 20.0)
+    } else {
+        x0 + text_w
+    };
+    let path_w = (path_end - path_x).max(24.0);
     let pf = font(size::FOOTNOTE, Weight::Regular);
     let path_s = kit::truncate_middle(ui.ctx(), &shown, &pf, path_w);
     kit::text_at(
@@ -1169,12 +1202,11 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
         }
     }
     // Row actions, shown on hover.
-    let actions_w = 150.0;
     let actions = Rect::from_min_max(
-        pos2(size_r.left() - 12.0 - actions_w, r.top()),
+        pos2(actions_left, r.top()),
         pos2(size_r.left() - 12.0, r.bottom()),
     );
-    let show = hov.max(if resp.contains_pointer() { 1.0 } else { 0.0 });
+    let show = hov.max(if row_hovered { 1.0 } else { 0.0 });
     if show > 0.0 {
         // A soft solid under the buttons so the text beneath does not show through.
         let under = actions
@@ -1321,20 +1353,15 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                 });
         });
         ui.add_space(space::L);
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let label = match method {
-                executor::Method::Trash => "Move to Trash",
-                executor::Method::Quarantine | executor::Method::AdminQuarantine => {
-                    "Move to Quarantine"
-                }
-            };
-            if kit::danger(ui, &t, label) {
-                go = true;
+        let label = match method {
+            executor::Method::Trash => "Move to Trash",
+            executor::Method::Quarantine | executor::Method::AdminQuarantine => {
+                "Move to Quarantine"
             }
-            if kit::secondary(ui, &t, "Cancel") {
-                close = true;
-            }
-        });
+        };
+        let (ok, cancel) = kit::dialog_actions(ui, &t, label, kit::Kind::Danger);
+        go |= ok;
+        close |= cancel;
     });
     if dlg.should_close() {
         close = true;

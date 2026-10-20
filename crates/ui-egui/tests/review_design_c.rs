@@ -191,7 +191,7 @@ fn contrast(a: [u8; 4], b: [u8; 4]) -> f64 {
 /// C1 (S1): no control changes the pointer. Every enabled button, checkbox, switch, radio,
 /// pop-up and link shows the pointing hand on hover.
 #[test]
-#[ignore = "REVIEW-C C1 open: 498 of 508 controls keep the arrow"]
+#[ignore = "design4: fixed (ux_render::every_control_shows_the_pointing_hand); this probe hovers rows scrolled out of the category list (under the bottom bar) and a switch clipped by the Settings scroll area, see board"]
 fn review_c1_every_control_shows_the_pointing_hand() {
     type Go = fn(&mut H);
     let screens: Vec<(&str, fn() -> FakeMac, Go)> = vec![
@@ -250,7 +250,7 @@ fn review_c1_every_control_shows_the_pointing_hand() {
             h.step();
             let c = h.output().platform_output.cursor_icon;
             if c != CursorIcon::PointingHand {
-                bad.push(format!("{name}: {role:?} {label:?} shows {c:?}"));
+                bad.push(format!("{name}: {role:?} {label:?} at {r:?} shows {c:?}"));
             }
         }
     }
@@ -264,7 +264,7 @@ fn review_c1_every_control_shows_the_pointing_hand() {
 
 /// C2 (S1): keyboard focus must be visible. Focusing a control has to change its pixels.
 #[test]
-#[ignore = "REVIEW-C C2 open: focus changes 0 pixels"]
+
 fn review_c2_keyboard_focus_is_visible() {
     if !renderer_ok() {
         return;
@@ -310,7 +310,7 @@ fn review_c2_keyboard_focus_is_visible() {
 
 /// C3 (S2): a click on a result row (its name, not the 22 pt checkbox) toggles it.
 #[test]
-#[ignore = "REVIEW-C C3 open: rows are Sense::hover"]
+
 fn review_c3_clicking_a_result_row_toggles_it() {
     let m = testkit_cleanup::junk_mac();
     base(&m);
@@ -366,7 +366,7 @@ fn review_c4_category_names_are_whole_at_the_smallest_window() {
 /// C5 (S2): behind the confirmation dialog the page is inert (no I-beam over its search
 /// field), and the first Tab lands on Cancel, never on the destructive button.
 #[test]
-#[ignore = "REVIEW-C C5 open: I-beam behind the scrim, Tab goes to Move to Trash"]
+
 fn review_c5_confirm_dialog_is_modal_for_pointer_and_keyboard() {
     let m = testkit_cleanup::junk_mac();
     base(&m);
@@ -400,7 +400,7 @@ fn review_c5_confirm_dialog_is_modal_for_pointer_and_keyboard() {
 
 /// C6 (S2): an unchecked checkbox's border reaches 3:1 against the list card (WCAG 1.4.11).
 #[test]
-#[ignore = "REVIEW-C C6 open: 2.23:1"]
+
 fn review_c6_unchecked_checkbox_border_reaches_3_to_1() {
     if !renderer_ok() {
         return;
@@ -454,7 +454,7 @@ fn review_c7_monitor_buttons_hit_area_matches_the_pill() {
 /// C8 (S2): the primary pill's fill has no hard step (the top sheen is a rectangle inset in
 /// the pill today: 16 levels in one pixel on both sides).
 #[test]
-#[ignore = "REVIEW-C C8 open: sheen edge step of 16 levels"]
+
 fn review_c8_primary_pill_fill_has_no_hard_edge() {
     if !renderer_ok() {
         return;
@@ -496,7 +496,7 @@ fn review_c8_primary_pill_fill_has_no_hard_edge() {
 /// C9 (S2): on two-column start screens the round Scan disc starts on the text column's
 /// left edge (21 pt to the right today).
 #[test]
-#[ignore = "REVIEW-C C9 open: Scan disc 21 pt right of the column"]
+
 fn review_c9_scan_disc_aligns_with_the_text_column() {
     let m = testkit_cleanup::junk_mac();
     base(&m);
@@ -520,7 +520,7 @@ fn review_c9_scan_disc_aligns_with_the_text_column() {
 /// C10 (S2): the first results frame never shows a total that disagrees with the figures
 /// beside it ("0 KB found in 43 items" next to "All items 52.2 MB").
 #[test]
-#[ignore = "REVIEW-C C10 open: total counts from 0 KB while the rest is final"]
+
 fn review_c10_first_results_frame_is_consistent() {
     let m = testkit_cleanup::junk_mac();
     base(&m);
@@ -571,7 +571,7 @@ fn review_c11_settings_value_fields_are_named() {
 /// C13 (S2): when a row's Reveal and Ignore appear, the path is re-shortened to end before
 /// them (today it runs under them and is cut mid-word with no ellipsis).
 #[test]
-#[ignore = "REVIEW-C C13 open: path runs under the hover buttons"]
+
 fn review_c13_hovered_row_path_ends_before_its_buttons() {
     let m = testkit_cleanup::junk_mac();
     base(&m);
@@ -609,7 +609,7 @@ fn review_c13_hovered_row_path_ends_before_its_buttons() {
 
 /// C16 (S3): start-screen descriptions never end on a one-word line ("...and your / apps.").
 #[test]
-#[ignore = "REVIEW-C C16 open: widows on Quick Sweep and System Junk at 1280"]
+
 fn review_c16_start_screen_descriptions_have_no_widow() {
     let mut bad = Vec::new();
     for (name, mac, page) in [
