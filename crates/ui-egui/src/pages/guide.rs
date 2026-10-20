@@ -222,7 +222,7 @@ fn block(ui: &mut Ui, t: &Tokens, b: &Block, w: f32) {
                     ),
                 );
                 let wrap = ui.available_width();
-                ui.label(inline(t, s, size::BODY, t.text_dim, wrap));
+                ui.add(egui::Label::new(inline(t, s, size::BODY, t.text_dim, wrap)).wrap());
             });
             ui.add_space(space::XS);
         }

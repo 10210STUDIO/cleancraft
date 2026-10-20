@@ -6,7 +6,7 @@ Branch agent6/health6. Rows with status and tests: docs/features-r6/health6.md (
 
 1. **Mac Health** (pages/health.rs, core health.rs). A second tool of the Live Monitor section (switcher "Live Monitor | Mac Health"), so the sidebar keeps its 7 entries and Cmd+1..7. Facts: free space and 7-day change, Trash, last junk scan and when, last Threat Check and age, updates, apps not opened for 180 days, startup items turned on and the unsigned ones, battery wear and cycles, memory pressure, macOS version; "Unknown" when unread. No score: the state is Good or Needs attention by the 13 rules in `health::RULES` (shown under "How this is decided"); only Attention and Act soon cards change it, and the summary line names them. Each card has one button that opens a page (`AppRoute`); a "Scan ..." card starts a scan that only looks. Nothing runs from the page (test checks the journal stays empty).
 2. **Free space history** (core space_history.rs): one sample per launch (`CleanApp::launch_checks`, background thread) and per agent tick (tray6 calls `space_history::record`), at most one an hour, 90 days, capped at 2160 samples, numbers only, written tmp + rename, a damaged file kept as space-history.damaged.json. Chart (`kit::time_chart`) over 7 / 30 / 90 days from zero, a dashed "Getting low" line at the Attention threshold, hover value, "Collecting" when empty.
-3. **What grew**: app.rs keeps a two-level summary of each finished Disk Map tree (`health::note_disk_map`, two latest per folder, 6 folders), Mac Health compares the two latest and names the inner folder when it carries 80% of its parent's growth. files6 needed no change.
+3. **What grew**: app.rs keeps a two-level summary of each finished Disk Map tree (`health::summarize` / `keep_map_summary`, two latest per folder, 6 folders), written when the person leaves Disk Map (or the app quits) so CleanCraft's own file never makes the map on screen one file out of date (ux4_flows recalculates the map from disk), Mac Health compares the two latest and names the inner folder when it carries 80% of its parent's growth. files6 needed no change.
 4. **Scan notes**: app.rs `observe()` notes every plan shown (plan pages and Quick Sweep tiles; the note follows what is left after cleanups) and every update check, in scan-notes.json. `health::note_plan` is public for tray6's scheduled scans.
 5. **Routes** (core route.rs): `AppRoute { Feature, Scan, Health, History, Settings, AgentGuide, ConnectAi, UnusedApps, UninstallApp(PathBuf) }` with a string form; `CleanApp::open_route`; `navigate(str)` takes the same strings. watch6 re-exports it.
 6. **AI agents guide** (docs/guide-ai-agents.md) rendered in the app (pages/guide.rs, text built in); a test fails if an MCP tool is missing from its table.
@@ -21,13 +21,17 @@ Branch agent6/health6. Rows with status and tests: docs/features-r6/health6.md (
 - ui: tests/health6_ui.rs (21: every card opens its page on a FakeMac, rules shown, chart ranges, what grew, routes, guide, first launch, connect with Undo, Claude Code, invalid JSON, not installed, process names, quit links, sampler rate, repaint budget); pages::guide tests; ux_render gets 4 scenes (mac-health, mac-health-good, connect-ai-apps, agent-guide), so the pointer test covers the new controls and renders run at 1060, 1280 and 1600.
 - Renders: docs/screens/v2/health/.
 
+## Gate
+
+`cargo test --workspace` (all 82 targets, the last 24 rerun with --no-fail-fast after two fixes: qa_monitor now expects grouped process names; the guide's list items wrap), `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --all` green. target/ deleted afterwards.
+
 ## Shared-file changes
 
 - core lib.rs: `pub mod` lines for health, mcp_setup, proc_names, route, space_history, testkit_health.
 - core monitor.rs: `Snapshot::processes` (serde skip, not sent to agents), Sampler caches Trash size and ioreg for 30 s, `COMMANDS_PER_READING`, `SLOW_FACTS_SECS`.
 - ui motion.rs: `window_hidden`, `spinner_repaint`; `ambient_repaint` also stops when minimised or occluded.
 - ui pages/mod.rs: `pub mod guide, health, welcome`.
-- ui tests/ux_render.rs: 4 scenes.
+- ui tests/ux_render.rs: 4 scenes. ui tests/qa_monitor.rs: the top-list check follows the grouped names (round 6 behaviour).
 - app.rs and kit.rs are mine this round (EXTRA_TOOLS, page_group, section_pages, page_look, open_route, observe, launch_checks, `now`, `window_hidden`, `egui_ctx`; kit::choice_pills, time_chart, nice_ceiling).
 
 ## Waiting on others

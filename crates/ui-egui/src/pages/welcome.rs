@@ -288,13 +288,13 @@ fn client_row(app: &mut CleanApp, ui: &mut Ui, c: &Client) {
                 ClientState::Connected => {
                     kit::tag(ui, "Connected", t.success);
                 }
-                ClientState::Invalid(_) | ClientState::Conflict(_) => {
-                    if kit::secondary(ui, &t, "Open the File") {
-                        app.act();
-                        let shown = app.env.display(&c.config);
-                        if let Err(e) = app.env.sys.spawn("/usr/bin/open", &["-t", &shown]) {
-                            app.warn(format!("Could not open {shown}: {e}"));
-                        }
+                ClientState::Invalid(_) | ClientState::Conflict(_)
+                    if kit::secondary(ui, &t, "Open the File") =>
+                {
+                    app.act();
+                    let shown = app.env.display(&c.config);
+                    if let Err(e) = app.env.sys.spawn("/usr/bin/open", &["-t", &shown]) {
+                        app.warn(format!("Could not open {shown}: {e}"));
                     }
                 }
                 _ => {}

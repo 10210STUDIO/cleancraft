@@ -324,6 +324,10 @@ fn disk_map_scan_is_noted_for_what_grew() {
     for _ in 0..10 {
         h.step();
     }
+    // Written once the person leaves Disk Map (never while its sizes are on screen).
+    assert!(cleancraft_core::health::map_summaries(&mac.env).is_empty());
+    h.state_mut().navigate("health");
+    steps(&mut h);
     assert_eq!(cleancraft_core::health::map_summaries(&mac.env).len(), 1);
 }
 

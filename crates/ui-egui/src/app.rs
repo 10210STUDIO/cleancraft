@@ -174,6 +174,9 @@ pub struct CleanApp {
 struct Observed {
     plans: BTreeMap<FeatureId, (String, u64, usize)>,
     map: Option<(std::path::PathBuf, u64, u64)>,
+    /// A Disk Map summary waiting to be written (when the person leaves Disk Map: writing
+    /// into the mapped folder while it is shown would make the map one file out of date).
+    map_pending: Option<cleancraft_core::health::MapSummary>,
     updates: Option<usize>,
     launched: bool,
 }
@@ -276,6 +279,7 @@ impl CleanApp {
     /// Open a route: a page, a page that starts its scan, App Remover on one app. A route only
     /// opens and looks; nothing is ever cleaned from here.
     pub fn open_route(&mut self, r: &AppRoute) {
+        self.flush_health_notes();
         // A notice belongs to the page it was about (REVIEW-U U14).
         self.notice = None;
         self.page = match r {
@@ -449,12 +453,12 @@ impl CleanApp {
             let key = (root.path.clone(), root.size, root.files);
             if self.observed.map.as_ref() != Some(&key) {
                 self.observed.map = Some(key);
-                let _ = cleancraft_core::health::note_disk_map(
-                    &env,
-                    tree,
-                    chrono::Utc::now().timestamp(),
-                );
+                self.observed.map_pending =
+                    cleancraft_core::health::summarize(tree, chrono::Utc::now().timestamp());
             }
+        }
+        if self.page != Page::Feature(FeatureId::SpaceLens) {
+            self.flush_health_notes();
         }
         let updates = self
             .apps
@@ -473,6 +477,13 @@ impl CleanApp {
         if !self.observed.launched && !self.sync {
             self.observed.launched = true;
             self.launch_checks();
+        }
+    }
+
+    /// Write what Mac Health keeps that is still waiting (the last Disk Map summary).
+    pub fn flush_health_notes(&mut self) {
+        if let Some(s) = self.observed.map_pending.take() {
+            let _ = cleancraft_core::health::keep_map_summary(&self.env, s);
         }
     }
 
@@ -964,5 +975,12 @@ impl CleanApp {
                 });
             ui.add_space(8.0);
         }
+    }
+}
+
+impl Drop for CleanApp {
+    /// A Disk Map summary not yet written is kept when the app quits.
+    fn drop(&mut self) {
+        self.flush_health_notes();
     }
 }
