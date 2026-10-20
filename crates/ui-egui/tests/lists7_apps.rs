@@ -107,7 +107,10 @@ fn macos_apps_are_hidden_until_asked_for_and_never_selectable() {
     go(&mut h);
     // Default: hidden, out of the totals, and said so.
     assert_eq!(rows(&h), ["Viewer", "Editor", "Jotter"]);
-    assert!(has_text(&h, "in 3 apps (apps only), 1 from macOS hidden"), "headline");
+    assert!(
+        has_text(&h, "in 3 apps (apps only), 1 from macOS hidden"),
+        "headline"
+    );
     assert!(has_text(&h, "All Apps  3  "), "group count without Safari");
     assert!(has(&h, "1 macOS app hidden"));
     // Shown on request: locked, with its tag.

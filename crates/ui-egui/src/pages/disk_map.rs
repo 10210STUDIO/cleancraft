@@ -33,6 +33,7 @@ use crate::app::CleanApp;
 use crate::icons::{self, Icon};
 use crate::jobs::Job;
 use crate::kit;
+use crate::kit_list::{self, Filter};
 use crate::theme::{self, Weight, font, motion, size};
 
 /// Blocks drawn at most; the rest are one "Other items" block.
@@ -80,6 +81,59 @@ pub struct State {
     pub vols: Option<Vec<Volume>>,
     /// The location of the mapped folder (`root`).
     pub map_loc: Option<MapLocation>,
+    /// The search over the folder's list.
+    pub search: String,
+}
+
+/// The list's name in the settings (filters and sort).
+pub const LIST: &str = "disk_map";
+/// The list's sort orders.
+pub const SORTS: [kit_list::SortKey; 2] = [kit_list::BY_SIZE, kit_list::BY_NAME];
+
+fn node_has(n: &Node, key: &str) -> bool {
+    match key {
+        "folders" => n.is_dir,
+        "files" => !n.is_dir,
+        _ => false,
+    }
+}
+
+/// The list's filters, counted in the folder shown.
+fn list_filters(node: &Node) -> Vec<Filter> {
+    let n = |k: &str| node.children.iter().filter(|c| node_has(c, k)).count();
+    vec![
+        Filter::any("Show", "folders", "Folders", n("folders")),
+        Filter::any("Show", "files", "Files", n("files")),
+    ]
+}
+
+/// The folder's items the list shows, in its order, each with its place in the map (its
+/// block colour).
+fn shown_children<'a>(
+    node: &'a Node,
+    prefs: &cleancraft_core::settings::ListPrefs,
+    search: &str,
+) -> Vec<(usize, &'a Node)> {
+    let q = kit_list::query(search);
+    let filters = list_filters(node);
+    let mut v: Vec<(usize, &Node)> = node
+        .children
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| {
+            kit_list::matches(&q, &[&c.name])
+                && kit_list::passes(prefs, &filters, |k| node_has(c, k))
+        })
+        .collect();
+    let (key, rev) = kit_list::sort_of(prefs, &SORTS);
+    v.sort_by(|a, b| {
+        let o = match key.key {
+            "name" => a.1.name.to_lowercase().cmp(&b.1.name.to_lowercase()),
+            _ => b.1.size.cmp(&a.1.size),
+        };
+        if rev { o.reverse() } else { o }
+    });
+    v
 }
 
 impl State {
@@ -983,6 +1037,57 @@ fn map(app: &mut CleanApp, ui: &mut Ui) {
             kit::dim(ui, &t, "Measuring was stopped; sizes are partial.");
         }
     }
+    // Search, Filter, Sort over the folder's list.
+    let filters = list_filters(&node);
+    let mut prefs = kit_list::prefs(&app.settings, LIST);
+    let mut search = std::mem::take(&mut app.disk_map.search);
+    let mut changed = false;
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = theme::space::S;
+        let (_, ch) = kit_list::search(
+            ui,
+            &t,
+            &mut search,
+            "Search this folder",
+            "Search this folder",
+            220.0,
+        );
+        if ch {
+            app.act();
+        }
+        changed |= kit_list::menus(ui, &t, LIST, &filters, &SORTS, &mut prefs);
+    });
+    let shown = shown_children(&node, &prefs, &search).len();
+    let st = kit_list::status(
+        ui,
+        &t,
+        shown,
+        node.children.len(),
+        ("item", "items"),
+        &filters,
+        &mut prefs,
+        &mut search,
+    );
+    changed |= st.prefs;
+    app.disk_map.search = search;
+    if changed || st.search {
+        app.act();
+    }
+    if changed && kit_list::store(&mut app.settings, LIST, prefs.clone()) {
+        app.save_settings();
+    }
+    // Ticked items of this folder that the search or filters hide still go: say so.
+    let visible: BTreeSet<&Path> = shown_children(&node, &prefs, &app.disk_map.search)
+        .into_iter()
+        .map(|(_, c)| c.path.as_path())
+        .collect();
+    let hidden = node
+        .children
+        .iter()
+        .filter(|c| app.disk_map.selected.contains(&c.path) && !visible.contains(c.path.as_path()))
+        .count();
+    let note = kit_list::hidden_note(hidden);
     // Bottom bar.
     let n = app.disk_map.selection().len();
     let size = app.disk_map.selected_size();
@@ -992,8 +1097,8 @@ fn map(app: &mut CleanApp, ui: &mut Ui) {
             ui,
             &t,
             &human_size(size),
-            &format!("{} selected", cleancraft_core::fsutil::items(n)),
-            &format!("{n} selected, {}", human_size(size)),
+            &format!("{} selected{note}", cleancraft_core::fsutil::items(n)),
+            &format!("{n} selected{note}, {}", human_size(size)),
             false,
         );
         ui.add_space(theme::space::M);
@@ -1198,7 +1303,18 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
         .inner_margin(egui::Margin::symmetric(6, 8))
         .show(ui, |ui| {
             ui.set_min_size(vec2(ui.available_width(), h - 18.0));
-            let kids = &node.children;
+            let prefs = kit_list::prefs(&app.settings, LIST);
+            let kids = shown_children(node, &prefs, &app.disk_map.search);
+            if kids.is_empty() && !node.children.is_empty() {
+                kit::empty_state(
+                    ui,
+                    &t,
+                    Icon::Search,
+                    "No items match",
+                    "Clear Filters shows every item of this folder again.",
+                );
+                return;
+            }
             if kids.is_empty() {
                 kit::empty_state(
                     ui,
@@ -1216,8 +1332,7 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                 .auto_shrink([false, false])
                 .show_rows(ui, LIST_ROW_H, kids.len(), |ui, range| {
                     ui.spacing_mut().item_spacing.y = 0.0;
-                    for (k, c) in kids[range.clone()].iter().enumerate() {
-                        let idx = range.start + k;
+                    for &(idx, c) in &kids[range.clone()] {
                         let mut locked = node_lock_reason(&app.env, c);
                         // A top folder of an external disk ticks what is inside it.
                         let inside = locked.as_deref().is_some_and(contents_only);

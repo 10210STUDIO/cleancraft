@@ -414,7 +414,7 @@ pub fn menus(
     if !filters.is_empty() {
         changed |= filter_menu(ui, t, id, filters, p);
     }
-    if sorts.len() > 1 {
+    if !sorts.is_empty() {
         changed |= sort_menu(ui, id, sorts, p);
     }
     changed
