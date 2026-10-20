@@ -93,7 +93,7 @@ pub fn choose_folder(
 ) -> Result<Option<std::path::PathBuf>, String> {
     let script = format!(
         "POSIX path of (choose folder with prompt \"{}\")",
-        prompt.replace('\\', "").replace('"', "")
+        prompt.replace(['\\', '"'], "")
     );
     let out = env
         .sys

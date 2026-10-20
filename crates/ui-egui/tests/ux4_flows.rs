@@ -17,6 +17,7 @@ use cleancraft_core::space;
 use cleancraft_core::testkit::FakeMac;
 use cleancraft_core::testkit_apps::{AppSpec, FakeMacApps};
 use cleancraft_core::testkit_cleanup;
+use cleancraft_core::testkit_quit::FakeMacQuit;
 use common::*;
 use egui_kittest::kittest::{NodeT, Queryable};
 
@@ -250,7 +251,10 @@ fn removing_leftover_files_updates_their_group() {
 #[test]
 fn running_app_banner_quits_and_rows_unlock() {
     let m = mac();
-    m.mac.run_app(&m.editor);
+    // The app's own program runs (as `ps` shows it).
+    m.mac.user_id(501);
+    m.mac
+        .run_program(&m.editor.join("Contents/MacOS/Editor"), 4242, 501);
     let f = m.mac.env.fake_sys().unwrap();
     f.answer("/usr/bin/osascript", "");
     f.answer("/bin/kill", "");
@@ -258,7 +262,7 @@ fn running_app_banner_quits_and_rows_unlock() {
     go_remover(&mut h);
     click(&mut h, "Editor");
     // Said once, in the banner; the rows carry a padlock, not the sentence.
-    assert!(has(&h, "Editor is open"));
+    assert!(has(&h, "Editor is running"));
     assert!(!has_text(&h, "(Quit Editor first)"));
     assert!(has(&h, "Quit Editor"));
     // Every leftover is locked while it runs.
@@ -314,7 +318,10 @@ fn running_app_banner_quits_and_rows_unlock() {
 #[test]
 fn force_quit_after_confirmation() {
     let m = mac();
-    m.mac.run_app(&m.editor);
+    // The app's own program runs (as `ps` shows it).
+    m.mac.user_id(501);
+    m.mac
+        .run_program(&m.editor.join("Contents/MacOS/Editor"), 4242, 501);
     let f = m.mac.env.fake_sys().unwrap();
     f.answer("/usr/bin/osascript", "");
     f.answer("/bin/kill", "");
