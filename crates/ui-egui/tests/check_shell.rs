@@ -12,13 +12,12 @@ fn check_sidebar_rows_positions() {
     let mac = FakeMac::sample();
     let h = harness(&mac);
     let mut outside = Vec::new();
-    for (_, feats) in cleancraft_ui_egui::app::GROUPS {
-        for f in *feats {
-            let r = h.get_all_by_label(f.title()).next().unwrap().rect();
-            println!("{:<20} {r:?}", f.title());
-            if r.max.y > HGT + 0.5 {
-                outside.push(f.title().to_string());
-            }
+    // One row per section.
+    for (name, _) in cleancraft_ui_egui::app::GROUPS {
+        let r = h.get_all_by_label(name).next().unwrap().rect();
+        println!("{name:<20} {r:?}");
+        if r.max.y > HGT + 0.5 {
+            outside.push(name.to_string());
         }
     }
     for l in ["History", "Settings"] {

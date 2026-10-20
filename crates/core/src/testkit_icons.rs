@@ -189,3 +189,16 @@ impl FakeMacIcons for FakeMac {
         }
     }
 }
+
+/// Set string keys in an app's Info.plist (copyright lines and the like).
+pub fn set_plist_strings(app: &Path, keys: &[(&str, &str)]) {
+    let p = app.join("Contents/Info.plist");
+    let mut d = plist::Value::from_file(&p)
+        .ok()
+        .and_then(|v| v.into_dictionary())
+        .unwrap_or_default();
+    for (k, v) in keys {
+        d.insert((*k).into(), (*v).into());
+    }
+    let _ = plist::Value::Dictionary(d).to_file_xml(&p);
+}

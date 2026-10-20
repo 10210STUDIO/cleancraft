@@ -318,7 +318,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     } else {
         "Remove apps with the files they leave behind, or reset an app to a fresh start."
     };
-    // The updates start screen has its own big title.
+    // The updates start screen has its own large title.
     let hero = f == FeatureId::Updater && app.apps.updates.is_none() && app.apps.upd_job.is_none();
     if !hero {
         kit::header(ui, &t, icon, f.title(), sub);
@@ -639,7 +639,7 @@ fn apps_list(app: &mut CleanApp, ui: &mut Ui, h: f32) {
     }
     let now = now();
     let mut open = None;
-    egui::ScrollArea::vertical()
+    let fade_out = egui::ScrollArea::vertical()
         .id_salt("apps-list")
         .max_height(h)
         .auto_shrink([false, false])
@@ -736,6 +736,7 @@ fn apps_list(app: &mut CleanApp, ui: &mut Ui, h: f32) {
                 );
             }
         });
+    kit::scroll_fade(ui, &fade_out, t.glass_solid());
     if let Some(p) = open {
         app.act();
         open_app(app, &p);
@@ -767,7 +768,7 @@ fn files_list(app: &mut CleanApp, ui: &mut Ui, h: f32) {
         return;
     };
     let mut toggles = Vec::new();
-    egui::ScrollArea::vertical()
+    let fade_out = egui::ScrollArea::vertical()
         .id_salt("apps-files")
         .max_height(h - 20.0)
         .show_rows(ui, 44.0, ids.len(), |ui, range| {
@@ -778,6 +779,7 @@ fn files_list(app: &mut CleanApp, ui: &mut Ui, h: f32) {
                 }
             }
         });
+    kit::scroll_fade(ui, &fade_out, t.glass_solid());
     for (id, on) in toggles {
         app.act();
         if let Some(p) = app.apps.extras.as_mut() {
@@ -1050,7 +1052,7 @@ fn detail(app: &mut CleanApp, ui: &mut Ui) {
         .inner_margin(egui::Margin::symmetric(8, 8))
         .show(ui, |ui| {
             ui.set_min_size(egui::vec2(ui.available_width(), h - 18.0));
-            egui::ScrollArea::vertical()
+            let fade_out = egui::ScrollArea::vertical()
                 .id_salt("apps-detail")
                 .max_height(h - 18.0)
                 .auto_shrink([false, false])
@@ -1087,6 +1089,7 @@ fn detail(app: &mut CleanApp, ui: &mut Ui) {
                         ui.add_space(4.0);
                     }
                 });
+            kit::scroll_fade(ui, &fade_out, t.glass_solid());
         });
     for (id, on) in toggles {
         app.act();
@@ -1292,10 +1295,13 @@ fn updates_page(app: &mut CleanApp, ui: &mut Ui) {
             ui,
             &t,
             FeatureId::Updater,
-            FeatureId::Updater.title(),
-            "Newer versions of your apps and of macOS. CleanCraft opens the right place to install them.",
-            "Check for Updates",
-            "CleanCraft asks each app's update feed and the App Store, then hands the update to the app or the App Store.",
+            kit::HeroText {
+                title: FeatureId::Updater.title(),
+                desc: "Newer versions of your apps and of macOS. CleanCraft opens the right place to install them.",
+                covers: super::covers(FeatureId::Updater),
+                action: "Check for Updates",
+                note: "CleanCraft asks each app's update feed and the App Store, then hands the update to the app or the App Store.",
+            },
             |_| {},
         ) {
             app.act();
@@ -1325,7 +1331,7 @@ fn updates_page(app: &mut CleanApp, ui: &mut Ui) {
     });
     ui.add_space(space::S);
     let h = ui.available_height() - 8.0;
-    egui::ScrollArea::vertical()
+    let fade_out = egui::ScrollArea::vertical()
         .id_salt("updates")
         .max_height(h)
         .show(ui, |ui| {
@@ -1439,6 +1445,7 @@ fn updates_page(app: &mut CleanApp, ui: &mut Ui) {
                 });
             });
         });
+    kit::scroll_fade_page(ui, &fade_out, &t);
 }
 
 fn update_row(app: &mut CleanApp, ui: &mut Ui, u: &UpdateInfo) {

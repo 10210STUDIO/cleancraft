@@ -103,7 +103,7 @@ fn run_lists_everything_moves_exactly_that_and_undo_per_module() {
         .collect();
     let mail_size = selected_on_disk(&mail);
     let expect_freed = selected_on_disk(&junk) + mail_size;
-    click(&mut h, "Run");
+    click(&mut h, "Review and Clean");
     for p in &listed {
         assert_eq!(count(&h, &m, p), 1, "{} not listed once", p.display());
     }
@@ -161,7 +161,7 @@ fn include_toggle_skips_a_module_and_is_saved() {
         vec![FeatureId::SystemJunk]
     );
     assert!(has(&h, &human_size(selected_on_disk(&mail))));
-    click(&mut h, "Run");
+    click(&mut h, "Review and Clean");
     for i in junk.selected() {
         assert_eq!(count(&h, &m, &i.path), 0, "skipped module listed");
     }
@@ -201,10 +201,10 @@ fn cancel_moves_nothing() {
     let m = sweep_mac();
     let mut h = scanned(&m);
     let junk = plan_of(&h, FeatureId::SystemJunk);
-    click(&mut h, "Run");
+    click(&mut h, "Review and Clean");
     click(&mut h, "Cancel");
     assert!(junk.items.iter().all(|i| i.path.exists()));
-    assert!(has(&h, "Run"));
+    assert!(has(&h, "Review and Clean"));
 }
 
 #[test]
@@ -213,7 +213,7 @@ fn file_in_use_is_skipped_and_shown() {
     let mut h = scanned(&m);
     let b = m.env.home_path("Library/Mail Downloads/b.zip");
     m.env.fake_sys().unwrap().set_open(&b);
-    click(&mut h, "Run");
+    click(&mut h, "Review and Clean");
     click(&mut h, "Move to Trash");
     assert!(b.exists());
     assert!(has(&h, "open in a running app"));

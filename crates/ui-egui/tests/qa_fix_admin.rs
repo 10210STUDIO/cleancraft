@@ -34,6 +34,8 @@ fn threat_mac() -> (FakeMac, PathBuf) {
 
 fn review_daemon_only(m: &FakeMac, daemon: &Path) -> (H, u64) {
     let mut h = harness(m);
+    // The tool sits in the "Protect" section of the sidebar.
+    click(&mut h, "Protect");
     click(&mut h, "Threat Check");
     click(&mut h, "Scan");
     assert!(has_text(
@@ -132,6 +134,8 @@ fn package_installed_app_uninstalls_with_the_password_or_stays_when_cancelled() 
     let (m, app) = pkg_mac();
     let cache = m.env.home_path("Library/Caches/com.example.pkgtool");
     let mut h = harness(&m);
+    // The tool sits in the "Apps" section of the sidebar.
+    click(&mut h, "Apps");
     click(&mut h, "App Remover");
     click(&mut h, "Pkg Tool");
     assert!(has_text(&h, "(needs the administrator password)"));

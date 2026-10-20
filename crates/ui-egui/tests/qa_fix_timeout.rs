@@ -19,6 +19,8 @@ fn a_hung_task_command_is_stopped_and_explained() {
     f.answer("sw_vers -productVersion", "14.6.1\n");
     f.time_out("/usr/bin/tmutil thinlocalsnapshots / 999999999999 4");
     let mut h = harness(&m);
+    // The tool sits in the "Speed" section of the sidebar.
+    click(&mut h, "Speed");
     click(&mut h, "Tune-up Tasks");
     click(&mut h, "Free up purgeable space");
     click(&mut h, "Run Selected");

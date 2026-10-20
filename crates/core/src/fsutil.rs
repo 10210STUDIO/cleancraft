@@ -188,7 +188,7 @@ pub fn items(n: usize) -> String {
     count(n, "item", "items")
 }
 
-/// Decimal units like Finder: 1 KB = 1000 bytes. "Zero KB" for 0. Three significant digits;
+/// Decimal units like Finder: 1 KB = 1000 bytes. "0 KB" for 0. Three significant digits;
 /// a value that rounds up to the next precision or unit is shown there ("1.00 MB", not
 /// "1000 KB"). For files and disks.
 pub fn human_size(bytes: u64) -> String {
@@ -204,7 +204,7 @@ pub fn memory_size(bytes: u64) -> String {
 fn units(bytes: u64, base: f64) -> String {
     const UNITS: [&str; 5] = ["KB", "MB", "GB", "TB", "PB"];
     if bytes == 0 {
-        return "Zero KB".into();
+        return "0 KB".into();
     }
     if bytes == 1 {
         return "1 byte".into();
@@ -248,7 +248,7 @@ mod tests {
 
     #[test]
     fn human() {
-        assert_eq!(human_size(0), "Zero KB");
+        assert_eq!(human_size(0), "0 KB");
         assert_eq!(human_size(512), "512 bytes");
         assert_eq!(human_size(4096), "4 KB");
         assert_eq!(human_size(1_500_000), "1.50 MB");

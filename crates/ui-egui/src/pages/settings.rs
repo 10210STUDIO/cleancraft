@@ -24,6 +24,26 @@ fn heading(ui: &mut Ui, t: &crate::theme::Tokens, icon: Icon, text: &str) {
 
 /// A form row: the label in a leading column, the slider and its value with the unit after
 /// it. The slider keeps `name` as its accessible name.
+/// A form row: label in the right-aligned label column, a switch after it, and `text`
+/// beside the switch. Returns true when clicked. The switch is announced as `text`.
+fn switch_row(ui: &mut Ui, t: &crate::theme::Tokens, on: bool, text: &str, label: &str) -> bool {
+    ui.horizontal(|ui| {
+        let (r, _) = ui.allocate_exact_size(vec2(260.0, crate::theme::hit::FIELD), Sense::hover());
+        ui.painter().text(
+            r.right_center() - vec2(12.0, 0.0),
+            egui::Align2::RIGHT_CENTER,
+            label,
+            font(size::BODY, Weight::Regular),
+            t.text_dim,
+        );
+        let c = kit::switch(ui, t, on, text).clicked();
+        // Painted: the switch already carries the words for VoiceOver.
+        kit::heading(ui, text, font(size::CALLOUT, Weight::Medium), t.text);
+        c
+    })
+    .inner
+}
+
 fn slider_row(
     ui: &mut Ui,
     t: &crate::theme::Tokens,
@@ -69,7 +89,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
         &t,
         Icon::Settings,
         "Settings",
-        "Where removed items go, what scans leave alone, and how big and old files are judged.",
+        "Where removed items go, what scans leave alone, how big and old files are judged, and sounds.",
     );
     let mut changed = false;
     egui::ScrollArea::vertical()
@@ -195,6 +215,60 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                 {
                     changed = true;
                 }
+            });
+            ui.add_space(space::M);
+            kit::card(&t).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                heading(ui, &t, Icon::Monitor, "Sounds");
+                if switch_row(ui, &t, app.settings.sounds, "Play sounds", "Sounds") {
+                    app.settings.sounds = !app.settings.sounds;
+                    changed = true;
+                }
+                ui.add_enabled_ui(app.settings.sounds, |ui| {
+                    ui.horizontal(|ui| {
+                        let (r, _) =
+                            ui.allocate_exact_size(vec2(260.0, crate::theme::hit::FIELD), Sense::hover());
+                        ui.painter().text(
+                            r.right_center() - vec2(12.0, 0.0),
+                            egui::Align2::RIGHT_CENTER,
+                            "Volume",
+                            font(size::BODY, Weight::Regular),
+                            t.text_dim,
+                        );
+                        ui.spacing_mut().slider_width =
+                            (ui.available_width() - 160.0).clamp(160.0, 300.0);
+                        let mut v = app.settings.sound_volume;
+                        let r = ui.add(
+                            egui::Slider::new(&mut v, 0.0..=1.0)
+                                .show_value(false)
+                                .trailing_fill(true),
+                        );
+                        let shown = v as f64;
+                        r.widget_info(|| egui::WidgetInfo::slider(true, shown, "Volume"));
+                        if r.changed() {
+                            app.settings.sound_volume = v;
+                            changed = true;
+                        }
+                        let p = kit::pill(ui, &t, "Preview", kit::Kind::Secondary, None);
+                        p.widget_info(|| {
+                            egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Preview sound")
+                        });
+                        if p.clicked() {
+                            app.act();
+                            crate::sound::preview(&app.env, app.settings.sound_volume);
+                        }
+                    });
+                    if switch_row(
+                        ui,
+                        &t,
+                        app.settings.sound_ticks,
+                        "Click sounds on switches",
+                        "Clicks",
+                    ) {
+                        app.settings.sound_ticks = !app.settings.sound_ticks;
+                        changed = true;
+                    }
+                });
             });
         });
     if changed {

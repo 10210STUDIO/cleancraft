@@ -11,7 +11,7 @@ mod cli_monitor;
 mod cli_perf;
 
 use cleancraft_core::Env;
-use cleancraft_ui_egui::CleanApp;
+use cleancraft_ui_egui::{CleanApp, titlebar};
 
 struct App(CleanApp);
 
@@ -23,6 +23,10 @@ impl eframe::App for App {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // Registered first, so controls drawn later on the strip keep their clicks.
+        if titlebar::ACTIVE {
+            titlebar::drag_strip(ui);
+        }
         self.0.ui(ui);
     }
 }
@@ -34,6 +38,20 @@ fn wants_cli(args: &[String]) -> bool {
 
 fn icon() -> Option<egui::IconData> {
     eframe::icon_data::from_png_bytes(include_bytes!("../../../assets/AppIcon.png")).ok()
+}
+
+/// The main window: 1280 x 820, never under 1060 x 680, transparent title bar on macOS.
+fn viewport() -> egui::ViewportBuilder {
+    let v = titlebar::viewport(
+        egui::ViewportBuilder::default()
+            .with_title("CleanCraft")
+            .with_inner_size([1280.0, 820.0])
+            .with_min_inner_size([1060.0, 680.0]),
+    );
+    match icon() {
+        Some(i) => v.with_icon(i),
+        None => v,
+    }
 }
 
 fn main() {
@@ -48,13 +66,7 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let mut viewport = egui::ViewportBuilder::default()
-        .with_title("CleanCraft")
-        .with_inner_size([1280.0, 820.0])
-        .with_min_inner_size([1060.0, 680.0]);
-    if let Some(i) = icon() {
-        viewport = viewport.with_icon(i);
-    }
+    let viewport = viewport();
     let options = eframe::NativeOptions {
         viewport,
         ..Default::default()
@@ -74,5 +86,22 @@ fn main() {
     if let Err(e) = result {
         eprintln!("CleanCraft could not open its window: {e}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn main_window_has_the_transparent_title_bar_and_the_icon() {
+        let v = viewport();
+        assert_eq!(v.title.as_deref(), Some("CleanCraft"));
+        assert_eq!(v.fullsize_content_view, Some(true));
+        assert_eq!(v.titlebar_shown, Some(false));
+        assert_eq!(v.title_shown, Some(false));
+        assert_eq!(v.titlebar_buttons_shown, Some(true));
+        assert_eq!(v.min_inner_size, Some(egui::vec2(1060.0, 680.0)));
+        assert!(v.icon.is_some());
     }
 }

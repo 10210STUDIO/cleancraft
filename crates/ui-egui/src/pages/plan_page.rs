@@ -116,6 +116,7 @@ pub fn start_scan(app: &mut CleanApp, f: FeatureId) {
     let st = app.plan_state(f);
     st.phase = Phase::Scanning(job);
     st.error = None;
+    crate::sound::play(&app.env, crate::sound::Cue::ScanStart);
 }
 
 fn start_clean(app: &mut CleanApp, f: FeatureId) {
@@ -136,17 +137,20 @@ fn start_clean(app: &mut CleanApp, f: FeatureId) {
 
 /// Finish jobs. Returns true while something is running.
 pub fn poll(app: &mut CleanApp, f: FeatureId) -> bool {
+    let mut cue = None;
     let st = app.plan_state(f);
-    match &mut st.phase {
+    let busy = match &mut st.phase {
         Phase::Scanning(job) => {
             if let Some(r) = job.poll() {
                 match r {
                     Ok(plan) => {
+                        cue = Some(crate::sound::Cue::ScanDone);
                         st.plan = Some(plan);
                         st.category = None;
                         st.phase = Phase::Results;
                     }
                     Err(e) => {
+                        cue = Some(crate::sound::Cue::Error);
                         st.error = Some(e);
                         st.phase = Phase::Idle;
                     }
@@ -163,8 +167,18 @@ pub fn poll(app: &mut CleanApp, f: FeatureId) -> bool {
         Phase::Cleaning(job) => {
             if let Some(r) = job.poll() {
                 match r {
-                    Ok(rep) => st.phase = Phase::Done(rep),
+                    Ok(rep) => {
+                        // A cleanup that moved nothing because every item failed is an
+                        // error to the ear; anything moved is a finished cleanup.
+                        cue = Some(if rep.moved.is_empty() && !rep.skipped.is_empty() {
+                            crate::sound::Cue::Error
+                        } else {
+                            crate::sound::Cue::CleanDone
+                        });
+                        st.phase = Phase::Done(rep);
+                    }
                     Err(e) => {
+                        cue = Some(crate::sound::Cue::Error);
                         st.error = Some(e);
                         st.phase = Phase::Results;
                     }
@@ -182,7 +196,11 @@ pub fn poll(app: &mut CleanApp, f: FeatureId) -> bool {
             }
         }
         _ => false,
+    };
+    if let Some(c) = cue {
+        crate::sound::play(&app.env, c);
     }
+    busy
 }
 
 /// Stop the running scan: the scan is told to stop and its result is dropped.
@@ -204,11 +222,25 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         Phase::Cleaning(_) => 4,
         Phase::Done(_) => 5,
     };
+    // The start screen has its own large title; every other phase has the compact header.
     if phase != 0 {
         kit::header(ui, &t, icon, f.title(), blurb(f));
     }
     if let Some(e) = app.plan_state(f).error.clone() {
-        kit::strip(ui, Icon::Warning, t.danger, &e);
+        let (text, needs_access) = friendly_error(&e);
+        ui.horizontal(|ui| {
+            let w = if needs_access { 200.0 } else { 0.0 };
+            ui.scope(|ui| {
+                ui.set_max_width(ui.available_width() - w);
+                kit::strip(ui, Icon::Warning, t.warning, &text);
+            });
+            if needs_access && kit::secondary(ui, &t, "Open Privacy Settings") {
+                app.act();
+                if let Err(e) = cleancraft_core::permissions::open_fda_settings(&app.env) {
+                    app.warn(format!("Could not open System Settings: {e}"));
+                }
+            }
+        });
         ui.add_space(space::S);
     }
     match phase {
@@ -267,10 +299,13 @@ fn idle(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         ui,
         &t,
         f,
-        f.title(),
-        blurb(f),
-        "Scan",
-        "Scanning only looks. Nothing is removed until you review and confirm the list.",
+        kit::HeroText {
+            title: f.title(),
+            desc: blurb(f),
+            covers: super::covers(f),
+            action: "Scan",
+            note: "Scanning only looks. Nothing is removed until you review and confirm the list.",
+        },
         |ui| super::extras::before_scan(app, ui, f),
     );
     if go {
@@ -330,8 +365,32 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                     .font(font(size::TITLE2, Weight::SemiBold))
                     .color(t.text),
             );
-            for note in &plan.notes {
-                kit::dim(ui, &t, note);
+            ui.add_space(space::XS);
+            ui.label(
+                RichText::new("Your Mac has nothing this module would clean right now.")
+                    .font(font(size::CALLOUT, Weight::Regular))
+                    .color(t.text_dim),
+            );
+            // What could not be looked at stays one click away, not in the way.
+            if !plan.notes.is_empty() {
+                ui.add_space(space::S);
+                let open_id = egui::Id::new(("empty-details", &plan.id));
+                let open: bool = ui.data(|d| d.get_temp(open_id)).unwrap_or(false);
+                let label = if open { "Hide Details" } else { "Details" };
+                if kit::ghost(ui, &t, label, Some(Icon::Chevron)).clicked() {
+                    app.act();
+                    ui.data_mut(|d| d.insert_temp(open_id, !open));
+                }
+                if open {
+                    ui.add_space(space::XS);
+                    for note in &plan.notes {
+                        ui.label(
+                            RichText::new(sentence(note))
+                                .font(font(size::FOOTNOTE, Weight::Regular))
+                                .color(t.text_dim),
+                        );
+                    }
+                }
             }
             ui.add_space(space::L);
             if kit::secondary(ui, &t, "Scan Again") {
@@ -343,7 +402,7 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     }
     // Summary: the big total and the sentence under it.
     ui.horizontal_top(|ui| {
-        kit::display(ui, &t, &human_size(plan.total_size()));
+        kit::display_count(ui, &t, ("plan-total", &plan.id), plan.total_size());
         ui.add_space(4.0);
         ui.vertical(|ui| {
             ui.add_space(kit::baseline_offset(size::DISPLAY, size::TITLE3));
@@ -502,13 +561,14 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             .show(ui, |ui| {
                 ui.set_min_size(egui::vec2(left_w - 18.0, avail_h - 18.0));
                 ui.set_max_width(left_w - 18.0);
-                egui::ScrollArea::vertical()
+                let out = egui::ScrollArea::vertical()
                     .id_salt("cats")
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         ui.spacing_mut().item_spacing.y = 2.0;
                         categories(app, ui, f, &plan);
                     });
+                kit::scroll_fade(ui, &out, t.glass_solid());
             });
     });
     // Items.
@@ -527,19 +587,26 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                     });
                     return;
                 }
-                egui::ScrollArea::vertical()
+                let out = egui::ScrollArea::vertical()
                     .id_salt("items")
                     .max_height(list_h)
                     .auto_shrink([false, false])
                     .show_rows(ui, ROW_H, rows.len(), |ui, range| {
                         ui.spacing_mut().item_spacing.y = 0.0;
-                        for row in &rows[range] {
-                            match row {
-                                Row::Item(id) => item_row(app, ui, f, &plan, *id),
-                                Row::Group(g) => group_row(app, ui, f, g),
-                            }
+                        let first = range.start;
+                        for (i, row) in rows[range].iter().enumerate() {
+                            // Rows fade in one after the other when the results arrive.
+                            let (k, _) = kit::appear(ui, ("plan-rows", &plan.id), first + i);
+                            ui.scope(|ui| {
+                                ui.multiply_opacity(k);
+                                match row {
+                                    Row::Item(id) => item_row(app, ui, f, &plan, *id),
+                                    Row::Group(g) => group_row(app, ui, f, g),
+                                }
+                            });
                         }
                     });
+                kit::scroll_fade(ui, &out, t.glass_solid());
             });
     });
 }
@@ -888,11 +955,7 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
         .as_ref()
         .map(|p| p.items[id].selected)
         .unwrap_or(false);
-    let name = it
-        .path
-        .file_name()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_default();
+    let name = item_name(f, it);
     let w = ui.available_width();
     let (r, resp) = ui.allocate_exact_size(vec2(w, ROW_H), Sense::hover());
     let hov = kit::anim(
@@ -958,17 +1021,17 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
         &it.path,
         crate::file_icons::FileKind::of(&it.path),
     );
-    // Size on the right; Reveal and Ignore show over the end of the text on hover (they
-    // are always there for the keyboard, VoiceOver and tests), so names, reasons and paths
-    // get the width.
+    // Size on the first line, on the right; Reveal and Ignore show over the end of the row on
+    // hover (they are always there for the keyboard, VoiceOver and tests), so names, reasons
+    // and paths get the width.
     let size_text = human_size(it.size);
     let size_font = font(size::BODY, Weight::SemiBold);
     let size_w = kit::galley(ui, &size_text, size_font.clone(), t.text)
         .size()
         .x;
     let size_r = Rect::from_min_max(
-        pos2(r.right() - 14.0 - size_w.max(64.0), r.top()),
-        pos2(r.right() - 12.0, r.bottom()),
+        pos2(r.right() - 14.0 - size_w.max(64.0), r.top() + 8.0),
+        pos2(r.right() - 12.0, r.top() + 32.0),
     );
     kit::text_at(
         ui,
@@ -979,10 +1042,11 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
         if locked { t.text_faint } else { t.text },
         Align::Max,
     );
-    // Name, then the reason as a tag and the dimmed path.
     let x0 = r.left() + 90.0;
+    // Line 1: the name, then where it is (dimmed), up to the size.
     let text_w = (size_r.left() - 16.0 - x0).max(60.0);
-    // Line 1: the name, then where it is (dimmed). Line 2: why it is listed.
+    // Line 2 (why it is listed) runs under the size too, to the row's end.
+    let tag_room = (r.right() - 12.0 - x0).max(60.0);
     let name_font = font(size::BODY, Weight::SemiBold);
     let name_s = kit::truncate_middle(ui.ctx(), &name, &name_font, text_w * 0.62);
     let name_w = kit::galley(ui, &name_s, name_font.clone(), t.text).size().x;
@@ -1009,12 +1073,29 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
         Align::Min,
     )
     .on_hover_text(&shown);
-    let why = match &it.locked {
+    // The reason as a tag. A reason that repeats the row's name ("Trash of USB: 1 item" on
+    // the row "Trash of USB") shows only the rest.
+    let why_full = match &it.locked {
         Some(l) => format!("{} (cannot be selected: {l})", it.reason),
         None => reason_text(it),
     };
+    let reason = if locked {
+        it.reason.clone()
+    } else {
+        reason_text(it)
+    };
+    let reason = reason
+        .strip_prefix(&format!("{name}: "))
+        .map(sentence_start)
+        .unwrap_or(reason.clone());
+    // ... and one that ends in it ("Safari browsing history: History.db" on the row
+    // "History.db") drops that end.
+    let reason = reason
+        .strip_suffix(&format!(": {name}"))
+        .map(str::to_string)
+        .unwrap_or(reason);
     let tag_font = font(size::FOOTNOTE, Weight::Medium);
-    let tag_s = kit::truncate_end(ui.ctx(), &why, &tag_font, text_w - 16.0);
+    let tag_s = kit::truncate_end(ui.ctx(), &reason, &tag_font, tag_room - 16.0);
     let color = if locked {
         t.text_dim
     } else {
@@ -1023,7 +1104,22 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
     let tg = kit::galley(ui, &tag_s, tag_font.clone(), color);
     let tag_r = Rect::from_min_size(pos2(x0, r.top() + 31.0), tg.size() + vec2(16.0, 5.0));
     p.rect_filled(tag_r, tag_r.height() / 2.0, color.gamma_multiply(0.16));
-    kit::text_at(ui, tag_r, &tag_s, &why, tag_font, color, Align::Center).on_hover_text(&why);
+    kit::text_at(ui, tag_r, &tag_s, &why_full, tag_font, color, Align::Center)
+        .on_hover_text(&why_full);
+    // Why a locked row cannot be ticked, after the tag when it fits whole (never cut: the
+    // padlock and the tag's tooltip carry it otherwise).
+    if let Some(l) = &it.locked {
+        let lf = font(size::FOOTNOTE, Weight::Regular);
+        let lg = kit::galley(ui, l, lf.clone(), t.text_faint);
+        let lx = tag_r.right() + 8.0;
+        if lx + lg.size().x <= r.right() - 12.0 {
+            p.galley(
+                pos2(lx, tag_r.center().y - lg.size().y / 2.0),
+                lg,
+                t.text_faint,
+            );
+        }
+    }
     // Row actions, shown on hover.
     let actions_w = 150.0;
     let actions = Rect::from_min_max(
@@ -1075,6 +1171,20 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
     });
 }
 
+/// The name a row shows. A Trash is named after its disk ("Trash of USB"), not after the
+/// numeric user-id folder macOS keeps it in (`/Volumes/USB/.Trashes/501`).
+pub fn item_name(f: FeatureId, it: &cleancraft_core::Item) -> String {
+    if f == FeatureId::TrashBins
+        && let Some(g) = &it.group
+    {
+        return g.clone();
+    }
+    it.path
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
 /// The confirmation line for items that need the administrator password, when there are any.
 pub fn admin_note(n: usize) -> Option<String> {
     match n {
@@ -1117,7 +1227,7 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     let mut go = false;
     let width = (ui.ctx().content_rect().width() - 120.0).clamp(420.0, 640.0);
     let max_list = (ui.ctx().content_rect().height() - 330.0).clamp(120.0, 360.0);
-    kit::modal(egui::Id::new(("confirm", f.as_str())), &t).show(ui.ctx(), |ui| {
+    let dlg = kit::modal(egui::Id::new(("confirm", f.as_str())), &t).show(ui.ctx(), |ui| {
         ui.set_width(width);
         kit::dialog_head(
             ui,
@@ -1177,11 +1287,10 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                 close = true;
             }
         });
-        // Esc cancels, Return is left alone (the action moves files: it takes a click).
-        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-            close = true;
-        }
     });
+    if dlg.should_close() {
+        close = true;
+    }
     if go {
         app.act();
         start_clean(app, f);
@@ -1318,4 +1427,57 @@ fn done(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             st.plan = None;
         }
     });
+}
+
+/// A note as a sentence: capital first letter, full stop at the end.
+fn sentence(s: &str) -> String {
+    let mut c = s.trim().chars();
+    let mut out: String = match c.next() {
+        Some(f) => f.to_uppercase().chain(c).collect(),
+        None => return String::new(),
+    };
+    if !out.ends_with(['.', '!', '?']) {
+        out.push('.');
+    }
+    out
+}
+
+/// A scan error in plain words: "Could not read ~/Library/Caches: permission denied (os error
+/// 13)" becomes "CleanCraft is not allowed to read ~/Library/Caches." plus whether Full Disk
+/// Access would help (the page then offers to open that pane).
+pub fn friendly_error(e: &str) -> (String, bool) {
+    let low = e.to_lowercase();
+    let denied = (low.contains("permission denied") || low.contains("operation not permitted"))
+        && low.contains("read");
+    if denied {
+        let place = e
+            .split_once("read ")
+            .and_then(|(_, rest)| rest.split_once(':').map(|(p, _)| p.trim().to_string()))
+            .filter(|p| !p.is_empty());
+        let text = match place {
+            Some(p) => format!(
+                "CleanCraft is not allowed to read {p}. Turn on Full Disk Access for CleanCraft, then scan again."
+            ),
+            None => "CleanCraft is not allowed to read a folder it needs. Turn on Full Disk Access for CleanCraft, then scan again.".to_string(),
+        };
+        return (text, true);
+    }
+    // Drop the OS error number.
+    let mut text = e.to_string();
+    if let Some(i) = text.find(" (os error") {
+        text.truncate(i);
+    }
+    // Otherwise the words stay as written (they are already sentences from the modules).
+    (text, false)
+}
+
+/// "1 item" stays, "items found" becomes "Items found": the rest of a reason after its
+/// prefix, starting like a sentence.
+fn sentence_start(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        Some(f) if f.is_ascii_digit() => s.to_string(),
+        Some(f) => f.to_uppercase().chain(c).collect(),
+        None => String::new(),
+    }
 }

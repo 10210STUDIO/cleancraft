@@ -29,6 +29,8 @@ fn reach(h: &mut H, label: &str) {
 }
 
 fn open(h: &mut H) {
+    // The tool sits in the "Speed" section of the sidebar.
+    click(h, "Speed");
     click(h, "Tune-up Tasks");
     assert!(h.state().tasks.loaded);
 }

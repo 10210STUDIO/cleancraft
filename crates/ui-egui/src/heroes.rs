@@ -160,10 +160,10 @@ fn look(f: FeatureId) -> Look {
         FeatureId::MailAttachments => (sway(0.42), -0.28, 0.12, 0.2, v3(-0.7, 0.5, 0.5)),
         FeatureId::TrashBins => (spin(10.0), 0.0, 0.0, 0.3, v3(-0.45, 0.55, 0.8)),
         FeatureId::Malware => (sway(0.5), -0.25, 0.05, 0.16, v3(-0.4, 0.62, 0.6)),
-        FeatureId::Privacy => (sway(0.45), -0.3, 0.1, 0.16, v3(-0.3, 0.38, 1.0)),
+        FeatureId::Privacy => (sway(0.4), -0.32, 0.08, 0.16, v3(0.55, -0.1, 0.8)),
         FeatureId::Maintenance => (sway(0.35), -0.3, 0.18, 0.2, v3(-0.75, 0.75, 0.4)),
         FeatureId::LoginItems => (sway(0.45), -0.3, 0.22, 0.2, v3(-0.45, 0.55, 0.7)),
-        FeatureId::Uninstaller => (spin(4.0), -0.5, 0.0, 0.5, v3(-0.4, 0.75, 0.5)),
+        FeatureId::Uninstaller => (sway(0.35), -0.3, 0.06, 0.18, v3(0.5, 0.52, 0.3)),
         FeatureId::Updater => (sway(0.45), -0.3, 0.1, 0.18, v3(-0.6, 0.55, 0.5)),
         FeatureId::LargeOldFiles => (spin(2.0), -0.45, 0.0, 0.42, v3(-0.5, 0.62, 0.6)),
         FeatureId::Duplicates => (sway(0.3), 0.0, 0.08, 0.18, v3(-0.75, 0.62, 0.5)),
@@ -328,8 +328,11 @@ fn window(x: f32, from: f32, len: f32) -> f32 {
 
 fn backdrop(sc: &mut Scene<'static>, an: &Ani) {
     let glow = 0.30 + 0.25 * an.scan * (0.6 + 0.4 * an.breath) + 0.3 * (1.0 - an.burst);
+    // Straight behind the object as the camera sees it, so a camera looking down (Disk Map,
+    // System Junk) does not lift the halo above the object.
+    let (se, ce) = an.look.elevation.sin_cos();
     sc.sprite(
-        v3(0.0, 0.05, -2.2),
+        v3(0.0, 0.05 - 2.2 * se, -2.2 * ce),
         3.2,
         mix(an.a, an.b, 0.35),
         glow * 0.55,
@@ -435,12 +438,13 @@ fn effects(sc: &mut Scene<'static>, a: &'static Assets, an: &Ani) {
                 sc.sprite(p, 0.05 * (1.0 - 0.6 * k), col, fade, SpriteKind::Dot);
             }
         }
-        let ring = Xf::scale(0.8 + 1.0 * e).rot_x(FRAC_PI_2 - 0.35);
+        // The ring stops inside the slot margin and is gone by the time it gets there.
+        let ring = Xf::scale(0.8 + 0.55 * e).rot_x(FRAC_PI_2 - 0.35);
         sc.add_faded(
             &a.shock,
             ring,
             Material::glass(mix(an.a, WHITE, 0.5), 0.5).with_emissive(scale(an.a, 0.9)),
-            fade * fade * 0.6,
+            fade * fade * 0.6 * (1.0 - e).sqrt(),
         );
     }
 }
@@ -684,51 +688,82 @@ fn threat(sc: &mut Scene<'static>, a: &'static Assets, an: &Ani, root: Xf) {
     }
 }
 
+/// Privacy Traces: a padlock in front of a browser window whose history lines are the
+/// traces. Scanning unlocks the shackle and the lines flicker; done clears the lines and
+/// the shackle snaps shut.
 fn privacy(sc: &mut Scene<'static>, a: &'static Assets, an: &Ani, root: Xf) {
+    // The browser window behind, up and to the right.
+    let win = Xf::scale(0.82)
+        .rot_z(0.08)
+        .at(v3(0.42, 0.42, -0.6))
+        .then(root);
     sc.add(
-        &a.lens_housing,
-        root,
-        Material::satin(scale(an.b, 0.55), scale(an.b, 0.3)),
+        &a.browser,
+        win,
+        Material::satin(mix(an.b, WHITE, 0.35), scale(an.b, 0.7)),
     );
     sc.add(
-        &a.lens_rim,
-        Xf::ID.at(v3(0.0, 0.0, 0.17)).then(root),
-        Material::metal(mix(an.a, WHITE, 0.35), an.a),
+        &a.browser_bar,
+        Xf::ID.at(v3(0.0, 0.47, 0.06)).then(win),
+        Material::satin(scale(an.b, 0.55), scale(an.b, 0.4)),
     );
-    sc.add(
-        &a.iris,
-        Xf::ID.at(v3(0.0, 0.0, 0.16)).then(root),
-        Material::satin(mix(an.a, WHITE, 0.15), an.b).with_emissive(an.glow(0.4)),
-    );
-    let spin = lp::HERO_IDLE_TURN.angle(an.t) * 2.0 + an.scan_angle(lp::HERO_SCAN_TURN);
-    for i in 0..12 {
-        let ang = spin + TAU * i as f32 / 12.0;
+    for i in 0..3 {
         sc.add(
             &a.bead,
-            Xf::scale3(v3(0.07, 0.07, 0.05))
-                .at(v3(0.4 * ang.cos(), 0.4 * ang.sin(), 0.22))
-                .then(root),
-            Material::gloss(mix(an.a, WHITE, 0.5), an.a),
+            Xf::scale3(v3(0.045, 0.045, 0.03))
+                .at(v3(-0.66 + 0.13 * i as f32, 0.47, 0.1))
+                .then(win),
+            Material::gloss(WHITE, mix(WHITE, an.a, 0.3)),
         );
     }
-    let pupil = if an.scanning() {
-        1.0 + 0.35 * an.scan * an.sin(1.4, 0.0)
-    } else if an.done() {
-        motion::lerp(0.4, 1.0, an.settle)
+    // History lines: the traces. They flicker while scanning and clear when done.
+    let cleared = if an.done() {
+        ENTER.apply(window(an.since, 0.0, 0.6))
     } else {
-        1.0
+        0.0
     };
+    for i in 0..3 {
+        let fi = i as f32;
+        let flick = if an.scanning() {
+            1.0 - 0.6 * an.scan * (0.5 + 0.5 * an.sin(0.9, fi * 1.7))
+        } else {
+            1.0
+        };
+        let fade = flick * (1.0 - cleared);
+        sc.add_faded(
+            &a.card_line,
+            Xf::scale3(v3(2.0 - 0.45 * fi, 1.5, 1.0))
+                .at(v3(-0.08 - 0.13 * fi, 0.2 - 0.2 * fi, 0.08))
+                .then(win),
+            Material::satin(WHITE, mix(WHITE, an.b, 0.4)),
+            fade,
+        );
+    }
+    // The padlock in front, lower left.
+    let lock = Xf::scale(1.12).at(v3(-0.16, -0.36, 0.3)).then(root);
+    let open = if an.scanning() {
+        an.scan * (0.75 + 0.25 * an.sin(1.6, 0.0))
+    } else if an.done() {
+        // From open to shut with the done spring (overshoot reads as a snap).
+        (1.0 - an.settle).max(-0.15)
+    } else {
+        0.0
+    };
+    let body =
+        Material::gloss(mix(an.a, WHITE, 0.12), scale(an.a, 0.62)).with_emissive(an.glow(0.35));
+    sc.add(&a.lock_body, lock, body);
+    // The shackle lifts straight up when open, and its right leg swings out.
+    let shackle = Xf::ID
+        .at(v3(0.0, 0.2 * open, 0.0))
+        .rot_y(-0.5 * open)
+        .at(v3(0.0, 0.0, 0.0))
+        .then(lock);
+    let steel = Material::metal(mix(WHITE, an.a, 0.12), scale(mix(WHITE, an.b, 0.2), 0.45));
+    sc.add(&a.lock_shackle, shackle, steel);
     sc.add(
-        &a.pupil,
-        Xf::scale3(v3(pupil, pupil, 1.0))
-            .at(v3(0.0, 0.0, 0.22))
-            .then(root),
-        Material::gloss([0.02, 0.02, 0.03], [0.01, 0.01, 0.02]),
-    );
-    sc.add(
-        &a.dome,
-        Xf::ID.at(v3(0.0, 0.0, 0.16)).then(root),
-        Material::glass(mix(an.a, WHITE, 0.7), 0.06),
+        &a.lock_keyhole,
+        Xf::ID.at(v3(0.0, -0.06, 0.18)).then(lock),
+        Material::gloss([0.03, 0.02, 0.03], [0.01, 0.01, 0.02]),
     );
 }
 
@@ -809,40 +844,92 @@ fn startup(sc: &mut Scene<'static>, a: &'static Assets, an: &Ani, root: Xf) {
     );
 }
 
+/// App Remover: an app tile in "remove mode" with a minus badge. Scanning wiggles it and
+/// its leftover files orbit it; done shrinks the app away and leaves an empty glass slot.
 fn app_remover(sc: &mut Scene<'static>, a: &'static Assets, an: &Ani, root: Xf) {
-    let cols = [
-        (mix(an.a, WHITE, 0.15), scale(an.a, 0.7)),
-        (mix(an.b, WHITE, 0.15), scale(an.b, 0.7)),
-        (
-            mix(mix(an.a, an.b, 0.5), [0.9, 0.4, 0.9], 0.35),
-            scale(mix(an.a, an.b, 0.5), 0.6),
-        ),
-    ];
-    for (i, (top, bottom)) in cols.into_iter().enumerate() {
-        let fi = i as f32;
-        let mut y = -0.42 + fi * 0.38;
-        let mut fade = 1.0;
-        let mut turn = (fi - 1.0) * 0.12;
-        if an.scanning() {
-            let w = 0.5 + 0.5 * an.sin(1.4, fi * 0.9);
-            y += an.scan * (fi - 1.0) * 0.18 + an.scan * 0.08 * w;
-            turn += an.scan * 0.25 * (fi - 1.0) * w;
-        }
-        if an.done() && i == 2 {
-            // The top tile lifts away and fades out.
-            let k = ENTER.apply(window(an.since, 0.0, 0.8));
-            y += 1.1 * k;
-            fade = 1.0 - k;
-        }
-        let x = Xf::ID.rot_y(turn).at(v3(0.0, y, 0.0)).then(root);
-        let m = Material::gloss(top, bottom).with_emissive(an.glow(0.3));
-        sc.add_faded(&a.app_tile, x, m, fade);
+    let gone = if an.done() {
+        ENTER.apply(window(an.since, 0.05, 0.7))
+    } else {
+        0.0
+    };
+    let wiggle = if an.scanning() {
+        0.07 * an.scan * an.sin(0.32, 0.0)
+    } else {
+        0.0
+    };
+    let size = 1.0 - 0.9 * gone;
+    let tile = Xf::scale(size).rot_z(wiggle + 0.5 * gone).then(root);
+    let face =
+        Material::gloss(mix(an.a, WHITE, 0.18), scale(an.b, 0.75)).with_emissive(an.glow(0.3));
+    sc.add_faded(&a.remover_tile, tile, face, 1.0 - gone);
+    // The app's own glyph: a 2 by 2 grid of rounded squares.
+    let ink = Material::gloss(WHITE, mix(WHITE, an.a, 0.25));
+    for (x, y) in [(-1.0, 1.0), (1.0, 1.0), (-1.0, -1.0), (1.0, -1.0)] {
         sc.add_faded(
-            &a.app_glyph,
-            Xf::ID.at(v3(0.0, 0.09, 0.0)).then(x),
-            Material::gloss(WHITE, mix(WHITE, top, 0.3)),
-            fade,
+            &a.remover_cell,
+            Xf::ID.at(v3(0.19 * x, 0.19 * y, 0.12)).then(tile),
+            ink,
+            1.0 - gone,
         );
+    }
+    // The minus badge on the top left corner: pops in when scanning, out when done.
+    let pop = if an.scanning() {
+        1.0 + 0.12 * an.scan * (0.5 + 0.5 * an.sin(0.8, 0.0))
+    } else {
+        1.0
+    } * (1.0 - ENTER.apply(window(gone, 0.0, 0.5)));
+    if pop > 0.01 {
+        let badge = Xf::scale(pop)
+            .at(v3(-0.5, 0.5, 0.2))
+            .then(Xf::scale(size).then(root));
+        sc.add(
+            &a.badge,
+            badge,
+            Material::gloss(
+                lin(egui::Color32::from_rgb(0xFF, 0x6B, 0x6B)),
+                lin(egui::Color32::from_rgb(0xC8, 0x2A, 0x3A)),
+            ),
+        );
+        sc.add(
+            &a.badge_minus,
+            Xf::ID.at(v3(0.0, 0.0, 0.09)).then(badge),
+            Material::gloss(WHITE, mix(WHITE, [0.9, 0.5, 0.5], 0.3)),
+        );
+    }
+    // Leftover files: small chips that orbit while scanning and fly into the app when done.
+    if an.scanning() || (an.done() && gone < 1.0) {
+        let k = if an.scanning() { an.scan } else { 1.0 - gone };
+        let spin = an.scan_angle(Loop::new(2.4, Easing::Linear));
+        for i in 0..4 {
+            let ang = spin + TAU * i as f32 / 4.0 + 0.4;
+            let r = 0.95 * k + 0.2;
+            sc.add_faded(
+                &a.tile,
+                Xf::ID
+                    .rot_z(ang)
+                    .at(v3(
+                        r * ang.cos(),
+                        r * ang.sin() * 0.8,
+                        0.25 * (ang * 1.0).sin(),
+                    ))
+                    .then(root),
+                Material::satin(mix(an.b, WHITE, 0.5), an.b),
+                k,
+            );
+        }
+    }
+    // The empty place the app leaves behind: a dashed outline of its tile.
+    if gone > 0.0 {
+        let m = Material::satin(mix(an.a, WHITE, 0.45), mix(an.a, an.b, 0.5))
+            .with_emissive(scale(an.a, 0.15));
+        for &(p, ang) in &a.slot_path {
+            sc.add_faded(
+                &a.slot_dash,
+                Xf::ID.rot_z(ang).at(v3(p[0], p[1], 0.0)).then(root),
+                m,
+                gone,
+            );
+        }
     }
 }
 
@@ -1109,12 +1196,7 @@ struct Assets {
     shield_inner: Mesh3,
     check: Mesh3,
     beam: Mesh3,
-    lens_housing: Mesh3,
-    lens_rim: Mesh3,
-    iris: Mesh3,
     bead: Mesh3,
-    pupil: Mesh3,
-    dome: Mesh3,
     gear_big: Mesh3,
     gear_small: Mesh3,
     hub: Mesh3,
@@ -1122,8 +1204,18 @@ struct Assets {
     groove: Mesh3,
     power_arc: Mesh3,
     power_bar: Mesh3,
-    app_tile: Mesh3,
-    app_glyph: Mesh3,
+    browser: Mesh3,
+    browser_bar: Mesh3,
+    lock_body: Mesh3,
+    lock_shackle: Mesh3,
+    lock_keyhole: Mesh3,
+    remover_tile: Mesh3,
+    remover_cell: Mesh3,
+    badge: Mesh3,
+    badge_minus: Mesh3,
+    slot_dash: Mesh3,
+    /// Dash centres and directions, evenly spaced along the app tile's outline.
+    slot_path: Vec<([f32; 2], f32)>,
     refresh_arc: Mesh3,
     arrow: Mesh3,
     ball: Mesh3,
@@ -1149,19 +1241,19 @@ fn assets() -> &'static Assets {
 }
 
 /// Lay a mesh built around Y so it faces the camera (+Z).
-fn facing(m: Mesh3) -> Mesh3 {
+pub(crate) fn facing(m: Mesh3) -> Mesh3 {
     let mut m = m.transformed(Xf::ID.rot_x(FRAC_PI_2));
     m.tint.clear();
     m.finish()
 }
 
 /// Recompute the vertical gradient after a transform.
-fn retint(mut m: Mesh3) -> Mesh3 {
+pub(crate) fn retint(mut m: Mesh3) -> Mesh3 {
     m.tint.clear();
     m.finish()
 }
 
-fn ccw(mut p: Vec<[f32; 2]>) -> Vec<[f32; 2]> {
+pub(crate) fn ccw(mut p: Vec<[f32; 2]>) -> Vec<[f32; 2]> {
     let n = p.len();
     let area: f32 = (0..n)
         .map(|i| p[i][0] * p[(i + 1) % n][1] - p[(i + 1) % n][0] * p[i][1])
@@ -1172,7 +1264,7 @@ fn ccw(mut p: Vec<[f32; 2]>) -> Vec<[f32; 2]> {
     p
 }
 
-fn rounded_rect(w: f32, h: f32, r: f32, seg: usize) -> Vec<[f32; 2]> {
+pub(crate) fn rounded_rect(w: f32, h: f32, r: f32, seg: usize) -> Vec<[f32; 2]> {
     let (hw, hh) = (w * 0.5 - r, h * 0.5 - r);
     let mut p = Vec::new();
     for (cx, cy, a0) in [
@@ -1189,7 +1281,7 @@ fn rounded_rect(w: f32, h: f32, r: f32, seg: usize) -> Vec<[f32; 2]> {
     p
 }
 
-fn squircle(r: f32, n: f32, seg: usize) -> Vec<[f32; 2]> {
+pub(crate) fn squircle(r: f32, n: f32, seg: usize) -> Vec<[f32; 2]> {
     (0..seg)
         .map(|i| {
             let a = TAU * i as f32 / seg as f32;
@@ -1213,7 +1305,7 @@ fn quad_bezier(p0: [f32; 2], c: [f32; 2], p1: [f32; 2], steps: usize, out: &mut 
     }
 }
 
-fn shield_outline(s: f32) -> Vec<[f32; 2]> {
+pub(crate) fn shield_outline(s: f32) -> Vec<[f32; 2]> {
     let mut right = Vec::new();
     quad_bezier([0.0, 0.8], [0.42, 0.8], [0.82, 0.94], 8, &mut right);
     quad_bezier([0.82, 0.94], [0.88, 0.5], [0.8, 0.12], 8, &mut right);
@@ -1227,7 +1319,7 @@ fn shield_outline(s: f32) -> Vec<[f32; 2]> {
 }
 
 /// Outline of a thick polyline (miter joins, limited).
-fn stroke(points: &[[f32; 2]], w: f32) -> Vec<[f32; 2]> {
+pub(crate) fn stroke(points: &[[f32; 2]], w: f32) -> Vec<[f32; 2]> {
     let n = points.len();
     let dir = |a: [f32; 2], b: [f32; 2]| {
         let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
@@ -1261,7 +1353,7 @@ fn stroke(points: &[[f32; 2]], w: f32) -> Vec<[f32; 2]> {
     ccw(left)
 }
 
-fn gear_outline(teeth: usize, pitch_r: f32) -> Vec<[f32; 2]> {
+pub(crate) fn gear_outline(teeth: usize, pitch_r: f32) -> Vec<[f32; 2]> {
     let m = 2.0 * pitch_r / teeth as f32;
     let (ra, rr) = (pitch_r + m * 0.95, pitch_r - m * 1.15);
     let pa = TAU / teeth as f32;
@@ -1297,6 +1389,63 @@ fn sector_outline(r0: f32, r1: f32, a0: f32, a1: f32) -> Vec<[f32; 2]> {
         let a = a0 + (a1 - a0) * k as f32 / steps as f32;
         p.push([r0 * a.cos(), r0 * a.sin()]);
     }
+    ccw(p)
+}
+
+/// A padlock shackle: an arch with two straight legs, as one bent tube (the left leg
+/// is longer, so it stays in the body when the shackle lifts).
+fn lock_shackle() -> Mesh3 {
+    let (r, w) = (0.3f32, 0.08f32);
+    let arch = facing(Mesh3::torus(r, w, 40, 12, PI, PI));
+    let mut m = arch.transformed(Xf::ID.at(v3(0.0, 0.62, 0.0)));
+    for x in [-r, r] {
+        let leg = Mesh3::rounded_box(v3(w, 0.17, w), w * 0.99, 4);
+        m.merge(&leg.transformed(Xf::ID.at(v3(x, 0.47, 0.0))));
+    }
+    retint(m)
+}
+
+/// `n` points evenly spaced by arc length along a closed path, with the direction there.
+fn even_points(path: &[[f32; 2]], n: usize) -> Vec<([f32; 2], f32)> {
+    let len = path.len();
+    let seg = |i: usize| {
+        let (p, q) = (path[i], path[(i + 1) % len]);
+        (
+            (q[0] - p[0]).hypot(q[1] - p[1]),
+            (q[1] - p[1]).atan2(q[0] - p[0]),
+        )
+    };
+    let total: f32 = (0..len).map(|i| seg(i).0).sum();
+    let mut out = Vec::with_capacity(n);
+    let (mut i, mut walked) = (0, 0.0f32);
+    for k in 0..n {
+        let want = total * k as f32 / n as f32;
+        while i < len - 1 && walked + seg(i).0 < want {
+            walked += seg(i).0;
+            i += 1;
+        }
+        let (l, ang) = seg(i);
+        let t = ((want - walked) / l.max(1e-6)).clamp(0.0, 1.0);
+        let (p, q) = (path[i], path[(i + 1) % len]);
+        out.push(([p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t], ang));
+    }
+    out
+}
+
+/// A keyhole: a round head over a tapered slot.
+fn keyhole() -> Vec<[f32; 2]> {
+    let (r, cy) = (0.085f32, 0.04f32);
+    let mut p = Vec::new();
+    // From the right side of the slot top, around the head, to the left side.
+    let a0 = (-0.35f32).asin();
+    let a1 = PI - a0;
+    let n = 24;
+    for k in 0..=n {
+        let a = a0 + (a1 - a0) * k as f32 / n as f32;
+        p.push([r * a.cos(), cy + r * a.sin()]);
+    }
+    p.push([-0.06, -0.2]);
+    p.push([0.06, -0.2]);
     ccw(p)
 }
 
@@ -1413,22 +1562,7 @@ fn build_assets() -> Assets {
         shield_inner: Mesh3::extrude(&shield_outline(0.66), 0.08, 0.035, 2),
         check: Mesh3::extrude(&check, 0.1, 0.04, 2),
         beam: Mesh3::rounded_box(v3(1.0, 0.025, 0.025), 0.024, 3),
-        lens_housing: puck_z(0.98, 0.32, 0.14, 64),
-        lens_rim: facing(Mesh3::torus(0.74, 0.07, 64, 12, 0.0, TAU)),
-        iris: puck_z(0.7, 0.06, 0.02, 64),
         bead: Mesh3::icosphere(1),
-        pupil: puck_z(0.22, 0.05, 0.02, 40),
-        dome: facing(Mesh3::lathe(
-            &(0..=8)
-                .map(|k| {
-                    let a = FRAC_PI_2 * k as f32 / 8.0;
-                    [0.7 * a.cos(), 0.18 * a.sin()]
-                })
-                .collect::<Vec<_>>(),
-            48,
-            0.0,
-            TAU,
-        )),
         gear_big: Mesh3::extrude(&gear_outline(GEAR_BIG.0, GEAR_BIG.1), 0.22, 0.035, 2),
         gear_small: Mesh3::extrude(&gear_outline(GEAR_SMALL.0, GEAR_SMALL.1), 0.2, 0.035, 2),
         hub: puck_z(0.16, 0.12, 0.04, 32),
@@ -1443,11 +1577,17 @@ fn build_assets() -> Assets {
             TAU - 1.24,
         )),
         power_bar: Mesh3::rounded_box(v3(0.075, 0.24, 0.075), 0.074, 4),
-        app_tile: retint(
-            Mesh3::extrude(&ccw(squircle(0.62, 4.5, 72)), 0.16, 0.05, 3)
-                .transformed(Xf::ID.rot_x(-FRAC_PI_2)),
-        ),
-        app_glyph: Mesh3::puck(0.2, 0.06, 0.025, 32),
+        browser: Mesh3::extrude(&rounded_rect(1.62, 1.2, 0.12, 4), 0.1, 0.035, 2),
+        browser_bar: Mesh3::rounded_box(v3(0.78, 0.075, 0.02), 0.02, 3),
+        lock_body: Mesh3::extrude(&rounded_rect(1.1, 0.86, 0.17, 5), 0.34, 0.1, 3),
+        lock_shackle: lock_shackle(),
+        lock_keyhole: Mesh3::extrude(&keyhole(), 0.06, 0.02, 1),
+        remover_tile: retint(Mesh3::extrude(&ccw(squircle(0.66, 4.5, 72)), 0.2, 0.06, 3)),
+        remover_cell: Mesh3::rounded_box(v3(0.13, 0.13, 0.04), 0.039, 3),
+        badge: puck_z(0.23, 0.12, 0.05, 40),
+        badge_minus: Mesh3::rounded_box(v3(0.13, 0.035, 0.025), 0.024, 3),
+        slot_dash: Mesh3::rounded_box(v3(0.055, 0.022, 0.022), 0.021, 3),
+        slot_path: even_points(&squircle(0.62, 4.5, 720), 22),
         refresh_arc: facing(Mesh3::tube(0.78, 0.12, 48, 14, 0.3, 150f32.to_radians())),
         arrow: retint(arrow),
         ball: Mesh3::icosphere(3),
@@ -1694,6 +1834,52 @@ mod tests {
                     assert!(grown.contains(v.pos), "{f:?} {s:?} {:?}", v.pos);
                 }
                 assert!(m.is_valid());
+            }
+        }
+    }
+
+    #[test]
+    fn nothing_reaches_the_outer_margin_of_the_slot() {
+        // REVIEW-B B3: the slot may be clipped, so glows, shadows and particles must reach
+        // zero well inside the rect or a lit box shows. Checked on a CPU raster at 96 and
+        // 200 pt, every state, including the burst.
+        let ink = egui::Color32::from_rgb(0x0E, 0x13, 0x1B);
+        for side in [96usize, 200] {
+            let rect = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(side as f32, side as f32));
+            for f in FeatureId::ALL {
+                for s in [
+                    st(HeroPhase::Idle, 0.0, 3.7),
+                    st(HeroPhase::Scanning, 0.9, 2.0),
+                    st(HeroPhase::Done, 1.0, 0.12),
+                    st(HeroPhase::Done, 1.0, 0.3),
+                    st(HeroPhase::Done, 1.0, 0.6),
+                    st(HeroPhase::Done, 1.0, 5.0),
+                ] {
+                    let mut all = Mesh::default();
+                    all.add_colored_rect(rect, ink);
+                    all.append(mesh(f, s, rect, 1.0).0);
+                    let px = crate::render3d::rasterize(&all, side, side, 1.0, 1);
+                    let m = crate::render3d::SPRITE_MARGIN as usize - 2;
+                    let mut worst = 0u8;
+                    for y in 0..side {
+                        for x in 0..side {
+                            if x < m || y < m || x >= side - m || y >= side - m {
+                                let p = &px[(y * side + x) * 4..(y * side + x) * 4 + 3];
+                                let d = p
+                                    .iter()
+                                    .zip([ink.r(), ink.g(), ink.b()])
+                                    .map(|(&a, b)| a.abs_diff(b))
+                                    .max()
+                                    .unwrap_or(0);
+                                worst = worst.max(d);
+                            }
+                        }
+                    }
+                    assert!(
+                        worst <= 2,
+                        "{f:?} {s:?} at {side} pt: edge differs by {worst}"
+                    );
+                }
             }
         }
     }

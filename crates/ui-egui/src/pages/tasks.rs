@@ -158,7 +158,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         });
     });
     ui.add_space(6.0);
-    egui::ScrollArea::vertical()
+    let fade_out = egui::ScrollArea::vertical()
         .id_salt("tasks")
         .auto_shrink([false, false])
         .show(ui, |ui| {
@@ -167,6 +167,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                 ui.add_space(crate::theme::space::S);
             }
         });
+    kit::scroll_fade_page(ui, &fade_out, &t);
     if app.tasks.confirm.is_some() {
         confirm(app, ui);
     }
@@ -230,11 +231,13 @@ fn task_card(app: &mut CleanApp, ui: &mut Ui, info: &tasks::TaskInfo) {
                 kit::well(&t)
                     .inner_margin(egui::Margin::symmetric(12, 8))
                     .show(ui, |ui| {
+                        // An eyebrow, then the command in Inter Medium: the same type as the
+                        // rest of the app instead of egui's fallback monospace.
+                        kit::eyebrow(ui, &t, "Command");
                         ui.label(
-                            RichText::new(format!("Command: {command}"))
-                                .monospace()
-                                .size(size::FOOTNOTE)
-                                .color(t.text_dim),
+                            RichText::new(&command)
+                                .font(font(size::FOOTNOTE, Weight::Medium))
+                                .color(t.text),
                         );
                     });
                 if let Some(Err(why)) = &ready {
@@ -345,7 +348,7 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
     let mut go = false;
     let mut close = false;
     let max_list = (ui.ctx().content_rect().height() - 300.0).clamp(120.0, 380.0);
-    kit::modal(egui::Id::new("tasks-confirm"), &t).show(ui.ctx(), |ui| {
+    let dlg = kit::modal(egui::Id::new("tasks-confirm"), &t).show(ui.ctx(), |ui| {
         ui.set_width((ui.ctx().content_rect().width() - 120.0).clamp(420.0, 640.0));
         kit::dialog_head(
             ui,
@@ -369,8 +372,8 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
                     for c in p.commands() {
                         ui.label(
                             RichText::new(c)
-                                .monospace()
-                                .size(crate::theme::size::FOOTNOTE),
+                                .font(font(size::FOOTNOTE, Weight::Medium))
+                                .color(t.text),
                         );
                     }
                     if p.needs_admin() {
@@ -397,6 +400,9 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
             }
         });
     });
+    if dlg.should_close() {
+        close = true;
+    }
     if go {
         app.act();
         app.tasks.confirm = None;

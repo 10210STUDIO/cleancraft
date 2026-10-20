@@ -20,6 +20,8 @@ fn reach(h: &mut H, label: &str) {
 
 fn open(m: &cleancraft_core::testkit::FakeMac) -> H {
     let mut h = harness(m);
+    // The tool sits in the "Speed" section of the sidebar.
+    click(&mut h, "Speed");
     click(&mut h, "Startup Items");
     assert!(h.state().startup.data.is_some());
     h

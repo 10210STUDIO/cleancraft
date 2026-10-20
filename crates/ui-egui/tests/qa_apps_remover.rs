@@ -85,6 +85,8 @@ fn click_contains(h: &mut H, needle: &str) {
 fn list_groups_and_numbers_match_the_disk() {
     let m = mac();
     let mut h = harness(&m.mac);
+    // The tool sits in the "Apps" section of the sidebar.
+    click(&mut h, "Apps");
     click(&mut h, "App Remover");
     for n in ["Editor", "Viewer", "Safari"] {
         assert!(has(&h, n), "{n} missing");
@@ -178,6 +180,8 @@ fn uninstall_moves_app_and_leftovers_then_undo() {
 }
 
 fn m_h(h: &mut H) -> &mut H {
+    // The tool sits in the "Apps" section of the sidebar.
+    click(h, "Apps");
     click(h, "App Remover");
     h
 }
@@ -298,6 +302,8 @@ fn leftovers_and_installers_groups() {
     m.mac
         .home_file("Library/PreferencePanes/Thing.prefPane/Contents/x", 20_000);
     let mut h = harness(&m.mac);
+    // The tool sits in the "Apps" section of the sidebar.
+    click(&mut h, "Apps");
     click(&mut h, "App Remover");
     assert!(has_text(
         &h,

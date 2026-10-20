@@ -781,7 +781,7 @@ pub fn trash_size(env: &Env) -> (Option<u64>, Option<String>) {
     match std::fs::read_dir(&t) {
         Ok(_) => {
             // What the Trash holds, the same number as Trash Bins (the folder itself is not
-            // counted: an empty Trash is Zero KB).
+            // counted: an empty Trash is 0 KB).
             let (size, _, unreadable) = crate::fsutil::contents_size(&t);
             if unreadable > 0 {
                 (
@@ -855,13 +855,17 @@ pub fn rate_text(bytes_per_sec: u64) -> String {
     format!("{}/s", human_size(bytes_per_sec))
 }
 
-/// "3 d 4 h", "5 h 12 min", "12 min".
+/// "375 days", "3 days 4 h", "1 day 2 h", "5 h 12 min", "12 min". Hours are dropped from a
+/// week on: nobody needs them next to "375 days".
 pub fn uptime_text(secs: u64) -> String {
     let d = secs / 86_400;
     let h = (secs % 86_400) / 3600;
     let m = (secs % 3600) / 60;
-    if d > 0 {
-        format!("{d} d {h} h")
+    let days = crate::fsutil::count(d as usize, "day", "days");
+    if d >= 7 || (d > 0 && h == 0) {
+        days
+    } else if d > 0 {
+        format!("{days} {h} h")
     } else if h > 0 {
         format!("{h} h {m} min")
     } else {

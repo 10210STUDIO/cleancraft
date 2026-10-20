@@ -21,6 +21,8 @@ fn reveal_only_for_paths_that_exist() {
     let fs = mac.env.fake_sys().unwrap();
     fs.answer("open", "");
     let mut h = harness(&mac);
+    // The tool sits in the "Protect" section of the sidebar.
+    click(&mut h, "Protect");
     click(&mut h, "Privacy Traces");
     click(&mut h, "Scan");
     let plan = h.state().plans[&FeatureId::Privacy]
@@ -35,12 +37,12 @@ fn reveal_only_for_paths_that_exist() {
             .count()
     };
 
-    click(&mut h, "Wi-Fi networks  Zero KB");
+    click(&mut h, "Wi-Fi networks  0 KB");
     assert!(has(&h, "Home Net"), "the networks are listed");
     assert_eq!(on_disk("wifi"), 0);
     assert_eq!(reveals(&h), 0, "Wi-Fi rows are not files");
 
-    click(&mut h, "App permissions  Zero KB");
+    click(&mut h, "App permissions  0 KB");
     assert!(has_text(&h, "us.zoom.xos"));
     assert_eq!(reveals(&h), 0, "permission rows are not files");
 

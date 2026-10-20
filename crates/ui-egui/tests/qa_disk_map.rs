@@ -32,6 +32,8 @@ fn map_drill_select_remove_undo() {
     let mac = mac();
     let env = mac.env.clone();
     let mut h = harness(&mac);
+    // The tool sits in the "Files" section of the sidebar.
+    click(&mut h, "Files");
     click(&mut h, "Disk Map");
     assert!(has(
         &h,
@@ -109,6 +111,8 @@ fn map_drill_select_remove_undo() {
 fn cancel_keeps_everything() {
     let mac = mac();
     let mut h = harness(&mac);
+    // The tool sits in the "Files" section of the sidebar.
+    click(&mut h, "Files");
     click(&mut h, "Disk Map");
     click(&mut h, "Map Home Folder");
     click(&mut h, "Select Movies");
@@ -125,6 +129,8 @@ fn typed_folder_and_errors() {
     let a = mac.home_file("Work/a.bin", 400_000);
     let b = mac.home_file("Work/b.bin", 500_000);
     let mut h = harness(&mac);
+    // The tool sits in the "Files" section of the sidebar.
+    click(&mut h, "Files");
     click(&mut h, "Disk Map");
     type_into(&mut h, "Folder to map", "~/Nope");
     click(&mut h, "Map Folder");

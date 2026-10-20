@@ -224,6 +224,18 @@ impl Pen<'_> {
         self.fan((cx, cy), &pts);
     }
 
+    /// A four-point sparkle drawn as an outline with the pen's stroke.
+    fn sparkle_outline(&self, cx: f32, cy: f32, big: f32, small: f32) {
+        let pts: Vec<Pos2> = (0..8)
+            .map(|i| {
+                let a = i as f32 * PI / 4.0 - PI / 2.0;
+                let r = if i % 2 == 0 { big } else { small };
+                self.pt(cx + r * a.cos(), cy + r * a.sin())
+            })
+            .collect();
+        self.poly(pts, true);
+    }
+
     /// A quadratic curve's points from a to b bending toward c.
     fn quad(&self, a: (f32, f32), c: (f32, f32), b: (f32, f32)) -> Vec<Pos2> {
         (0..=12)
@@ -275,9 +287,11 @@ fn gear_points(pen: &Pen<'_>, cx: f32, cy: f32, outer: f32, inner: f32, teeth: u
 fn draw(pen: &Pen<'_>, icon: Icon) {
     match icon {
         Icon::Sweep => {
-            pen.sparkle(10.0, 13.5, 8.5, 2.3);
-            pen.sparkle(18.5, 5.5, 3.8, 1.1);
-            pen.dot(19.0, 17.5, 1.3);
+            // Outlined like the other line icons (REVIEW-A 15: the filled star read twice as
+            // heavy as System Junk next to it); the small sparkle stays solid as an accent.
+            pen.sparkle_outline(10.0, 13.0, 8.0, 2.6);
+            pen.sparkle(18.5, 5.5, 3.6, 1.0);
+            pen.dot(19.0, 17.8, 1.1);
         }
         Icon::Junk => {
             // An open-topped box of loose pieces.
@@ -298,11 +312,12 @@ fn draw(pen: &Pen<'_>, icon: Icon) {
             pen.line(&[(3.8, 7.5), (12.0, 13.5), (20.2, 7.5)]);
         }
         Icon::Trash => {
-            pen.line(&[(4.0, 6.5), (20.0, 6.5)]);
-            pen.line(&[(9.5, 6.5), (9.5, 4.0), (14.5, 4.0), (14.5, 6.5)]);
-            pen.line(&[(6.2, 6.5), (7.2, 20.0), (16.8, 20.0), (17.8, 6.5)]);
-            pen.line(&[(10.2, 10.5), (10.2, 16.2)]);
-            pen.line(&[(13.8, 10.5), (13.8, 16.2)]);
+            // Sits 0.8 unit higher than its box: optically centred on the label's x-height.
+            pen.line(&[(4.0, 5.7), (20.0, 5.7)]);
+            pen.line(&[(9.5, 5.7), (9.5, 3.2), (14.5, 3.2), (14.5, 5.7)]);
+            pen.line(&[(6.2, 5.7), (7.2, 19.2), (16.8, 19.2), (17.8, 5.7)]);
+            pen.line(&[(10.2, 9.7), (10.2, 15.4)]);
+            pen.line(&[(13.8, 9.7), (13.8, 15.4)]);
         }
         Icon::LargeOld => {
             pen.closed(&[
@@ -372,7 +387,7 @@ fn draw(pen: &Pen<'_>, icon: Icon) {
                 ]);
             }
             pen.line(&[(12.0, 15.0), (16.6, 9.6)]);
-            pen.dot(12.0, 15.0, 1.9);
+            pen.dot(12.0, 15.0, 1.4);
             pen.line(&[(5.5, 19.5), (18.5, 19.5)]);
         }
         Icon::Shield => {

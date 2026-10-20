@@ -23,6 +23,8 @@ fn plan(h: &H) -> Plan {
 
 fn open(mac: &FakeMac) -> H {
     let mut h = harness(mac);
+    // The tool sits in the "Protect" section of the sidebar.
+    click(&mut h, "Protect");
     click(&mut h, "Privacy Traces");
     click(&mut h, "Scan");
     h
@@ -157,7 +159,7 @@ fn running_browser_and_errors() {
 fn wifi_settings_button() {
     let mac = privacy_mac();
     let mut h = open(&mac);
-    click(&mut h, "Wi-Fi networks  Zero KB");
+    click(&mut h, "Wi-Fi networks  0 KB");
     assert!(has(&h, "Home Net") && has(&h, "Cafe Guest"));
     assert!(has_text(
         &h,
@@ -178,7 +180,7 @@ fn reset_permissions_flow() {
         "Successfully reset\n",
     );
     let mut h = open(&mac);
-    click(&mut h, "App permissions  Zero KB");
+    click(&mut h, "App permissions  0 KB");
     assert!(has_text(
         &h,
         "Camera access granted to us.zoom.xos (cannot be selected"
@@ -235,7 +237,7 @@ fn reset_permissions_flow() {
     mac.env
         .inject_fault(&executor::journal_path(&mac.env), Fault::DiskFull);
     let n = fake.calls().len();
-    click(&mut h, "App permissions  Zero KB");
+    click(&mut h, "App permissions  0 KB");
     click(&mut h, "Reset Permissions");
     click(&mut h, "Camera: us.zoom.xos");
     click(&mut h, "Reset Selected");

@@ -33,19 +33,19 @@ material is file names and paths.
 | Token (`theme::size`) | Size | Weight | Line height | HIG role | Used for |
 |---|---|---|---|---|---|
 | `DISPLAY` | 52 | Bold | 1.1 | (none) | the total found on a results page |
-| `NUMBER` | 30 | Bold | 1.15 | (none) | values in Quick Sweep tiles and Live Monitor cards, App Remover detail total |
-| `LARGE_TITLE` | 30 | Bold | 1.2 | Large Title (26) | start-screen title, Done headline |
+| `NUMBER` | 34 | Bold | 1.15 | (none) | values in Quick Sweep tiles and Live Monitor cards, App Remover detail total |
+| `LARGE_TITLE` | 34 | Bold | 1.2 | Large Title (26) | start-screen title, Done headline |
 | `NUMBER_S` | 24 | Bold | 1.2 | (none) | selected size in the bottom bar (same size as `TITLE`) |
 | `TITLE` | 24 | Bold | 1.2 | Title 1 (22) | page title in the header, app name in App Remover detail |
 | `TITLE2` | 19 | SemiBold / Bold | 1.25 | Title 2 (17) | dialog headline, progress headline, app name in the sidebar logo, empty states |
 | `TITLE3` | 16 | SemiBold | 1.3 | Title 3 (15) | card titles, "found in" and "ready to clean" next to the total |
 | `BODY_L` | 16 | Regular | 1.4 | (none) | lead text under a start-screen title, Done summary (same size as `TITLE3`) |
-| `BODY` | 14 | Regular / Medium / SemiBold | 1.35 | Body (13) | row names (SemiBold), sidebar entries (Medium, SemiBold when active), sizes in rows, primary buttons |
+| `BODY` | 15 | Regular / Medium / SemiBold | 1.35 | Body (13) | row names (SemiBold), sidebar entries (Medium, SemiBold when active), sizes in rows, primary buttons |
 | `CALLOUT` | 13 | Regular / Medium | 1.35 | Callout (12) | page subtitles, secondary lines, secondary buttons, banners, strips, confirmation lines |
 | `FOOTNOTE` | 12 | Regular / Medium | 1.3 | Footnote (10) | paths, tags, counts, app meta lines, row actions (Reveal, Ignore) |
 | `CAPTION` | 11.5 | SemiBold, upper case, +0.6 to 0.8 letter spacing | 1.2 | Caption (10) | sidebar group labels and eyebrows only |
 
-Nine sizes in all (`theme::SCALE`: 52, 30, 24, 19, 16, 14, 13, 12, 11.5); `theme::snap`
+Nine sizes in all (`theme::SCALE`: 52, 34, 24, 19, 16, 15, 13, 12, 11.5; round 3 raised the start-screen title to 34 and body text to 15 at the lead's request); `theme::snap`
 puts text sized from a shape (the initial in an app tile) on the nearest one.
 
 Rules:
@@ -79,7 +79,7 @@ icons agent's `images::app_icon` when loaded, the coloured initial tile as place
 `XXS 2`, `XS 4`, `S 8`, `M 12`, `L 16`, `XL 24`, `XXL 32`, `XXXL 48`.
 
 - Content margin: 32 left/right, 24 top/bottom (`PAGE_X`, `PAGE_Y`).
-- Sidebar: 232 wide, inner margin 12 x 16.
+- Sidebar: 240 wide, inner margin 12 left and right; the top 40 pt are the title band and its air (titlebar.rs).
 - Gutter between cards and between the two columns of a results page: 16 (`GUTTER`).
 - Header to content: 16. Card inner margin: 16 to 18. Dialog inner margin: 24.
 - Results left column: 272 wide (236 under 760 pt of content width).
@@ -150,13 +150,36 @@ Neutral slate (History and Settings).
 
 ## Components (kit.rs)
 
-`pill` (Primary, Secondary, Danger, Ghost), `check`, `check_mixed`, `check_text`, `radio`,
+`pill` (Primary, Secondary, Danger, Ghost), `switch`, `check`, `check_mixed`, `check_text`, `radio`,
 `search_field`, `text_field`, `sort_menu`, `quiet_label`, `card`, `well`,
 `bar_frame`, `bottom_bar`, `dialog_frame`, `modal`, `dialog_head`, `strip`, `header`,
 `card_head`, `hero`, `round_action`, `chips`, `progress`, `progress_ring`, `done_check`,
 `done_hero`, `tag`,
 `bar`, `gauge`, `sparkline`, `badge`, `icon_tile`, `app_icon`, `initial_tile`, `confirm_line`,
 `text_at`, `place`.
+
+### Added in round 3
+
+- `switch`: a 38 x 22 pt macOS switch (green when on) for states that are on or off
+  (Startup Items). Its accessible name is the action a click takes ("Turn Off Dropbox"). It
+  replaces the old "On" tag plus "Turn Off" button pair.
+- `modal` returns a `Dialog`: it fades in with its scrim and rises 8 pt (`motion::tr::OVERLAY`,
+  0.2 s; instant with Reduce motion), has a close button (X, 28 pt hit area, "Close dialog")
+  at its top right, and `should_close()` is true after the X or Esc (both mean Cancel). A
+  click on the scrim does nothing: the dialogs confirm moves.
+- `display_count`: the results total counts up from 0 over 0.6 s (`motion::tr::COUNT`);
+  VoiceOver hears the final figure from the first frame.
+- `appear`: rows of a results list and Quick Sweep tiles fade in 35 ms apart
+  (`motion::appear`).
+- `chips_with_state`: Quick Sweep's scanning screen lists every module as a chip that is done
+  (green check), scanning (spinning arc, accent border) or waiting (dimmed).
+- `progress_with`: the scanning screen with a known share done and extra content.
+- `scroll_fade` (lists in cards) and `scroll_fade_page` (lists on the backdrop): a 24 pt fade
+  at the bottom of a scroll area while more content is below, and at its top once scrolled.
+- `dither`: one or two levels of white noise (a 64 px tile, one texel per physical pixel) over
+  the backdrop, so its wide dark gradients do not band on Retina displays.
+- `theme::DANGER_A` / `DANGER_B` and `danger_label()`: the Danger pill's label is ink, at
+  least 4.5:1 on both ends of its gradient (white was 2.7:1).
 
 ## Layout
 
@@ -166,4 +189,28 @@ Neutral slate (History and Settings).
   `ux_render::no_page_uses_a_glyph_inter_cannot_draw_and_nothing_leaves_the_window`).
 - Start screens centre their block vertically (85% of the free space above, so the block
   sits slightly high), with the picture sized by what is left.
+- Done screens, Quick Sweep's included, are one centred composition: object with check badge,
+  headline, buttons, then any per-module cards.
+- Sidebar (lead decision, round 3): the macOS traffic lights sit in the top 28 pt
+  (transparent title bar, `titlebar.rs`), the logo (`logo.rs`) under them, then seven
+  entries, one per section: Quick Sweep, Clean, Protect, Speed, Apps, Files, Live Monitor; a
+  divider; History and Settings. Rows are 44 pt with a 28 pt 3D section icon
+  (`section_icons.rs`: rest, half lit on hover, lit and lifted when selected) and a 15 pt
+  Medium label; the selected entry sits on a soft pill. No small-caps group labels. A
+  section opens the tool it showed last.
+- Sections with several tools show a segmented switcher at the top of the page in every
+  phase (one segment per tool, icon and name, selected state for VoiceOver); it stands in
+  for the compact page header, so nothing at the top of the page moves from start screen to
+  results. Page headings are painted (no second accessibility node with the tool's name).
+- Start screens: from 900 pt of content width, two columns: the 3D object on the left
+  (42% of the width, up to 480 pt), and on the right the 34 pt title, the explanation, what
+  the scan covers (`pages::covers`), controls, the round action and the note. Narrower, one
+  centred column without the coverage list; a short window gets a smaller object (none
+  under 64 pt) and an 88 pt round action. Renders at 1060 x 680, 1280 x 820 and
+  1600 x 1000.
+- Results rows: line 1 is the name, the path (shortened in the middle) and the size; line 2
+  is the reason tag, which runs under the size to the row's end. A reason that repeats the
+  row's name drops it ("Trash of USB: 1 item" on the row "Trash of USB" reads "1 item").
+  Locked rows show a padlock instead of the checkbox; why they are locked follows the tag
+  when it fits whole, and is always in the tooltip.
 - Grids (Quick Sweep tiles) share the page height between rows so they fill the page.

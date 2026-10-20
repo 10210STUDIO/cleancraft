@@ -19,13 +19,13 @@ pub mod space {
     pub const XXL: f32 = 32.0;
     pub const XXXL: f32 = 48.0;
     /// Width of the sidebar.
-    pub const SIDEBAR: f32 = 232.0;
+    pub const SIDEBAR: f32 = 240.0;
     /// Inner margin of the sidebar (left/right, top/bottom).
     pub const SIDEBAR_X: i8 = 12;
     pub const SIDEBAR_Y: i8 = 16;
     /// Margin around the content area.
     pub const PAGE_X: i8 = 32;
-    pub const PAGE_Y: i8 = 24;
+    pub const PAGE_Y: i8 = 30;
     /// Gap between cards in a grid and between the two columns of a results page.
     pub const GUTTER: f32 = 16.0;
     /// Widest a line of running text may get (hero descriptions, dialogs).
@@ -72,13 +72,13 @@ pub fn snap(x: f32) -> f32 {
 pub mod size {
     /// Big numbers: the total found, freed space. Bold.
     pub const DISPLAY: f32 = 52.0;
-    /// Numbers inside cards and tiles. Bold.
-    pub const NUMBER: f32 = 30.0;
+    /// Numbers inside cards and tiles. Bold. (Same size as `LARGE_TITLE`.)
+    pub const NUMBER: f32 = 34.0;
     /// Numbers in the bottom bar and small stats. Bold. (Same size as `TITLE`: the scale
     /// keeps to nine sizes.)
     pub const NUMBER_S: f32 = 24.0;
     /// Start-screen title, Done headline. Bold.
-    pub const LARGE_TITLE: f32 = 30.0;
+    pub const LARGE_TITLE: f32 = 34.0;
     /// Page title in the header. Bold.
     pub const TITLE: f32 = 24.0;
     /// Dialog headline, progress headline. SemiBold.
@@ -88,7 +88,7 @@ pub mod size {
     /// Lead text under a hero title. Regular. (Same size as `TITLE3`.)
     pub const BODY_L: f32 = 16.0;
     /// Body text, row names (SemiBold), sidebar entries (Medium).
-    pub const BODY: f32 = 14.0;
+    pub const BODY: f32 = 15.0;
     /// Secondary lines: subtitles, meta, buttons. Regular or Medium.
     pub const CALLOUT: f32 = 13.0;
     /// Paths, tags, counts. The smallest text a person must read.
@@ -282,6 +282,24 @@ impl Tokens {
     pub fn on_section(&self) -> Color32 {
         on_color(self.sec_a)
     }
+}
+
+/// The Danger pill's gradient (the button that moves files): coral to rose.
+pub const DANGER_A: Color32 = Color32::from_rgb(0xFF, 0x76, 0x6E);
+pub const DANGER_B: Color32 = Color32::from_rgb(0xEE, 0x5A, 0x64);
+
+/// The Danger pill's label: ink, which reads at least 4.5:1 on both ends of its gradient
+/// (white would read 2.7:1 at the light end).
+pub fn danger_label() -> Color32 {
+    on_color(icons_mid(DANGER_A, DANGER_B))
+}
+
+fn icons_mid(a: Color32, b: Color32) -> Color32 {
+    Color32::from_rgb(
+        ((a.r() as u16 + b.r() as u16) / 2) as u8,
+        ((a.g() as u16 + b.g() as u16) / 2) as u8,
+        ((a.b() as u16 + b.b() as u16) / 2) as u8,
+    )
 }
 
 /// Dark ink for text on colour fills.

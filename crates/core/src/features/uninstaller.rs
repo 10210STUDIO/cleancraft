@@ -174,6 +174,11 @@ pub fn uninstall_plan(
         if settings.is_ignored(&path) || policy::check(env, &allow, &path).is_err() {
             continue;
         }
+        // Apple's App Store apps (iMovie, GarageBand) are removable, but their files named
+        // after an Apple id stay: the same check as before anything moves (`validate_set`).
+        if apps::apple_part(&path, 3, true).is_some() {
+            continue;
+        }
         let size = tree_size(&path).0;
         let (cat, why, sel) = match conf {
             Confidence::High if twin.is_some() => (
@@ -277,7 +282,9 @@ pub fn find_leftovers(
     let mut names: Vec<String> = vec![app.name.to_lowercase(), app.bundle_name.to_lowercase()];
     names.retain(|n| n.chars().count() >= 3 && !other_names.contains(n));
     names.dedup();
-    let vendor = app.vendor.to_lowercase();
+    // The maker's folder name comes from the bundle id ("com.jetbrains.goland": "jetbrains"),
+    // never from the shown developer name ("JetBrains s.r.o.").
+    let vendor = apps::vendor_segment(&app.bundle_id);
     let mut out = Vec::new();
     for (dir, label) in LEFTOVER_DIRS {
         let root = resolve(env, dir);
@@ -298,7 +305,7 @@ pub fn find_leftovers(
                 out.push((entry, *label, Confidence::Medium));
             } else if VENDOR_DIRS.contains(dir)
                 && !app.apple
-                && vendor != "unknown"
+                && vendor != "apple"
                 && vendor.chars().count() >= 3
                 && fname.to_lowercase() == vendor
                 && !names.contains(&vendor)
@@ -396,10 +403,7 @@ impl Feature for Uninstaller {
             if is_running(env, &it.path) {
                 bail!("Quit {name} first. Nothing was moved.");
             }
-            if it.selected
-                && apps::read_bundle(&it.path)
-                    .is_some_and(|b| b.bundle_id.starts_with("com.apple."))
-            {
+            if it.selected && (apps::macos_app(&it.path) || apps::in_system(env, &it.path)) {
                 bail!("{name} is part of macOS and cannot be removed.");
             }
         }

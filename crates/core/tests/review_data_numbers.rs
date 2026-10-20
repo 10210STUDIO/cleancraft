@@ -49,7 +49,7 @@ fn alloc(p: &Path) -> u64 {
 
 #[test]
 fn human_size_boundaries_that_are_right() {
-    assert_eq!(human_size(0), "Zero KB");
+    assert_eq!(human_size(0), "0 KB");
     assert_eq!(human_size(999), "999 bytes");
     assert_eq!(human_size(1_000), "1 KB");
     assert_eq!(human_size(999_499), "999 KB");

@@ -21,6 +21,8 @@ fn one_cache() -> (FakeMac, std::path::PathBuf) {
 fn one_item_is_singular_on_every_step() {
     let (mac, _) = one_cache();
     let mut h = harness(&mac);
+    // The tool sits in the "Clean" section of the sidebar.
+    click(&mut h, "Clean");
     click(&mut h, "System Junk");
     click(&mut h, "Scan");
     let plan = h.state().plans[&cleancraft_core::FeatureId::SystemJunk]
@@ -47,6 +49,8 @@ fn one_item_is_singular_on_every_step() {
 fn done_and_history_sizes_match_the_disk() {
     let mac = FakeMac::sample();
     let mut h = harness(&mac);
+    // The tool sits in the "Clean" section of the sidebar.
+    click(&mut h, "Clean");
     click(&mut h, "System Junk");
     click(&mut h, "Scan");
     let plan = h.state().plans[&cleancraft_core::FeatureId::SystemJunk]
@@ -89,6 +93,8 @@ fn moving_to_the_trash_is_not_called_freed() {
     let trash_before = tree_size(&mac.env.user_trash()).0;
     let size = tree_size(&cache).0;
     let mut h = harness(&mac);
+    // The tool sits in the "Clean" section of the sidebar.
+    click(&mut h, "Clean");
     click(&mut h, "System Junk");
     click(&mut h, "Scan");
     click(&mut h, "Review and Clean");
@@ -119,7 +125,7 @@ fn charging_estimate_is_time_until_full() {
     h.get_by_label("Live Monitor").scroll_to_me();
     steps(&mut h);
     click(&mut h, "Live Monitor");
-    assert!(has(&h, "charging"));
+    assert!(has(&h, "Charging"), "pmset state in sentence case");
     assert!(has(&h, "1 h 30 min"));
     assert!(
         !has(&h, "Time left"),

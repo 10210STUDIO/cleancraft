@@ -50,6 +50,8 @@ fn mac() -> FakeMac {
 fn check_show_and_hand_off() {
     let mac = mac();
     let mut h = harness(&mac);
+    // The tool sits in the "Apps" section of the sidebar.
+    click(&mut h, "Apps");
     click(&mut h, "App Updates");
     click(&mut h, "Check for Updates");
     assert!(has(&h, "2 updates available"));
@@ -101,6 +103,8 @@ fn everything_offline() {
     });
     mac.web_fails(CAST, 28);
     let mut h = harness(&mac);
+    // The tool sits in the "Apps" section of the sidebar.
+    click(&mut h, "Apps");
     click(&mut h, "App Updates");
     click(&mut h, "Check for Updates");
     assert!(has(&h, "All checked apps are up to date"));

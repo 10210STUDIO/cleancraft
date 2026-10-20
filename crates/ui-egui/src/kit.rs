@@ -96,19 +96,11 @@ pub fn pill(ui: &mut Ui, t: &Tokens, label: &str, kind: Kind, icon: Option<Icon>
             t.on_section()
         }
         Kind::Danger => {
-            let a = icons::lerp(
-                Color32::from_rgb(0xFF, 0x76, 0x6E),
-                Color32::WHITE,
-                0.1 * hov,
-            );
-            let b = icons::lerp(
-                Color32::from_rgb(0xEE, 0x5A, 0x64),
-                Color32::WHITE,
-                0.1 * hov,
-            );
+            let a = icons::lerp(theme::DANGER_A, Color32::WHITE, 0.1 * hov);
+            let b = icons::lerp(theme::DANGER_B, Color32::WHITE, 0.1 * hov);
             icons::gradient_tile(&p, r, round, a, b);
             top_sheen(&p, r, round);
-            theme::on_color(icons::lerp(a, b, 0.5))
+            theme::danger_label()
         }
         Kind::Secondary => {
             let fill = icons::lerp(t.glass, t.glass_hover, hov);
@@ -241,22 +233,49 @@ pub fn dialog_frame(t: &Tokens) -> Frame {
 /// The colour field behind the content: a vertical wash of the section colour, a large soft
 /// glow at the upper right and a fainter one at the lower left.
 pub fn backdrop(p: &egui::Painter, r: Rect, t: &Tokens) {
-    p.rect_filled(r, 0.0, t.bg);
-    icons::vertical_gradient(p, r, icons::lerp(t.bg, t.sec_b, 0.10), t.bg);
-    icons::glow(
-        p,
-        pos2(r.right() - r.width() * 0.18, r.top() + r.height() * 0.02),
-        r.width() * 0.55,
-        t.sec_a.gamma_multiply(0.16),
-        0.75,
-    );
-    icons::glow(
-        p,
-        pos2(r.left() + r.width() * 0.05, r.bottom()),
-        r.width() * 0.45,
-        t.sec_b.gamma_multiply(0.08),
-        0.7,
-    );
+    // Remembered so a page-level scroll fade can paint the same field over its content.
+    p.ctx()
+        .data_mut(|d| d.insert_temp(egui::Id::new("cleancraft-backdrop"), r));
+    backdrop_fill(p, r, t);
+    dither(p, r);
+}
+
+/// About one level of 8-bit noise over the wide, dark gradient washes, so they do not show
+/// steps (banding) on a Retina display. A 64 px tile repeated, made once.
+pub fn dither(p: &egui::Painter, r: Rect) {
+    let ctx = p.ctx();
+    let id = egui::Id::new("cleancraft-dither");
+    let tex: egui::TextureHandle = match ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
+        Some(t) => t,
+        None => {
+            const N: usize = 64;
+            // A small xorshift: the same tile every run (snapshots stay stable).
+            let mut x: u32 = 0x9E37_79B9;
+            let px: Vec<Color32> = (0..N * N)
+                .map(|_| {
+                    x ^= x << 13;
+                    x ^= x >> 17;
+                    x ^= x << 5;
+                    // White only: black at this alpha barely moves a dark backdrop, so a
+                    // signed noise would brighten on average anyway. 0 to 2 of 255 adds at
+                    // most one or two levels on these dark fields.
+                    Color32::from_white_alpha((x % 3) as u8)
+                })
+                .collect();
+            let img = egui::ColorImage::new([N, N], px);
+            let opts = egui::TextureOptions {
+                wrap_mode: egui::TextureWrapMode::Repeat,
+                ..egui::TextureOptions::NEAREST
+            };
+            let t = ctx.load_texture("cleancraft-dither", img, opts);
+            ctx.data_mut(|d| d.insert_temp(id, t.clone()));
+            t
+        }
+    };
+    let ppp = ctx.pixels_per_point();
+    // One noise texel per physical pixel.
+    let uv = Rect::from_min_size(pos2(0.0, 0.0), r.size() * ppp / 64.0);
+    p.image(tex.id(), r, uv, Color32::WHITE);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -264,11 +283,104 @@ pub fn backdrop(p: &egui::Painter, r: Rect, t: &Tokens) {
 // ---------------------------------------------------------------------------------------
 
 pub fn title(ui: &mut Ui, t: &Tokens, text: &str) {
-    ui.label(
-        RichText::new(text)
-            .font(font(size::TITLE, Weight::Bold))
-            .color(t.text),
+    heading(ui, text, font(size::TITLE, Weight::Bold), t.text);
+}
+
+/// A page heading, painted: the sidebar entry or the selected tool in the section switcher
+/// already names the page for VoiceOver, so the heading adds no second node with the same
+/// name (which would make "System Junk" ambiguous to assistive tools and tests).
+pub fn heading(ui: &mut Ui, text: &str, fid: FontId, color: Color32) -> Rect {
+    let g = galley(ui, text, fid, color);
+    let (r, _) = ui.allocate_exact_size(g.size(), Sense::hover());
+    ui.painter().galley(r.min, g, color);
+    r
+}
+
+/// Whether the section switcher is on the page this frame (set by the shell).
+pub fn switcher_shown(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<bool>(egui::Id::new("cleancraft-switcher")))
+        .unwrap_or(false)
+}
+
+pub fn set_switcher_shown(ctx: &egui::Context, on: bool) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("cleancraft-switcher"), on));
+}
+
+/// The section switcher: one segment per tool (icon and name) in a glass track; the
+/// selected one sits on a soft pill in the section colour. Each segment is announced with its
+/// tool's name and selected state. Returns the index clicked.
+pub fn segmented(
+    ui: &mut Ui,
+    t: &Tokens,
+    items: &[(Icon, &str)],
+    selected: usize,
+) -> Option<usize> {
+    let fid = font(size::CALLOUT, Weight::SemiBold);
+    let h = 40.0;
+    let pad = 14.0;
+    let icon = 16.0;
+    let widths: Vec<f32> = items
+        .iter()
+        .map(|(_, n)| galley(ui, n, fid.clone(), t.text).size().x + icon + 8.0 + pad * 2.0)
+        .collect();
+    let total: f32 = widths.iter().sum::<f32>() + 8.0;
+    let (track, _) = ui.allocate_exact_size(vec2(total, h), Sense::hover());
+    let p = ui.painter().clone();
+    p.rect_filled(track, h / 2.0, Color32::from_black_alpha(70));
+    p.rect_stroke(
+        track,
+        h / 2.0,
+        Stroke::new(1.0, t.glass_stroke),
+        egui::StrokeKind::Inside,
     );
+    let mut x = track.left() + 4.0;
+    let mut clicked = None;
+    for (i, (ic, name)) in items.iter().enumerate() {
+        let r = Rect::from_min_size(pos2(x, track.top() + 4.0), vec2(widths[i], h - 8.0));
+        x += widths[i];
+        let id = ui.id().with(("segment", *name));
+        let resp = ui.interact(r, id, Sense::click());
+        let on = i == selected;
+        resp.widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, true, on, *name));
+        let hov = anim(ui.ctx(), id.with("hov"), resp.hovered(), motion::HOVER);
+        let k = anim(ui.ctx(), id.with("on"), on, motion::HOVER * 1.5);
+        if k > 0.0 {
+            p.rect_filled(
+                r,
+                r.height() / 2.0,
+                icons::lerp(t.glass_solid(), t.sec_a, 0.22).gamma_multiply(k),
+            );
+            p.rect_stroke(
+                r,
+                r.height() / 2.0,
+                Stroke::new(1.0, t.sec_a.gamma_multiply(0.45 * k)),
+                egui::StrokeKind::Inside,
+            );
+        } else if hov > 0.0 {
+            p.rect_filled(
+                r,
+                r.height() / 2.0,
+                Color32::from_white_alpha((10.0 * hov) as u8),
+            );
+        }
+        let color = icons::lerp(icons::lerp(t.text_dim, t.text, hov), t.text, k);
+        let ir = Rect::from_center_size(
+            pos2(r.left() + pad + icon / 2.0, r.center().y),
+            Vec2::splat(icon),
+        );
+        icons::paint(&p, ir, *ic, icons::lerp(color, t.sec_a, k * 0.6));
+        p.text(
+            pos2(ir.right() + 8.0, r.center().y),
+            Align2::LEFT_CENTER,
+            *name,
+            fid.clone(),
+            color,
+        );
+        if resp.clicked() {
+            clicked = Some(i);
+        }
+    }
+    clicked
 }
 
 pub fn subtitle(ui: &mut Ui, t: &Tokens, text: &str) {
@@ -304,6 +416,112 @@ pub fn display(ui: &mut Ui, t: &Tokens, text: &str) -> Response {
             .font(font(size::DISPLAY, Weight::Bold))
             .color(icons::lerp(t.sec_a, Color32::WHITE, 0.15)),
     )
+}
+
+/// The big total of a results screen, counting up from 0 the first time `key` shows
+/// (`motion::tr::COUNT`, instant with Reduce motion). VoiceOver and tests read the final
+/// figure from the first frame.
+pub fn display_count(
+    ui: &mut Ui,
+    t: &Tokens,
+    key: impl std::hash::Hash + std::fmt::Debug,
+    bytes: u64,
+) -> Response {
+    let id = egui::Id::new(("display-count", key));
+    let ctx = ui.ctx().clone();
+    if ctx.data(|d| d.get_temp::<bool>(id.with("seen"))).is_none() {
+        ctx.data_mut(|d| d.insert_temp(id.with("seen"), true));
+        crate::motion::count_to(&ctx, id, 0.0, crate::motion::tr::COUNT);
+    }
+    let v = crate::motion::count_to(&ctx, id, bytes as f64, crate::motion::tr::COUNT);
+    let full = cleancraft_core::fsutil::human_size(bytes);
+    let shown = cleancraft_core::fsutil::human_size(v.round() as u64);
+    let r = display(ui, t, &shown);
+    r.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, full.clone()));
+    r
+}
+
+/// Opacity and rise (points) of the `index`-th tile or row of a list shown under `key`,
+/// staggered (`motion::appear`). Apply with `ui.multiply_opacity` and a translated rect.
+pub fn appear(ui: &Ui, key: impl std::hash::Hash + std::fmt::Debug, index: usize) -> (f32, f32) {
+    let k = crate::motion::appear(ui.ctx(), egui::Id::new(("appear", key)), index);
+    (k, 10.0 * (1.0 - motion::ease_out(k)))
+}
+
+/// A 24 pt fade at the bottom of a scroll area while more content sits below it (and at the
+/// top once scrolled), so a list ends softly instead of in a row cut in half. `under` is the
+/// colour behind the list (the card's composited fill, or the page background).
+pub fn scroll_fade<R>(ui: &Ui, out: &egui::scroll_area::ScrollAreaOutput<R>, under: Color32) {
+    let r = out.inner_rect;
+    let p = ui.painter().with_clip_rect(r.intersect(ui.clip_rect()));
+    let below = out.content_size.y - out.state.offset.y - r.height();
+    let h = 24.0_f32.min(r.height() / 3.0);
+    if below > 1.0 {
+        let k = (below / h).min(1.0);
+        icons::vertical_gradient(
+            &p,
+            Rect::from_min_max(pos2(r.left(), r.bottom() - h), r.max),
+            under.gamma_multiply(0.0),
+            under.gamma_multiply(k),
+        );
+    }
+    if out.state.offset.y > 1.0 {
+        let k = (out.state.offset.y / h).min(1.0);
+        icons::vertical_gradient(
+            &p,
+            Rect::from_min_max(r.min, pos2(r.right(), r.top() + h * 0.6)),
+            under.gamma_multiply(k),
+            under.gamma_multiply(0.0),
+        );
+    }
+}
+
+/// [`scroll_fade`] for a list that sits straight on the page backdrop (Quick Sweep tiles,
+/// Live Monitor cards): the backdrop itself is painted again over the last 24 pt in strips
+/// of rising opacity, so the fade matches the glows behind it.
+pub fn scroll_fade_page<R>(ui: &Ui, out: &egui::scroll_area::ScrollAreaOutput<R>, t: &Tokens) {
+    let Some(field) = ui
+        .ctx()
+        .data(|d| d.get_temp::<Rect>(egui::Id::new("cleancraft-backdrop")))
+    else {
+        return;
+    };
+    let r = out.inner_rect;
+    let below = out.content_size.y - out.state.offset.y - r.height();
+    if below <= 1.0 {
+        return;
+    }
+    let h = 24.0_f32.min(r.height() / 3.0);
+    let k = (below / h).min(1.0);
+    let strips = 12;
+    for i in 0..strips {
+        let y0 = r.bottom() - h + h * i as f32 / strips as f32;
+        let y1 = r.bottom() - h + h * (i + 1) as f32 / strips as f32;
+        let strip = Rect::from_min_max(pos2(r.left(), y0), pos2(r.right(), y1));
+        let mut p = ui.painter().with_clip_rect(strip.intersect(ui.clip_rect()));
+        p.set_opacity(k * (i as f32 + 0.5) / strips as f32);
+        backdrop_fill(&p, field, t);
+    }
+}
+
+/// The backdrop's colour field without remembering it (see [`backdrop`]).
+fn backdrop_fill(p: &egui::Painter, r: Rect, t: &Tokens) {
+    p.rect_filled(r, 0.0, t.bg);
+    icons::vertical_gradient(p, r, icons::lerp(t.bg, t.sec_b, 0.10), t.bg);
+    icons::glow(
+        p,
+        pos2(r.right() - r.width() * 0.18, r.top() + r.height() * 0.02),
+        r.width() * 0.55,
+        t.sec_a.gamma_multiply(0.16),
+        0.75,
+    );
+    icons::glow(
+        p,
+        pos2(r.left() + r.width() * 0.05, r.bottom()),
+        r.width() * 0.45,
+        t.sec_b.gamma_multiply(0.08),
+        0.7,
+    );
 }
 
 /// The narrowest width up to `max_w` at which `text` still takes as few lines as at
@@ -484,13 +702,35 @@ pub fn app_icon(ui: &Ui, r: Rect, name: &str, bundle: Option<&std::path::Path>) 
 /// A centred, wrapping row of painted chips (small module tile and name), for "what this
 /// covers" lines on start screens. Painted only: no accessible nodes, so names stay unique.
 pub fn chips(ui: &mut Ui, t: &Tokens, items: &[(Icon, Color32, &str)], max_w: f32) {
+    chips_with_state(ui, t, items, &[], max_w);
+}
+
+/// Where a module is in a multi-module scan (Quick Sweep's progress chips).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChipState {
+    Waiting,
+    Working,
+    Done,
+}
+
+/// [`chips`] with a state per chip (empty `states`: plain chips). A done chip ends in a green
+/// check, the working one in a small spinning arc, waiting ones are dimmed. Each chip is
+/// announced as "System Junk: done", "Mail Downloads: scanning", "Trash Bins: waiting".
+pub fn chips_with_state(
+    ui: &mut Ui,
+    t: &Tokens,
+    items: &[(Icon, Color32, &str)],
+    states: &[ChipState],
+    max_w: f32,
+) {
     let fid = font(size::CALLOUT, Weight::Medium);
     let h = 34.0;
     let gap = space::S;
     let tile = 22.0;
+    let mark = if states.is_empty() { 0.0 } else { 22.0 };
     let widths: Vec<f32> = items
         .iter()
-        .map(|(_, _, n)| galley(ui, n, fid.clone(), t.text).size().x + tile + 30.0)
+        .map(|(_, _, n)| galley(ui, n, fid.clone(), t.text).size().x + tile + 30.0 + mark)
         .collect();
     let max_w = max_w.min(ui.available_width());
     // Fewest lines that fit, then the same number of chips on each line (5 chips on two
@@ -512,35 +752,94 @@ pub fn chips(ui: &mut Ui, t: &Tokens, items: &[(Icon, Color32, &str)], max_w: f3
         .map(|c| c.to_vec())
         .collect();
     let total_h = lines.len() as f32 * h + (lines.len() as f32 - 1.0) * gap;
+    let left_aligned = ui.layout().horizontal_align() == egui::Align::Min;
     let (area, _) = ui.allocate_exact_size(vec2(ui.available_width(), total_h), Sense::hover());
-    let p = ui.painter();
+    let time = ui.input(|i| i.time);
     for (li, line) in lines.iter().enumerate() {
         let lw: f32 =
             line.iter().map(|i| widths[*i]).sum::<f32>() + gap * (line.len() as f32 - 1.0);
-        let mut x = area.center().x - lw / 2.0;
+        // Lines follow the layout: centred in a centred column, from the left edge in a
+        // left-aligned one (the wide start screen).
+        let mut x = if left_aligned {
+            area.left()
+        } else {
+            area.center().x - lw / 2.0
+        };
         let y = area.top() + li as f32 * (h + gap);
         for i in line {
             let (icon, color, name) = items[*i];
+            let state = states.get(*i).copied();
             let r = Rect::from_min_size(pos2(x, y), vec2(widths[*i], h));
+            let mut p = ui.painter().clone();
+            if state == Some(ChipState::Waiting) {
+                p.set_opacity(0.45);
+            }
             p.rect_filled(r, h / 2.0, t.glass);
             p.rect_stroke(
                 r,
                 h / 2.0,
-                Stroke::new(1.0, t.glass_stroke),
+                Stroke::new(
+                    1.0,
+                    if state == Some(ChipState::Working) {
+                        t.sec_a.gamma_multiply(0.7)
+                    } else {
+                        t.glass_stroke
+                    },
+                ),
                 egui::StrokeKind::Inside,
             );
             let tr = Rect::from_center_size(
                 pos2(r.left() + 6.0 + tile / 2.0, r.center().y),
                 Vec2::splat(tile),
             );
-            icon_tile(p, tr, icon, color);
+            icon_tile(&p, tr, icon, color);
             p.text(
                 pos2(tr.right() + 8.0, r.center().y),
                 Align2::LEFT_CENTER,
                 name,
                 fid.clone(),
-                t.text_dim,
+                if state.is_some_and(|s| s != ChipState::Waiting) {
+                    t.text
+                } else {
+                    t.text_dim
+                },
             );
+            if let Some(st) = state {
+                let c = pos2(r.right() - 10.0 - mark / 2.0 + 4.0, r.center().y);
+                match st {
+                    ChipState::Done => icons::paint(
+                        &p,
+                        Rect::from_center_size(c, Vec2::splat(14.0)),
+                        Icon::Check,
+                        t.success,
+                    ),
+                    ChipState::Working => {
+                        p.circle_stroke(c, 6.0, Stroke::new(2.0, Color32::from_white_alpha(24)));
+                        let a0 = if motion::reduced() {
+                            0.0
+                        } else {
+                            motion::looped(time, motion::SPIN) * std::f32::consts::TAU
+                        };
+                        let pts: Vec<Pos2> = (0..=12)
+                            .map(|k| {
+                                let a = a0 + k as f32 / 12.0 * 1.6;
+                                c + vec2(a.cos(), a.sin()) * 6.0
+                            })
+                            .collect();
+                        p.add(Shape::line(pts, Stroke::new(2.0, t.sec_a)));
+                        crate::motion::ambient_repaint(ui.ctx());
+                    }
+                    ChipState::Waiting => {}
+                }
+                let word = match st {
+                    ChipState::Done => "done",
+                    ChipState::Working => "scanning",
+                    ChipState::Waiting => "waiting",
+                };
+                let label = format!("{name}: {word}");
+                let resp = ui.interact(r, ui.id().with(("chip", *i)), Sense::hover());
+                resp.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, label.clone()));
+            }
             x += widths[*i] + gap;
         }
     }
@@ -604,6 +903,10 @@ pub fn series_color(t: &Tokens, i: usize) -> Color32 {
 
 /// The compact header at the top of a page: icon tile, title, one line under it.
 pub fn header(ui: &mut Ui, t: &Tokens, icon: Icon, title_text: &str, sub: &str) {
+    // In a section with several tools the switcher above names the page: no second header.
+    if switcher_shown(ui.ctx()) {
+        return;
+    }
     ui.horizontal(|ui| {
         badge(ui, t.sec_a, icon, isz::HEADER);
         ui.add_space(space::XS);
@@ -686,67 +989,168 @@ pub fn centered_block<R>(ui: &mut Ui, id: egui::Id, add: impl FnOnce(&mut Ui) ->
     r
 }
 
-/// A module's start screen: picture, title, one line, optional controls, the big round
-/// action button and a short note. Returns true when the action is clicked.
+/// What a module's start screen shows besides its object.
+pub struct HeroText<'a> {
+    pub title: &'a str,
+    pub desc: &'a str,
+    /// What the scan looks at, one short line each.
+    pub covers: &'a [&'a str],
+    pub action: &'a str,
+    pub note: &'a str,
+}
+
+/// Content width from which a start screen uses two columns (object left, words right).
+pub const HERO_TWO_COLUMNS: f32 = 900.0;
+
+/// A module's start screen. From [`HERO_TWO_COLUMNS`] wide: the module's 3D object on the
+/// left, scaled with the window, and on the right the title (34 pt), the explanation, what the
+/// scan covers, optional controls, the action and a short note. Narrower (a 1060 pt window):
+/// one centred column without the coverage list.
+/// Returns true when the action is clicked.
 pub fn hero(
     ui: &mut Ui,
     t: &Tokens,
     feature: cleancraft_core::FeatureId,
-    title_text: &str,
-    desc: &str,
-    action: &str,
-    note: &str,
+    text: HeroText<'_>,
     extra: impl FnOnce(&mut Ui),
 ) -> bool {
-    let id = ui.id().with(("hero", title_text));
+    let id = ui.id().with(("hero", feature.as_str()));
     let avail = ui.available_height();
-    // Height of everything but the picture, from the last frame: the picture takes what is
-    // left (between 96 and HERO_MAX points), so the action button never needs scrolling.
-    let rest: f32 = ui.data(|d| d.get_temp(id.with("rest"))).unwrap_or(320.0);
-    let side = ((avail - rest) / 1.12).clamp(96.0, isz::HERO_MAX).round();
+    let width = ui.available_width();
+    let wide = width >= HERO_TWO_COLUMNS;
+    // Height of everything but the picture, from the last frame.
+    let rest: f32 = ui
+        .data(|d| d.get_temp(id.with(("rest", wide))))
+        .unwrap_or(if wide { 360.0 } else { 420.0 });
     let mut clicked = false;
+    let words = |ui: &mut Ui, align_left: bool, covers: bool, clicked: &mut bool| {
+        let start = ui.cursor().min.y;
+        let w = ui.available_width().min(space::MEASURE);
+        heading(
+            ui,
+            text.title,
+            font(size::LARGE_TITLE, Weight::Bold),
+            t.text,
+        );
+        ui.add_space(space::S);
+        ui.scope(|ui| {
+            let fid = font(size::BODY_L, Weight::Regular);
+            let bw = if align_left {
+                w
+            } else {
+                balanced_width(ui, text.desc, &fid, w)
+            };
+            ui.set_max_width(bw);
+            ui.label(RichText::new(text.desc).font(fid).color(t.text_dim));
+        });
+        if covers && !text.covers.is_empty() {
+            ui.add_space(space::L);
+            for c in text.covers {
+                ui.horizontal(|ui| {
+                    let (r, _) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::hover());
+                    ui.painter()
+                        .circle_filled(r.center(), 9.0, t.sec_a.gamma_multiply(0.16));
+                    icons::paint(
+                        ui.painter(),
+                        Rect::from_center_size(r.center(), Vec2::splat(12.0)),
+                        Icon::Check,
+                        t.sec_a,
+                    );
+                    ui.add_space(space::XS);
+                    ui.label(
+                        RichText::new(*c)
+                            .font(font(size::BODY, Weight::Regular))
+                            .color(t.text),
+                    );
+                });
+                ui.add_space(2.0);
+            }
+        }
+        ui.add_space(space::L);
+        extra(ui);
+        ui.add_space(space::XS);
+        // A short window gets a smaller round button (it is 156 pt tall with its halo).
+        let d = if avail < 620.0 { 88.0 } else { 112.0 };
+        *clicked = round_action(ui, t, text.action, d).clicked();
+        ui.add_space(space::S);
+        if !text.note.is_empty() {
+            ui.scope(|ui| {
+                ui.set_max_width(w);
+                dim(ui, t, text.note);
+            });
+        }
+        ui.cursor().min.y - start
+    };
     egui::ScrollArea::vertical()
         .id_salt(id)
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            centered_block(ui, id, |ui| {
-                // The module's own 3D object (heroes.rs), idle.
-                show_hero(
-                    ui,
-                    feature,
-                    crate::heroes::HeroPhase::Idle,
-                    0.0,
-                    Vec2::splat(side * 1.12),
-                );
-                let start = ui.cursor().min.y;
-                ui.add_space(space::S);
-                ui.label(
-                    RichText::new(title_text)
-                        .font(font(size::LARGE_TITLE, Weight::Bold))
-                        .color(t.text),
-                );
-                ui.add_space(space::XS);
-                ui.scope(|ui| {
-                    let fid = font(size::BODY_L, Weight::Regular);
-                    let w =
-                        balanced_width(ui, desc, &fid, space::MEASURE.min(ui.available_width()));
-                    ui.set_max_width(w);
-                    ui.label(RichText::new(desc).font(fid).color(t.text_dim));
+            if wide {
+                // Two columns, centred as a pair in the page.
+                let block_h = rest.max(240.0);
+                let top = ((avail - block_h) / 2.0).max(0.0) * 0.85;
+                ui.add_space(top);
+                let side = (width * 0.42)
+                    .min(avail * 0.82)
+                    .clamp(isz::HERO_MIN * 1.6, isz::HERO_MAX * 2.0)
+                    .round();
+                let right_w = (width - side - space::XXL).min(space::MEASURE + 40.0);
+                let left_pad = ((width - side - space::XXL - right_w) / 2.0).max(0.0);
+                ui.horizontal_top(|ui| {
+                    ui.add_space(left_pad);
+                    ui.vertical(|ui| {
+                        ui.add_space(((block_h - side) / 2.0).max(0.0));
+                        show_hero(
+                            ui,
+                            feature,
+                            crate::heroes::HeroPhase::Idle,
+                            0.0,
+                            Vec2::splat(side),
+                        );
+                    });
+                    ui.add_space(space::XXL);
+                    ui.vertical(|ui| {
+                        ui.set_width(right_w);
+                        ui.add_space(((block_h - rest) / 2.0).max(0.0));
+                        let h = words(ui, true, true, &mut clicked);
+                        if (h - rest).abs() > 1.0 {
+                            ui.data_mut(|d| d.insert_temp(id.with(("rest", true)), h));
+                            ui.ctx().request_repaint();
+                        }
+                    });
                 });
-                ui.add_space(space::L);
-                extra(ui);
-                ui.add_space(space::XS);
-                clicked = round_action(ui, t, action, 112.0).clicked();
-                ui.add_space(space::S);
-                if !note.is_empty() {
-                    dim(ui, t, note);
-                }
-                let h = ui.cursor().min.y - start;
-                if (h - rest).abs() > 1.0 {
-                    ui.data_mut(|d| d.insert_temp(id.with("rest"), h));
-                    ui.ctx().request_repaint();
-                }
-            });
+            } else {
+                // One column (a 1060 pt window): the coverage list waits for a wider window,
+                // the object keeps its room.
+                let covers = false;
+                // What the words leave, minus a margin; a short window gets a smaller
+                // object, and none at all rather than a scrolling start screen.
+                let side = ((avail - rest - 16.0) / 1.12).min(isz::HERO_MAX).round();
+                centered_block(ui, id, |ui| {
+                    if side >= 64.0 {
+                        show_hero(
+                            ui,
+                            feature,
+                            crate::heroes::HeroPhase::Idle,
+                            0.0,
+                            Vec2::splat(side * 1.12),
+                        );
+                        ui.add_space(space::S);
+                    }
+                    let h = ui
+                        .scope(|ui| {
+                            ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                                words(ui, false, covers, &mut clicked)
+                            })
+                            .inner
+                        })
+                        .inner;
+                    if (h - rest).abs() > 1.0 {
+                        ui.data_mut(|d| d.insert_temp(id.with(("rest", false)), h));
+                        ui.ctx().request_repaint();
+                    }
+                });
+            }
         });
     // The idle picture drifts slowly: 30 frames a second is plenty and saves energy on
     // 120 Hz displays (heroes::show asks for its own frames; this covers the halo).
@@ -860,6 +1264,33 @@ pub fn progress(
     elapsed: u64,
     can_stop: bool,
 ) -> bool {
+    progress_with(
+        ui,
+        t,
+        feature,
+        headline,
+        status,
+        elapsed,
+        can_stop,
+        0.0,
+        |_| {},
+    )
+}
+
+/// [`progress`] with a known share done (0 when unknown; it feeds the hero's glow) and extra
+/// content under the elapsed time (Quick Sweep's module chips).
+#[allow(clippy::too_many_arguments)]
+pub fn progress_with(
+    ui: &mut Ui,
+    t: &Tokens,
+    feature: cleancraft_core::FeatureId,
+    headline: &str,
+    status: &str,
+    elapsed: u64,
+    can_stop: bool,
+    done: f32,
+    extra: impl FnOnce(&mut Ui),
+) -> bool {
     let id = ui.id().with(("progress", headline));
     let mut stop = false;
     centered_block(ui, id, |ui| {
@@ -870,7 +1301,7 @@ pub fn progress(
             ui,
             feature,
             crate::heroes::HeroPhase::Scanning,
-            0.0,
+            done,
             Vec2::splat(d),
         );
         ui.add_space(space::S);
@@ -890,6 +1321,7 @@ pub fn progress(
                 .font(font(size::TITLE3, Weight::SemiBold))
                 .color(t.text_dim),
         );
+        extra(ui);
         if can_stop {
             ui.add_space(space::M);
             stop = pill(ui, t, "Stop", Kind::Secondary, Some(Icon::Stop)).clicked();
@@ -1089,8 +1521,19 @@ pub fn sparkline(p: &egui::Painter, r: Rect, values: &[f64], slots: usize, color
         );
         return;
     }
-    let n = slots.max(values.len()) as f32;
-    let start = n - values.len() as f32;
+    // Faint quarter lines, so the box reads as a chart even when the load is flat.
+    for k in 1..4 {
+        let y = r.top() + r.height() * k as f32 / 4.0;
+        p.line_segment(
+            [pos2(r.left() + 6.0, y), pos2(r.right() - 6.0, y)],
+            Stroke::new(1.0, Color32::from_white_alpha(10)),
+        );
+    }
+    // The readings so far span the whole width: three readings make a line across the box,
+    // not a stub at its right edge. Once the history is full it scrolls.
+    let values = &values[values.len().saturating_sub(slots.max(2))..];
+    let n = values.len() as f32;
+    let start = 0.0;
     let pts: Vec<Pos2> = values
         .iter()
         .enumerate()
@@ -1181,11 +1624,141 @@ pub fn centered_row<R>(ui: &mut Ui, id: egui::Id, add: impl FnOnce(&mut Ui) -> R
     .inner
 }
 
-/// A confirmation dialog in CleanCraft's style.
-pub fn modal(id: egui::Id, t: &Tokens) -> egui::Modal {
-    egui::Modal::new(id)
-        .frame(dialog_frame(t))
-        .backdrop_color(Color32::from_rgba_unmultiplied(4, 6, 10, 170))
+/// A macOS-style switch (38 x 22 pt): green track and knob on the right when on. `name` is
+/// what VoiceOver and tests call it (e.g. "Turn Off Dropbox": the action a click takes).
+/// Returns the response; the caller acts on `clicked()`.
+pub fn switch(ui: &mut Ui, t: &Tokens, on: bool, name: &str) -> Response {
+    let (outer, resp) = ui.allocate_exact_size(vec2(44.0, hit::MIN), Sense::click());
+    let enabled = ui.is_enabled();
+    resp.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, enabled, on, name));
+    let r = Rect::from_center_size(outer.center(), vec2(38.0, 22.0));
+    let k = anim(ui.ctx(), resp.id.with("on"), on, motion::HOVER * 1.5);
+    let hov = anim(ui.ctx(), resp.id.with("hov"), resp.hovered(), motion::HOVER);
+    let p = ui.painter();
+    let off_track = Color32::from_white_alpha((34.0 + 14.0 * hov) as u8);
+    let track = icons::lerp(off_track, t.success, k);
+    p.rect_filled(r, 11.0, track);
+    p.rect_stroke(
+        r,
+        11.0,
+        Stroke::new(1.0, Color32::from_white_alpha(20)),
+        egui::StrokeKind::Inside,
+    );
+    let c = pos2(r.left() + 11.0 + 16.0 * k, r.center().y);
+    p.circle_filled(c + vec2(0.0, 1.0), 9.5, Color32::from_black_alpha(60));
+    p.circle_filled(c, 9.0, Color32::from_rgb(0xF4, 0xF6, 0xF8));
+    resp
+}
+
+/// A confirmation dialog in CleanCraft's style: it fades in with its scrim and rises 8 pt
+/// (`motion::tr::OVERLAY`, instant with Reduce motion), and has a close button (X) at its
+/// top right. Esc and the X both report [`DialogResponse::should_close`]; a click on the scrim
+/// does not close it (the dialogs confirm moves, so closing takes an intent).
+pub fn modal(id: egui::Id, t: &Tokens) -> Dialog {
+    Dialog { id, t: *t }
+}
+
+pub struct Dialog {
+    id: egui::Id,
+    t: Tokens,
+}
+
+pub struct DialogResponse<T> {
+    pub inner: T,
+    close: bool,
+}
+
+impl<T> DialogResponse<T> {
+    /// The X was clicked or Esc pressed: treat it as Cancel.
+    pub fn should_close(&self) -> bool {
+        self.close
+    }
+}
+
+/// 0..1 opening progress of the dialog `id`: restarts each time it opens again (a frame
+/// without it in between).
+pub fn overlay_progress(ctx: &egui::Context, id: egui::Id) -> f32 {
+    let frame = ctx.cumulative_frame_nr();
+    let now = ctx.input(|i| i.time);
+    let key = id.with("dialog-open");
+    let (last, start) = ctx
+        .data(|d| d.get_temp::<(u64, f64)>(key))
+        .unwrap_or((u64::MAX - 1, now));
+    let start = if last.wrapping_add(1) >= frame && last != u64::MAX - 1 {
+        start
+    } else {
+        now
+    };
+    ctx.data_mut(|d| d.insert_temp(key, (frame, start)));
+    let k = crate::motion::tr::OVERLAY.progress((now - start) as f32);
+    if k < 1.0 {
+        ctx.request_repaint();
+    }
+    k
+}
+
+impl Dialog {
+    pub fn show<T>(
+        self,
+        ctx: &egui::Context,
+        content: impl FnOnce(&mut Ui) -> T,
+    ) -> DialogResponse<T> {
+        let t = self.t;
+        let k = overlay_progress(ctx, self.id);
+        let rise = 8.0 * (1.0 - motion::ease_out(k));
+        let area = egui::Modal::default_area(self.id)
+            .fade_in(false)
+            .anchor(Align2::CENTER_CENTER, vec2(0.0, rise));
+        let mut close = false;
+        let resp = egui::Modal::new(self.id)
+            .area(area)
+            .frame(Frame::NONE)
+            .backdrop_color(Color32::from_rgba_unmultiplied(
+                4,
+                6,
+                10,
+                (170.0 * k).round() as u8,
+            ))
+            .show(ctx, |ui| {
+                ui.multiply_opacity(k);
+                let inner = dialog_frame(&t).show(ui, content);
+                // The close button over the frame's top right corner.
+                let r = inner.response.rect;
+                let x = Rect::from_center_size(
+                    pos2(r.right() - 22.0, r.top() + 22.0),
+                    Vec2::splat(hit::MIN),
+                );
+                let b = ui.interact(x, self.id.with("close-x"), Sense::click());
+                b.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, "Close dialog"));
+                let hov = anim(ui.ctx(), b.id.with("hov"), b.hovered(), motion::HOVER);
+                let p = ui.painter();
+                p.circle_filled(
+                    x.center(),
+                    hit::MIN / 2.0 - 2.0,
+                    Color32::from_white_alpha((10.0 + 18.0 * hov) as u8),
+                );
+                icons::paint(
+                    p,
+                    Rect::from_center_size(x.center(), Vec2::splat(12.0)),
+                    Icon::Close,
+                    icons::lerp(t.text_dim, t.text, hov),
+                );
+                if b.clicked() {
+                    close = true;
+                }
+                inner.inner
+            });
+        if resp.is_top_modal
+            && !resp.any_popup_open
+            && ctx.input(|i| i.key_pressed(egui::Key::Escape))
+        {
+            close = true;
+        }
+        DialogResponse {
+            inner: resp.inner,
+            close,
+        }
+    }
 }
 
 /// A dialog's top: icon tile in `color`, headline, one dim line.
@@ -1194,6 +1767,8 @@ pub fn dialog_head(ui: &mut Ui, t: &Tokens, icon: Icon, color: Color32, headline
         badge(ui, color, icon, isz::DIALOG);
         ui.add_space(space::S);
         ui.vertical(|ui| {
+            // Room for the dialog's close button at the top right.
+            ui.set_max_width(ui.available_width() - 20.0);
             ui.spacing_mut().item_spacing.y = space::XS;
             ui.add(
                 egui::Label::new(
@@ -1514,13 +2089,14 @@ pub fn radio(ui: &mut Ui, t: &Tokens, on: bool, text: &str) -> Response {
     let c = pos2(r.left() + 11.0, r.center().y);
     let rad = hit::CHECK / 2.0;
     p.circle_filled(c, rad, Color32::from_black_alpha(60));
-    // Ring at 3.5:1 against the card (WCAG 1.4.11), section colour on hover.
+    // Ring #8C96A5: 5.0:1 against the card as a colour, still over 3:1 where its 1.5 pt edge
+    // is anti-aliased (WCAG 1.4.11); section colour on hover.
     p.circle_stroke(
         c,
         rad - 0.75,
         Stroke::new(
             1.5,
-            icons::lerp(Color32::from_rgb(0x70, 0x7A, 0x8A), t.sec_a, hov.max(k)),
+            icons::lerp(Color32::from_rgb(0x8C, 0x96, 0xA5), t.sec_a, hov.max(k)),
         ),
     );
     if k > 0.0 {

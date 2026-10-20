@@ -81,7 +81,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
         return;
     }
     let recs = app.history.records.clone();
-    egui::ScrollArea::vertical()
+    let fade_out = egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
             for r in recs {
@@ -215,4 +215,5 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                 ui.add_space(6.0);
             }
         });
+    kit::scroll_fade_page(ui, &fade_out, &app.t);
 }
