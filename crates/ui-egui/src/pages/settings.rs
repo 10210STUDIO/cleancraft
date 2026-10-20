@@ -73,6 +73,10 @@ fn slider_row(
                 .logarithmic(wide)
                 .trailing_fill(true),
         );
+        // A slider senses drags only, so kit::slider's click check misses it.
+        if r.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
         let v = *value as f64;
         let name = name.to_string();
         r.widget_info(|| egui::WidgetInfo::slider(true, v, name.clone()));

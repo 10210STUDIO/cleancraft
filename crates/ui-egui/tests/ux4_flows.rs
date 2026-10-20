@@ -336,3 +336,33 @@ fn force_quit_after_confirmation() {
     steps(&mut h);
     assert!(f.calls().iter().any(|c| c.starts_with("/bin/kill")));
 }
+
+#[test]
+fn unreadable_leftover_never_shows_a_bare_zero() {
+    let m = mac();
+    // A private folder named after the app: nothing inside can be read.
+    let private = m
+        .mac
+        .home_file("Library/Containers/com.example.Editor/Data/x", 80_000);
+    let dir = m.mac.env.home_path("Library/Containers/com.example.Editor");
+    m.mac
+        .env
+        .inject_fault(&dir.join("Data"), cleancraft_core::Fault::PermissionDenied);
+    let mut h = harness(&m.mac);
+    go_remover(&mut h);
+    click(&mut h, "Editor");
+    let plan = h.state().apps.detail.clone().unwrap();
+    let it = plan
+        .items
+        .iter()
+        .find(|i| i.path == dir)
+        .expect("container listed");
+    assert!(cleancraft_core::features::uninstaller::size_is_partial(it));
+    let shown = if it.size == 0 {
+        "Unknown".to_string()
+    } else {
+        format!("at least {}", human_size(it.size))
+    };
+    assert!(has(&h, &shown), "{shown} not shown");
+    let _ = private;
+}

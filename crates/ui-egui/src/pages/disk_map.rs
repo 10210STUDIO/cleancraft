@@ -494,8 +494,11 @@ fn idle(app: &mut CleanApp, ui: &mut Ui) {
                 storage_bar(app, ui);
             });
             ui.add_space(theme::space::M);
+            // The field takes what the two buttons leave (the column is narrow at 1280).
+            let field_w = (ui.available_width() - 300.0).clamp(140.0, 300.0);
             kit::centered_row(ui, egui::Id::new("disk-map-folder-row"), |ui| {
-                let r = kit::text_field(ui, &t, &mut app.disk_map.folder_text, "~/Projects", 300.0);
+                let r =
+                    kit::text_field(ui, &t, &mut app.disk_map.folder_text, "~/Projects", field_w);
                 r.widget_info(|| {
                     egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Folder to map")
                 });

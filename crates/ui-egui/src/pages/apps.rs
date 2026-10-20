@@ -1195,8 +1195,13 @@ fn file_row(
         );
     }
     let ink = if locked { t.text_dim } else { t.text };
-    // Size, right aligned in a fixed column.
-    let size_text = human_size(it.size);
+    // Size, right aligned in a fixed column. Part of it unreadable: never a bare "0 KB".
+    let partial = uninstaller::size_is_partial(it);
+    let size_text = match (partial, it.size) {
+        (true, 0) => "Unknown".to_string(),
+        (true, n) => format!("at least {}", human_size(n)),
+        (false, n) => human_size(n),
+    };
     let size_font = font(size::BODY, Weight::SemiBold);
     let size_w = kit::galley(ui, &size_text, size_font.clone(), t.text)
         .size()
@@ -1206,15 +1211,22 @@ fn file_row(
         pos2(r.right() - 12.0 - size_w, r.top()),
         pos2(r.right() - 10.0, r.bottom()),
     );
-    kit::text_at(
+    let size_resp = kit::text_at(
         ui,
         size_r,
         &size_text,
         &size_text,
         size_font,
-        ink,
+        if partial { t.text_dim } else { ink },
         Align::Max,
     );
+    if partial {
+        kit::row_tip(
+            &size_resp,
+            r,
+            "Some of it could not be read (macOS keeps it private, or another user owns it), so it may be bigger than shown.",
+        );
+    }
     // Why it is listed. A lock that is not the plan's shared one is the most useful thing
     // to say, so it takes the place of the reason.
     let own_lock = it
@@ -1230,7 +1242,8 @@ fn file_row(
         // The app's name and version are the page's heading already.
         None if is_app => String::new(),
         None if short_reason && !is_app => {
-            let mut s = reason_kind(&it.reason).to_string();
+            let mut s =
+                reason_kind(it.reason.trim_end_matches(uninstaller::SIZE_PARTIAL)).to_string();
             if it.needs_admin {
                 s.push_str(", needs password");
             }
