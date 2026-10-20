@@ -35,3 +35,9 @@ crates/core/tests/watch_events.rs (real notify events on FakeMac), plus unit tes
 ## Not done here
 - Showing notifications and hosting the watcher in the agent: tray6.
 - Opening the routes in the app (App Remover on `trashed_app_plan`, Threat Check with `preselect_threat`, Full Disk Access): health6 / apps6.
+
+## Gate (commit 1714b98 plus this report)
+- `cargo clippy --workspace --all-targets -- -D warnings`: green. `cargo fmt --all --check`: green.
+- `cargo test -p cleancraft-core` (all core targets, including watch_events and the merged health6 tests): 389 passed, 0 failed.
+- `cargo test --workspace`: started, then stopped by me while compiling the UI tests because the shared disk fell to 1.5 GB free (posted on the board); not re-run, the disk stayed near 5 GB. My changes touch core only (watch.rs and three behaviour-neutral extractions); the UI crate compiles (clippy all targets) but its tests were not run on this branch. The lead's merge gate should run them.
+- target/ deleted.
