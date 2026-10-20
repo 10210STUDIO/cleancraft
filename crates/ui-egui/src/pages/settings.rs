@@ -728,7 +728,7 @@ fn dev_clutter_card(app: &mut CleanApp, ui: &mut Ui) -> bool {
     let mut changed = false;
     kit::card(&t).show(ui, |ui| {
         ui.set_width(ui.available_width());
-        heading(ui, &t, Icon::Junk, "Developer Clutter");
+        heading(ui, &t, Icon::Junk, "Code folders for Developer Clutter");
         let usual: Vec<String> = cleancraft_core::features::dev_clutter::DEFAULT_ROOTS
             .iter()
             .map(|d| format!("~/{d}"))
