@@ -35,10 +35,25 @@ pub struct Settings {
     pub sound_volume: f32,
     /// Also play a very soft tick on switches and taps (off unless the user turns it on).
     pub sound_ticks: bool,
+    /// Scheduled scans by the menu bar agent (look only): off, daily or weekly.
+    pub scan_every: crate::schedule::ScanEvery,
+    /// Hour of the day for scheduled scans, 0 to 23, local time.
+    pub scan_hour: u8,
+    /// Day of the week for weekly scans, 1 (Monday) to 7 (Sunday).
+    pub scan_weekday: u8,
+    /// The menu bar agent warns (at most once a day) when the startup disk has less than this
+    /// percent free. 0: never.
+    pub disk_low_percent: u8,
+    /// The menu bar agent shows no notifications while this is on.
+    pub notifications_paused: bool,
 }
 
 /// Interface sounds start at this loudness (0.0 to 1.0).
 pub const DEFAULT_SOUND_VOLUME: f32 = 0.6;
+/// Scheduled scans run at this hour unless the user picks another.
+pub const DEFAULT_SCAN_HOUR: u8 = 10;
+/// "Disk almost full" below this percent free.
+pub const DEFAULT_DISK_LOW_PERCENT: u8 = 10;
 
 impl Default for Settings {
     fn default() -> Self {
@@ -55,6 +70,11 @@ impl Default for Settings {
             sounds: true,
             sound_volume: DEFAULT_SOUND_VOLUME,
             sound_ticks: false,
+            scan_every: crate::schedule::ScanEvery::Off,
+            scan_hour: DEFAULT_SCAN_HOUR,
+            scan_weekday: 1,
+            disk_low_percent: DEFAULT_DISK_LOW_PERCENT,
+            notifications_paused: false,
         }
     }
 }

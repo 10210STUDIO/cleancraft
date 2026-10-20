@@ -66,11 +66,50 @@ cat > "$STAGE/Contents/Info.plist" <<PLIST
   <string>CleanCraft asks Finder to empty the Trash and System Events to list login items, only when you click those actions.</string>
   <key>NSHumanReadableCopyright</key>
   <string>MIT OR Apache-2.0. CleanCraft, an original app.</string>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key><string>com.cristianizzo.cleancraft</string>
+      <key>CFBundleURLSchemes</key>
+      <array><string>cleancraft</string></array>
+    </dict>
+  </array>
+</dict>
+</plist>
+PLIST
+
+# The menu bar agent: a helper app inside CleanCraft.app with its own bundle id and no Dock
+# icon (LSUIElement), so `open -b com.cristianizzo.cleancraft` always reaches the main app
+# and never the agent. It is the same program; Settings > "Show CleanCraft in the menu bar"
+# writes the LaunchAgent that starts it as `CleanCraftAgent agent`. This script never starts
+# it.
+HELPER="$STAGE/Contents/Library/LoginItems/CleanCraftAgent.app"
+mkdir -p "$HELPER/Contents/MacOS" "$HELPER/Contents/Resources"
+cp "$ROOT/target/release/cleancraft" "$HELPER/Contents/MacOS/CleanCraftAgent"
+cp "$STAGE/Contents/Resources/CleanCraft.icns" "$HELPER/Contents/Resources/CleanCraft.icns"
+cat > "$HELPER/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key><string>en</string>
+  <key>CFBundleName</key><string>CleanCraft Menu Bar</string>
+  <key>CFBundleIdentifier</key><string>com.cristianizzo.cleancraft.agent</string>
+  <key>CFBundleExecutable</key><string>CleanCraftAgent</string>
+  <key>CFBundleIconFile</key><string>CleanCraft</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>${VERSION}</string>
+  <key>CFBundleVersion</key><string>${VERSION}</string>
+  <key>LSMinimumSystemVersion</key><string>11.0</string>
+  <key>LSUIElement</key><true/>
+  <key>NSHighResolutionCapable</key><true/>
 </dict>
 </plist>
 PLIST
 
 echo "==> Signing (ad hoc)"
+# Inner helper first, then the app around it.
+codesign --force --sign - "$HELPER"
 codesign --force --deep --sign - "$STAGE"
 
 echo "==> Installing to $APP"
@@ -79,6 +118,8 @@ if [[ -e "$APP" ]]; then
 fi
 mkdir -p "$APP_DIR"
 cp -R "$STAGE" "$APP"
+# Let Launch Services know the app and its cleancraft:// links now.
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP" >/dev/null 2>&1 || true
 
 mkdir -p "$HOME/.local/bin"
 ln -sf "$APP/Contents/MacOS/CleanCraft" "$HOME/.local/bin/cleancraft"
@@ -94,4 +135,8 @@ For Mail, Safari and Trash data, turn on Full Disk Access:
 
 Agents (MCP):
   claude mcp add -s user cleancraft -- "$BIN" serve
+
+Menu bar: off until you turn on Settings > "Show CleanCraft in the menu bar". When it is
+already on, the new version runs there from your next login (this script never starts it).
+Open a page from Terminal: cleancraft open quick_sweep
 DONE

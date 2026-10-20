@@ -15,6 +15,7 @@ cleancraft-core = { workspace = true }
 cleancraft-mcp = { workspace = true }
 cleancraft-ui-egui = { workspace = true }
 anyhow = { workspace = true }
+chrono = { workspace = true }
 clap = { workspace = true }
 egui = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11"] }
@@ -24,3 +25,7 @@ rmcp = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 craft-quit = { workspace = true, features = ["menu"] }
+# The menu bar agent (`cleancraft agent`): a status item with a menu, on winit's event loop
+# (the same winit eframe uses). muda comes with tray-icon (`tray_icon::menu`).
+tray-icon = { version = "0.26.1", default-features = false }
+winit = { version = "0.30.13", default-features = false }

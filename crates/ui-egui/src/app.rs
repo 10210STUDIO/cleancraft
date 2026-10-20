@@ -375,6 +375,8 @@ impl CleanApp {
         busy |= pages::disk_map::poll(self);
         busy |= pages::monitor::poll(self);
         self.follow_journal();
+        // "Open at this page" requests from the menu bar agent and `cleancraft open` (tray6).
+        pages::settings::follow_open_requests(self, ctx);
         if busy {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
