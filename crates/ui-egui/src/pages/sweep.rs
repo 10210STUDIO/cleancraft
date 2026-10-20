@@ -256,7 +256,12 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             let secs = j.elapsed_secs();
             // Which module the scan is in: its title is the status when it starts (a module
             // then reports its own places, which leave the index where it is).
-            let ids = sources(app).ids();
+            let skip = app.settings.sweep_skip.clone();
+            let ids: Vec<FeatureId> = sources(app)
+                .ids()
+                .into_iter()
+                .filter(|id| !skip.contains(id))
+                .collect();
             if let Some(i) = ids.iter().position(|id| sweep::tile_title(*id) == s)
                 && i > app.sweep.scan_at
             {
@@ -328,6 +333,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
 fn idle(app: &mut CleanApp, ui: &mut Ui) {
     let t = app.t;
     let mut health_clicked = false;
+    let mut toggled: Option<FeatureId> = None;
     let ids = sources(app).ids();
     let looks: Vec<(Icon, Color32, &str)> = ids
         .iter()
@@ -336,6 +342,23 @@ fn idle(app: &mut CleanApp, ui: &mut Ui) {
             (i, c, sweep::tile_title(*id))
         })
         .collect();
+    // The chips choose what the scan includes (Settings::sweep_skip, the same choice as the
+    // Include box on each result tile).
+    let on: Vec<bool> = ids
+        .iter()
+        .map(|id| !app.settings.sweep_skip.contains(id))
+        .collect();
+    let picked = on.iter().filter(|o| **o).count();
+    let action = if picked == ids.len() {
+        "Scan".to_string()
+    } else {
+        format!("Scan {picked} of {}", ids.len())
+    };
+    let note = if picked == 0 {
+        "Choose at least one module above to scan."
+    } else {
+        "Scanning only looks. You see every file before anything moves. Click a module to leave it out."
+    };
     if kit::hero(
         ui,
         &t,
@@ -344,11 +367,14 @@ fn idle(app: &mut CleanApp, ui: &mut Ui) {
             title: "One scan for your whole Mac",
             desc: SUBTITLE,
             covers: &[],
-            action: "Scan",
-            note: "Scanning only looks. You see every file before anything moves.",
+            action: &action,
+            note,
+            enabled: picked > 0,
         },
         |ui| {
-            kit::chips(ui, &t, &looks, 760.0);
+            if let Some(i) = kit::chip_toggles(ui, &t, &looks, &on, 760.0) {
+                toggled = ids.get(i).copied();
+            }
             ui.add_space(space::S);
             // Mac Health from the first page (U7-4): its state when it was read, as a link.
             let line = health_line(app);
@@ -360,6 +386,15 @@ fn idle(app: &mut CleanApp, ui: &mut Ui) {
     ) {
         app.act();
         start_scan(app);
+    }
+    if let Some(id) = toggled {
+        app.act();
+        if app.settings.sweep_skip.contains(&id) {
+            app.settings.sweep_skip.retain(|x| *x != id);
+        } else {
+            app.settings.sweep_skip.push(id);
+        }
+        app.save_settings();
     }
     if health_clicked {
         app.act();
@@ -790,7 +825,11 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
                 cleancraft_core::fsutil::items(count),
                 human_size(size)
             ),
-            "These exact files will be moved. Threats go to the CleanCraft quarantine. You can put everything back from History.",
+            if plans.iter().any(|p| p.feature == Some(FeatureId::Malware)) {
+                "These exact files will be moved. Threats go to the CleanCraft quarantine. You can put everything back from History."
+            } else {
+                "These exact files will be moved. You can put everything back from History."
+            },
         );
         ui.add_space(space::M);
         let admin: usize = plans
@@ -808,7 +847,9 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
                 .iter()
                 .map(|p| 32.0 + p.selected_count() as f32 * crate::theme::hit::CONFIRM_LINE)
                 .sum();
-            let list_h = est.min(max_list);
+            // A little room for the module rows' own height (taller than the badge), so a
+            // short list never scrolls (U7-11).
+            let list_h = (est + 16.0).min(max_list);
             let out = egui::ScrollArea::vertical()
                 .min_scrolled_height(list_h)
                 .max_height(list_h)
@@ -839,7 +880,7 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
                                 &t,
                                 &it.path,
                                 &app.env.display(&it.path),
-                                &it.reason,
+                                &plan_page::confirm_reason(&app.env, p, it),
                                 &human_size(it.size),
                             );
                         }

@@ -1,10 +1,10 @@
 //! Usability review of round 6 (docs/design/REVIEW-U7.md): the new features driven like a
 //! first-time Mac user would, by clicks and keys on a fake Mac.
 //!
-//! Two kinds of tests, all `#[ignore]`d so the suite stays green:
+//! Two kinds of tests:
 //! - `task_*`: the walkthrough of one task. Passes today; prints every step with
 //!   `cargo test -p cleancraft-ui-egui --test review_usability7 -- --ignored --nocapture task_`.
-//! - `u7_##_*`: proof of one finding U7-##. Fails today; remove the `#[ignore]` when fixed.
+//! - `u7_##_*`: proof of one finding U7-##. All fixed by fix7 (their `#[ignore]` removed).
 //!
 //! With `CLEANCRAFT_REVIEW_U7_RENDERS=1` the tests write their evidence crops to
 //! `docs/design/review-u7/`. With `CLEANCRAFT_REVIEW_U7_DUMP=1` every screen's texts and
@@ -1054,7 +1054,6 @@ fn u7_06_a_new_code_folder_is_looked_in_at_once() {
 /// U7-7 (S2). Live Monitor: the CPU card says 17% and lists Brave at 85% (of one core),
 /// with nothing saying the units differ.
 #[test]
-#[ignore = "U7-7: fails today"]
 fn u7_07_process_cpu_is_on_the_same_scale_as_the_total() {
     let mac = monitor_mac();
     let mut h = harness(&mac);
@@ -1073,7 +1072,6 @@ fn u7_07_process_cpu_is_on_the_same_scale_as_the_total() {
 
 /// U7-7 (S2). A process CleanCraft does not know gets no words at all.
 #[test]
-#[ignore = "U7-7: fails today"]
 fn u7_07_unknown_process_names_its_app() {
     let mac = monitor_mac();
     let mut h = harness(&mac);
@@ -1089,7 +1087,6 @@ fn u7_07_unknown_process_names_its_app() {
 /// U7-8 (S2). On an external drive every top folder is locked; the checkbox still looks
 /// active and a click does nothing.
 #[test]
-#[ignore = "U7-8: fails today"]
 fn u7_08_external_drive_top_folder_can_be_selected() {
     let m = map_mac();
     let mut h = harness(&m);
@@ -1152,7 +1149,6 @@ fn u7_09_ai_step_names_and_buttons() {
 
 /// U7-10 (S3). Developer Clutter rows are all titled "target" or "node_modules".
 #[test]
-#[ignore = "U7-10: fails today"]
 fn u7_10_rows_lead_with_the_project() {
     let (m, _, _) = dev_mac();
     let mut h = harness(&m);
@@ -1171,7 +1167,6 @@ fn u7_10_rows_lead_with_the_project() {
 /// U7-11 (S3). Confirmations: a scroll hint for a 2-item list, the quarantine sentence with
 /// no threat, and the copy that stays is not named.
 #[test]
-#[ignore = "U7-11: fails today"]
 fn u7_11_quick_sweep_confirmation_says_what_stays() {
     let (m, _) = dl_mac();
     let mut h = harness(&m);
@@ -1214,7 +1209,6 @@ fn u7_12_quick_sweep_tiles_are_named_and_only_offer_what_applies() {
 /// U7-13 (S3). Trash Bins: next to "Empty Trash in Finder" the bar adds the Mail trash,
 /// which Finder does not empty.
 #[test]
-#[ignore = "U7-13: fails today"]
 fn u7_13_trash_bar_counts_what_finder_empties() {
     let m = trash_mac();
     let mut h = harness(&m);
@@ -1232,7 +1226,6 @@ fn u7_13_trash_bar_counts_what_finder_empties() {
 /// U7-14 (S3). After Open Accessibility Settings, coming back needs Erase in Mail... and the
 /// confirmation again: no Try Again.
 #[test]
-#[ignore = "U7-14: fails today"]
 fn u7_14_mail_erase_can_be_tried_again() {
     let m = trash_mac();
     m.env.fake_sys().unwrap().answer_full(
@@ -1323,7 +1316,6 @@ fn u7_16_health_buttons_go_where_the_text_says() {
 
 /// U7-17 (S3). Large & Old by age: the groups are not in age order.
 #[test]
-#[ignore = "U7-17: fails today"]
 fn u7_17_age_groups_in_age_order() {
     let m = large_old_mac();
     let mut h = harness(&m);
@@ -1356,7 +1348,6 @@ fn u7_17_age_groups_in_age_order() {
 /// U7-18 (S3). App Remover, three apps ticked: 9.11 MB selected out of "9.09 MB in 4 apps",
 /// and the bar's hint is cut.
 #[test]
-#[ignore = "U7-18: fails today"]
 fn u7_18_selection_bar_numbers_and_hint() {
     let m = apps_mac();
     let mut h = harness(&m.mac);

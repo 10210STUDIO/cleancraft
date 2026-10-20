@@ -1259,7 +1259,7 @@ fn apps_bottom_bar(app: &mut CleanApp, ui: &mut Ui) {
     let (figure, full) = match size {
         Some(s) => (
             human_size(s),
-            format!("{apps_text}, {} with their leftovers", human_size(s)),
+            format!("{apps_text}: {} to move, leftovers included", human_size(s)),
         ),
         None => ("...".to_string(), format!("{apps_text}, measuring")),
     };
@@ -1268,7 +1268,7 @@ fn apps_bottom_bar(app: &mut CleanApp, ui: &mut Ui) {
             ui,
             &t,
             &figure,
-            &format!("{apps_text}, with their leftovers"),
+            &format!("{apps_text}, leftovers included"),
             &full,
             size.is_none(),
         );
@@ -1284,11 +1284,9 @@ fn apps_bottom_bar(app: &mut CleanApp, ui: &mut Ui) {
                 app.apps.pick_sizes.clear();
                 app.apps.anchor = None;
             }
-            kit::bar_hint(
-                ui,
-                &t,
-                "Shift-click selects a range. Each app's files are listed before anything moves.",
-            );
+            // Short enough to show whole (U7-18); the rest in its tooltip.
+            kit::bar_hint(ui, &t, "Shift-click selects a range.")
+                .on_hover_text("Each app's files are listed before anything moves.");
         });
     });
 }
@@ -1305,10 +1303,11 @@ fn browse(app: &mut CleanApp, ui: &mut Ui) {
         ui.vertical(|ui| {
             ui.add_space(kit::baseline_offset(size::DISPLAY, size::TITLE3));
             ui.label(
+                // The apps themselves; their leftovers are measured when ticked (U7-18).
                 RichText::new(if n_apps == 1 {
-                    "in 1 app".to_string()
+                    "in 1 app (apps only)".to_string()
                 } else {
-                    format!("in {n_apps} apps")
+                    format!("in {n_apps} apps (apps only)")
                 })
                 .font(font(size::TITLE3, Weight::Medium))
                 .color(t.text_dim),
@@ -2744,10 +2743,22 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
         return;
     };
     let (rep, action) = (rep.clone(), *action);
-    let what = match action {
-        Action::Uninstall => "Uninstalled. ",
-        Action::Reset => "Reset done. ",
-        Action::RemoveFiles | Action::UninstallApps => "",
+    // The app itself may have stayed (macOS protects it, the password was not given): then
+    // the screen says so with what to do, never "Uninstalled" (fix7, App Store apps).
+    let kept = rep
+        .skipped
+        .iter()
+        .find(|(p, _)| is_app_bundle(p) && action == Action::Uninstall)
+        .map(|(p, why)| (p.clone(), why.to_string()));
+    let what = match (action, &kept) {
+        (Action::Uninstall, Some((p, why))) => format!(
+            "{} was not removed: {why}. {} ",
+            app_name(p),
+            app_kept_help(why)
+        ),
+        (Action::Uninstall, None) => "Uninstalled. ".into(),
+        (Action::Reset, _) => "Reset done. ".into(),
+        (Action::RemoveFiles | Action::UninstallApps, _) => String::new(),
     };
     let summary = format!(
         "{what}{}",
@@ -2761,6 +2772,9 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
         &summary,
         |app, ui| {
             let t = app.t;
+            if let Some((p, why)) = &kept {
+                kept_app_buttons(app, ui, p, why);
+            }
             if !rep.moved.is_empty()
                 && kit::pill(ui, &t, "Undo", kit::Kind::Secondary, Some(Icon::Undo)).clicked()
             {
@@ -2803,6 +2817,65 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
             }
         },
     );
+}
+
+/// An app bundle (the app itself, not one of its files).
+fn is_app_bundle(p: &Path) -> bool {
+    p.extension().is_some_and(|e| e.eq_ignore_ascii_case("app"))
+}
+
+/// What to do when the app itself stayed, by the reason it stayed.
+pub fn app_kept_help(why: &str) -> &'static str {
+    let w = why.to_lowercase();
+    if w.contains("password was not given") {
+        "Uninstall it again and enter the administrator password when macOS asks."
+    } else if w.contains("refused") || w.contains("not permitted") || w.contains("permission") {
+        "macOS protects this app. Drag it to the Trash in Finder, or turn on CleanCraft in System Settings > Privacy & Security > App Management, then uninstall it again."
+    } else if w.contains("running") || w.contains("in use") || w.contains("open") {
+        "Quit it, then uninstall it again."
+    } else {
+        "It is still installed. Uninstall it again, or drag it to the Trash in Finder."
+    }
+}
+
+/// The System Settings pane that lets an app change other apps (macOS 13 and later).
+pub const APP_MANAGEMENT_URL: &str =
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_AppBundles";
+
+/// The ways forward for an app that stayed: Show in Finder (to drag it to the Trash) and,
+/// when macOS refused the move, App Management in System Settings.
+fn kept_app_buttons(app: &mut CleanApp, ui: &mut Ui, p: &Path, why: &str) {
+    let t = app.t;
+    let name = app_name(p);
+    let r = kit::pill(
+        ui,
+        &t,
+        "Show in Finder",
+        kit::Kind::Secondary,
+        Some(Icon::Folder),
+    );
+    r.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            true,
+            format!("Show {name} in Finder"),
+        )
+    });
+    if r.clicked() {
+        app.act();
+        let shown = app.env.display(p);
+        if let Err(e) = app.env.sys.spawn("/usr/bin/open", &["-R", &shown]) {
+            app.warn(format!("Could not open Finder: {e}"));
+        }
+    }
+    if app_kept_help(why).contains("App Management")
+        && kit::secondary(ui, &t, "Open App Management Settings")
+    {
+        app.act();
+        if let Err(e) = app.env.sys.open_url(APP_MANAGEMENT_URL) {
+            app.warn(format!("Could not open System Settings: {e}"));
+        }
+    }
 }
 
 // ---------- several apps: review, confirmation, result ----------
@@ -3583,9 +3656,13 @@ fn batch_done(app: &mut CleanApp, ui: &mut Ui) {
         kit::done_hero(ui, &t, FeatureId::Uninstaller, d, started);
         ui.add_space(space::M);
         ui.label(
-            RichText::new(features::moved_text([&rep]))
-                .font(font(size::LARGE_TITLE, Weight::Bold))
-                .color(t.text),
+            RichText::new(if removed == 0 {
+                "No app was uninstalled".to_string()
+            } else {
+                features::moved_text([&rep])
+            })
+            .font(font(size::LARGE_TITLE, Weight::Bold))
+            .color(t.text),
         );
         ui.add_space(space::XS);
         ui.label(
@@ -3765,6 +3842,26 @@ fn result_row(
             }
         });
     });
+    // The app itself stayed: what to do next, in full (fix7).
+    if !undone
+        && !r.removed
+        && let Some((_, why)) = r.skipped.iter().find(|(p, _)| is_app_bundle(p))
+    {
+        ui.horizontal(|ui| {
+            ui.add_space(42.0);
+            ui.add(
+                egui::Label::new(
+                    RichText::new(format!(
+                        "Still installed. {}",
+                        app_kept_help(&why.to_string())
+                    ))
+                    .font(font(size::FOOTNOTE, Weight::Medium))
+                    .color(t.warning),
+                )
+                .wrap(),
+            );
+        });
+    }
     for (p, why) in &r.skipped {
         ui.horizontal(|ui| {
             ui.add_space(42.0);
@@ -3870,6 +3967,7 @@ fn updates_page(app: &mut CleanApp, ui: &mut Ui) {
                 covers: super::covers(FeatureId::Updater),
                 action: "Check for Updates",
                 note: "CleanCraft asks each app's update feed and the App Store, then hands the update to the app or the App Store.",
+                enabled: true,
             },
             |_| {},
         ) {

@@ -7,7 +7,8 @@
 //!   system does not know only loses that value).
 //! - `/usr/bin/top -l 2 -n 0 -s 1` for the CPU load (the second sample covers the last second).
 //!   When it fails, the load is the sum of `ps` CPU shares divided by the number of cores.
-//! - `/bin/ps -axco pid=,%cpu=,rss=,comm=` for the top apps by CPU and by memory.
+//! - `/bin/ps -axo pid=,%cpu=,rss=,comm=` for the top apps by CPU and by memory (comm is the
+//!   executable's path, its last part is the name).
 //! - `/usr/bin/vm_stat` for memory use (page size from its header).
 //! - `/bin/df -Pk <home>` for the startup disk, `~/.Trash` walked with [`tree_size`].
 //! - `/usr/bin/pmset -g batt` and `/usr/sbin/ioreg -rn AppleSmartBattery` for the battery.
@@ -58,6 +59,9 @@ pub struct AppUse {
     pub cpu: f64,
     /// Resident memory in bytes.
     pub memory: u64,
+    /// The executable's path when `ps` gave one (it tells which app a helper belongs to).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -310,8 +314,9 @@ pub fn parse_top_cpu(stdout: &str) -> Option<(f64, f64, f64)> {
     Some(((100.0 - idle).clamp(0.0, 100.0), user, sys))
 }
 
-/// `ps -axco pid=,%cpu=,rss=,comm=` lines: "  512  12.3  204800 Safari". rss is in KiB.
-/// The name is the rest of the line and may contain spaces.
+/// `ps -axo pid=,%cpu=,rss=,comm=` lines: "  512  12.3  204800
+/// /Applications/Safari.app/Contents/MacOS/Safari" (or a bare name, "Safari"). rss is in KiB.
+/// The command is the rest of the line and may contain spaces; the name is its last part.
 pub fn parse_ps_usage(stdout: &str) -> Option<Vec<AppUse>> {
     let mut out = Vec::new();
     for l in stdout.lines() {
@@ -333,11 +338,25 @@ pub fn parse_ps_usage(stdout: &str) -> Option<Vec<AppUse>> {
             let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
             rest = &rest[end..];
         }
+        let comm = rest.trim();
+        let (name, path) = if comm.starts_with('/') {
+            let n = comm.rsplit('/').next().unwrap_or(comm);
+            (n.to_string(), Some(comm.to_string()))
+        } else {
+            // "(kernel_task)": a name in brackets when ps cannot read the path.
+            (
+                comm.trim_start_matches('(')
+                    .trim_end_matches(')')
+                    .to_string(),
+                None,
+            )
+        };
         out.push(AppUse {
             pid,
-            name: rest.trim().to_string(),
+            name,
             cpu,
             memory: rss * 1024,
+            path,
         });
     }
     (!out.is_empty()).then_some(out)
@@ -610,7 +629,7 @@ impl Sampler {
         }
 
         // Processes.
-        let apps = match run_text(env, "/bin/ps", &["-axco", "pid=,%cpu=,rss=,comm="]) {
+        let apps = match run_text(env, "/bin/ps", &["-axo", "pid=,%cpu=,rss=,comm="]) {
             Ok(s) => match parse_ps_usage(&s) {
                 Some(a) => Some(a),
                 None => {

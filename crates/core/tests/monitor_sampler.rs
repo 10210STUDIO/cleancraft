@@ -67,7 +67,7 @@ fn full_snapshot_from_tools() {
     for c in [
         format!("/usr/sbin/sysctl {}", SYSCTL_KEYS.join(" ")),
         "/usr/bin/top -l 2 -n 0 -s 1".into(),
-        "/bin/ps -axco pid=,%cpu=,rss=,comm=".into(),
+        "/bin/ps -axo pid=,%cpu=,rss=,comm=".into(),
         "/usr/bin/vm_stat".into(),
         format!("/bin/df -Pk {home}"),
         "/usr/bin/pmset -g batt".into(),
