@@ -233,6 +233,7 @@ fn start_updates(app: &mut CleanApp) {
         updater::check_all(&env, &list, &|n| status(n))
     });
     app.apps.upd_job = Some(job);
+    crate::sound::play(&app.env, crate::sound::Cue::ScanStart);
 }
 
 /// Open an app's detail with a fresh plan.
@@ -413,6 +414,7 @@ pub fn poll(app: &mut CleanApp) -> bool {
         if let Some(r) = job.poll() {
             st.upd_job = None;
             st.updates = Some(r);
+            crate::sound::play(&app.env, crate::sound::Cue::ScanDone);
         } else if job.is_dead() {
             st.upd_job = None;
             st.error = Some("The update check stopped unexpectedly.".into());
@@ -433,6 +435,12 @@ pub fn poll(app: &mut CleanApp) -> bool {
     if let Some((r, action)) = finished {
         match r {
             Ok(rep) => {
+                let cue = if rep.moved.is_empty() && !rep.skipped.is_empty() {
+                    crate::sound::Cue::Error
+                } else {
+                    crate::sound::Cue::CleanDone
+                };
+                crate::sound::play(&app.env, cue);
                 app.apps.phase = Phase::Done(rep, action);
                 app.apps.pending = None;
                 // What moved leaves the lists and counts now; the slow look below confirms.
@@ -1283,7 +1291,8 @@ fn file_row(
     );
     // The whole path when either line had to be shortened.
     if name_s != name || folder_s != folder {
-        row.on_hover_text(&shown);
+        // Under the row (or above it at the bottom), never over its own text.
+        kit::row_tip(&row, r, &shown);
     }
     changed
 }
@@ -1872,14 +1881,9 @@ fn confirm_force(app: &mut CleanApp, ui: &mut Ui, name: &str) {
             "It stops at once, without asking to save. Work you have not saved in it is lost.",
         );
         ui.add_space(space::L);
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if kit::danger(ui, &t, "Force Quit") {
-                go = true;
-            }
-            if kit::secondary(ui, &t, "Cancel") {
-                close = true;
-            }
-        });
+        let (g, c) = kit::dialog_actions(ui, &t, "Force Quit", kit::Kind::Danger);
+        go = g;
+        close = c;
     });
     if resp.should_close() {
         close = true;
@@ -1975,18 +1979,13 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, action: Action) {
                 });
         });
         ui.add_space(space::L);
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let label = match app.settings.method {
-                Method::Trash => "Move to Trash",
-                Method::Quarantine | Method::AdminQuarantine => "Move to Quarantine",
-            };
-            if kit::danger(ui, &t, label) {
-                go = true;
-            }
-            if kit::secondary(ui, &t, "Cancel") {
-                close = true;
-            }
-        });
+        let label = match app.settings.method {
+            Method::Trash => "Move to Trash",
+            Method::Quarantine | Method::AdminQuarantine => "Move to Quarantine",
+        };
+        let (g, c) = kit::dialog_actions(ui, &t, label, kit::Kind::Danger);
+        go = g;
+        close = c;
     });
     if resp.should_close() {
         close = true;
@@ -2013,9 +2012,8 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
         Action::RemoveFiles => "",
     };
     let summary = format!(
-        "{what}{} moved. {} skipped.",
-        cleancraft_core::fsutil::items(rep.moved.len()),
-        rep.skipped.len()
+        "{what}{}",
+        kit::moved_summary(rep.moved.len(), rep.skipped.len())
     );
     super::plan_page::done_view(
         app,

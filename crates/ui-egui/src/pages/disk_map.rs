@@ -61,6 +61,8 @@ pub struct State {
     pub error: Option<String>,
     pub folder_text: String,
     pub disk: Option<DiskUse>,
+    /// The macOS folder dialog, while it is open.
+    pick: Option<Job<Result<Option<PathBuf>, String>>>,
     /// The action log as the trees reflect it: moves made on other pages update the map.
     watch: super::history::JournalWatch,
 }
@@ -125,6 +127,7 @@ fn start_map(app: &mut CleanApp, root: PathBuf, fresh: bool) {
         space::build(&root, &cancel, &|n, _| status(&format!("{n} files")))
     });
     app.disk_map.phase = Phase::Scanning(job);
+    crate::sound::play(&app.env, crate::sound::Cue::ScanStart);
 }
 
 /// Finish background work. Returns true while something runs.
@@ -143,6 +146,7 @@ pub fn poll(app: &mut CleanApp) -> bool {
                 } else if let Some(r) = st.root.clone() {
                     st.trees.insert(r, tree);
                     st.phase = Phase::Map;
+                    crate::sound::play(&app.env, crate::sound::Cue::ScanDone);
                 }
                 st.watch.prime(&app.env);
                 false
@@ -220,6 +224,7 @@ pub fn poll(app: &mut CleanApp) -> bool {
     };
     if let Some(m) = moved {
         app.files_moved(&m);
+        crate::sound::play(&app.env, crate::sound::Cue::CleanDone);
     }
     if came_back {
         app.files_back(&[]);
@@ -422,13 +427,17 @@ fn storage_bar(app: &mut CleanApp, ui: &mut Ui) {
                         .font(font(size::BODY, Weight::SemiBold))
                         .color(t.text),
                 );
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(
-                        RichText::new(format!("Selected: {}", human_size(sel)))
-                            .font(font(size::CALLOUT, Weight::Medium))
-                            .color(t.warning),
-                    );
-                });
+                // What the selection would free, only when something is selected (the
+                // bottom bar says "0 selected" otherwise).
+                if sel > 0 {
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.label(
+                            RichText::new(format!("Selected: {}", human_size(sel)))
+                                .font(font(size::CALLOUT, Weight::Medium))
+                                .color(t.warning),
+                        );
+                    });
+                }
             });
             if let (Some(u), Some(tot)) = (d.used, d.total)
                 && tot > 0
@@ -500,9 +509,49 @@ fn idle(app: &mut CleanApp, ui: &mut Ui) {
                 if (clicked || enter) && can {
                     folder_go = true;
                 }
+                let picking = app.disk_map.pick.is_some();
+                let ch = ui
+                    .add_enabled_ui(!picking, |ui| {
+                        kit::pill(ui, &t, "Choose Folder...", kit::Kind::Secondary, None)
+                    })
+                    .inner;
+                if ch
+                    .on_hover_text("Pick the folder to map in the macOS file dialog")
+                    .clicked()
+                    && !picking
+                {
+                    app.act();
+                    let env = app.env.clone();
+                    app.disk_map.pick = Some(Job::start(app.sync, move |_| {
+                        super::settings::choose_folder(&env, "Choose a folder to map")
+                    }));
+                }
             });
         },
     );
+    // The folder dialog answered: map that folder.
+    if let Some(job) = app.disk_map.pick.as_mut() {
+        if let Some(r) = job.poll() {
+            app.disk_map.pick = None;
+            match r {
+                Ok(Some(p)) => {
+                    app.disk_map.folder_text = app.env.display(&p);
+                    match space::parse_map_folder(&app.env, &app.disk_map.folder_text) {
+                        Ok(p) => start_map(app, p, false),
+                        Err(e) => app.disk_map.error = Some(e),
+                    }
+                    return;
+                }
+                Ok(None) => {}
+                Err(e) => app.disk_map.error = Some(e),
+            }
+        } else if job.is_dead() {
+            app.disk_map.pick = None;
+        } else {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(200));
+        }
+    }
     if folder_go {
         app.act();
         match space::parse_map_folder(&app.env, &app.disk_map.folder_text) {
@@ -1079,18 +1128,13 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
                 });
         });
         ui.add_space(theme::space::L);
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let label = match app.settings.method {
-                Method::Trash => "Move to Trash",
-                Method::Quarantine | Method::AdminQuarantine => "Move to Quarantine",
-            };
-            if kit::danger(ui, &t, label) {
-                go = true;
-            }
-            if kit::secondary(ui, &t, "Cancel") {
-                close = true;
-            }
-        });
+        let label = match app.settings.method {
+            Method::Trash => "Move to Trash",
+            Method::Quarantine | Method::AdminQuarantine => "Move to Quarantine",
+        };
+        let (g, c) = kit::dialog_actions(ui, &t, label, kit::Kind::Danger);
+        go = g;
+        close = c;
     });
     if go {
         app.act();

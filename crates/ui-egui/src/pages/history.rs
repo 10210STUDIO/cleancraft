@@ -14,6 +14,8 @@ pub struct State {
     pub records: Vec<ActionRecord>,
     /// The action log as it was when `records` were read.
     watch: JournalWatch,
+    /// Actions whose long item list is shown whole (by plan id).
+    pub expanded: std::collections::BTreeSet<String>,
 }
 
 impl State {
@@ -288,7 +290,14 @@ fn group_card(
                 });
             });
             ui.add_space(6.0);
-            for (k, r) in g.iter().enumerate() {
+            // A long action shows its first items and a way to see the rest.
+            let open = app.history.expanded.contains(&first.plan_id);
+            let shown = if g.len() > COLLAPSE_OVER && !open {
+                COLLAPSE_TO
+            } else {
+                g.len()
+            };
+            for (k, r) in g.iter().take(shown).enumerate() {
                 if k > 0 {
                     let y = ui.cursor().min.y;
                     ui.painter().hline(
@@ -299,8 +308,30 @@ fn group_card(
                 }
                 record_row(app, ui, r, now);
             }
+            if g.len() > COLLAPSE_OVER {
+                ui.horizontal(|ui| {
+                    ui.add_space(36.0);
+                    let label = if open {
+                        "Show Fewer".to_string()
+                    } else {
+                        format!("Show All {} Items", g.len())
+                    };
+                    if kit::ghost(ui, &t, &label, None).clicked() {
+                        app.act();
+                        if open {
+                            app.history.expanded.remove(&first.plan_id);
+                        } else {
+                            app.history.expanded.insert(first.plan_id.clone());
+                        }
+                    }
+                });
+            }
         });
 }
+
+/// An action with more items than this shows only the first [`COLLAPSE_TO`] at first.
+const COLLAPSE_OVER: usize = 8;
+const COLLAPSE_TO: usize = 5;
 
 /// One record: its name and where it was (or the command), and Undo or "Put back".
 fn record_row(

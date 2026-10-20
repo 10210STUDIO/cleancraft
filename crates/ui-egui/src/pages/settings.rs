@@ -269,11 +269,12 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                         // reach; the whole path in the tooltip and for VoiceOver.
                         let fid = font(size::CALLOUT, Weight::Regular);
                         let room = (ui.available_width() - 120.0).max(80.0);
-                        let short = kit::truncate_middle(ui.ctx(), &shown, &fid, room);
+                        let seen = super::history::short_path(&app.env, p);
+                        let short = kit::truncate_middle(ui.ctx(), &seen, &fid, room);
                         let w = kit::galley(ui, &short, fid.clone(), t.text).size().x + 2.0;
                         let (pr, _) = ui.allocate_exact_size(vec2(w, 20.0), Sense::hover());
                         kit::text_at(ui, pr, &short, &shown, fid, t.text, egui::Align::Min)
-                            .on_hover_text(&shown);
+                            .on_hover_text(&seen);
                         let r = kit::ghost(ui, &t, "Remove", Some(Icon::Close));
                         r.widget_info(|| {
                             egui::WidgetInfo::labeled(
