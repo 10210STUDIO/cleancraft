@@ -713,7 +713,7 @@ impl Engine {
             kind: WatchKind::NeedsFullDiskAccess,
             title: "Trash watch needs Full Disk Access".into(),
             body: "macOS keeps the Trash private. Give CleanCraft Full Disk Access in System Settings to get an offer when you drag an app to the Trash.".into(),
-            open: AppRoute::Settings,
+            open: AppRoute::FullDiskAccess,
             time: now,
             paths: vec![self.env.user_trash()],
         })
@@ -1004,7 +1004,7 @@ impl Engine {
                 reasons.join("; ")
             ),
             title,
-            open: AppRoute::Scan(FeatureId::Malware),
+            open: AppRoute::ThreatReview(p.to_path_buf()),
             name: it.label,
             count: 1,
             bytes: 0,
@@ -1032,7 +1032,7 @@ impl Engine {
             path: p.to_path_buf(),
             title,
             body: format!("{}. Review it in Threat Check.", reasons.join("; ")),
-            open: AppRoute::Scan(FeatureId::Malware),
+            open: AppRoute::ThreatReview(p.to_path_buf()),
             name,
             count: 1,
             bytes: 0,

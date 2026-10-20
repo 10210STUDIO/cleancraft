@@ -159,6 +159,8 @@ pub struct CleanApp {
     journal: pages::history::JournalWatch,
     /// "Not Now" on the Full Disk Access banner (for this session).
     pub fda_dismissed: bool,
+    /// The Threat Check finding a route asked to select once the scan shows it.
+    pub pending_threat: Option<std::path::PathBuf>,
     /// What Mac Health has noted already: scans (by plan id and what is left), the last
     /// Disk Map tree, the last update check, and whether launch work ran.
     observed: Observed,
@@ -224,6 +226,7 @@ impl CleanApp {
             last_moved: Vec::new(),
             journal: Default::default(),
             fda_dismissed: false,
+            pending_threat: None,
             observed: Observed::default(),
             now: 0.0,
             window_hidden: false,
@@ -287,7 +290,8 @@ impl CleanApp {
             AppRoute::Feature(f) | AppRoute::Scan(f) => Page::Feature(*f),
             AppRoute::Health => Page::Health,
             AppRoute::History => Page::History,
-            AppRoute::Settings => Page::Settings,
+            AppRoute::Settings | AppRoute::FullDiskAccess => Page::Settings,
+            AppRoute::ThreatReview(_) => Page::Feature(FeatureId::Malware),
             AppRoute::AgentGuide => Page::AgentGuide,
             AppRoute::ConnectAi => Page::ConnectAi,
             AppRoute::UnusedApps | AppRoute::UninstallApp(_) => {
@@ -305,8 +309,19 @@ impl CleanApp {
                 }
             }
             AppRoute::UninstallApp(p) => {
-                let real = self.env.sys_path(&p.to_string_lossy());
+                let real = self.route_path(p);
                 pages::apps::open_app(self, &real);
+            }
+            AppRoute::ThreatReview(p) => {
+                self.pending_threat = Some(self.route_path(p));
+                self.start_scan_if_idle(FeatureId::Malware);
+                self.apply_pending_threat();
+            }
+            AppRoute::FullDiskAccess => {
+                // Read it again: it may have been granted since launch.
+                self.fda = permissions::full_disk_access(&self.env);
+                self.fda_dismissed = false;
+                self.settings_page.focus_fda = true;
             }
             AppRoute::ConnectAi => pages::welcome::refresh(self),
             AppRoute::Health => pages::health::refresh_if_old(self),
@@ -314,9 +329,61 @@ impl CleanApp {
         }
     }
 
+    /// A path from a route: the agent and the watchers send paths as they found them (already
+    /// on this Mac, or inside the fake Mac of the tests); a typed route names a macOS path.
+    fn route_path(&self, p: &std::path::Path) -> std::path::PathBuf {
+        if std::fs::symlink_metadata(p).is_ok() {
+            p.to_path_buf()
+        } else {
+            self.env.sys_path(&p.to_string_lossy())
+        }
+    }
+
+    /// Select the finding a "Threat Check with this finding" route named, once Threat Check
+    /// shows its results. Selecting only ticks the item for review; nothing is removed.
+    fn apply_pending_threat(&mut self) {
+        let Some(path) = self.pending_threat.clone() else {
+            return;
+        };
+        if self.plan_state(FeatureId::Malware).is_busy() {
+            return;
+        }
+        self.pending_threat = None;
+        let st = self.plan_state(FeatureId::Malware);
+        let Some(plan) = st.plan.as_mut() else {
+            return;
+        };
+        let found = cleancraft_core::watch::preselect_threat(plan, &path);
+        if let Some(i) = found {
+            st.category = None;
+            let it = &plan.items[i];
+            let name = it
+                .path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let msg = match &it.locked {
+                Some(why) => format!("{name} is listed but cannot be selected: {why}"),
+                None => format!(
+                    "{name} is selected for review. Read why it was found before you remove anything."
+                ),
+            };
+            self.tell(msg);
+        } else {
+            let shown = self.env.display(&path);
+            self.tell(format!(
+                "Threat Check did not list {shown} this time: it may be gone or fixed already."
+            ));
+        }
+    }
+
     /// Start a module's scan unless it is scanning or shows results the person may be
     /// reviewing (those stay; Scan Again is on the page).
     fn start_scan_if_idle(&mut self, f: FeatureId) {
+        if f == FeatureId::SmartCare {
+            pages::sweep::start_scan_if_idle(self);
+            return;
+        }
         // Pages with their own lists load them; plan pages scan (Quick Sweep, Tune-up,
         // Startup Items, Disk Map and Live Monitor keep their own start buttons).
         if matches!(f, FeatureId::Uninstaller | FeatureId::Updater) {
@@ -599,6 +666,9 @@ impl CleanApp {
         let ids: Vec<FeatureId> = self.plans.keys().copied().collect();
         for f in ids {
             busy |= pages::plan_page::poll(self, f);
+        }
+        if self.pending_threat.is_some() {
+            self.apply_pending_threat();
         }
         busy |= pages::sweep::poll(self);
         busy |= pages::apps::poll(self);

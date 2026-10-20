@@ -29,11 +29,17 @@ pub enum AppRoute {
     /// App Remover on one app (its files listed for review), e.g. after the app was dragged
     /// to the Trash.
     UninstallApp(PathBuf),
+    /// Threat Check with one finding (a startup item's property list or an app) selected for
+    /// review; the scan starts when nothing is shown yet. Selecting never removes anything.
+    ThreatReview(PathBuf),
+    /// Where to turn on Full Disk Access (Settings, its Full Disk Access group).
+    FullDiskAccess,
 }
 
 impl AppRoute {
     /// The string form: "system_junk", "scan:system_junk", "health", "history", "settings",
-    /// "guide:ai_agents", "unused_apps", "uninstall:/Applications/X.app".
+    /// "guide:ai_agents", "unused_apps", "uninstall:/Applications/X.app",
+    /// "threat:/Library/LaunchAgents/x.plist", "full_disk_access".
     pub fn to_arg(&self) -> String {
         match self {
             AppRoute::Feature(f) => f.as_str().to_string(),
@@ -45,6 +51,8 @@ impl AppRoute {
             AppRoute::UnusedApps => "unused_apps".into(),
             AppRoute::ConnectAi => "connect_ai".into(),
             AppRoute::UninstallApp(p) => format!("uninstall:{}", p.display()),
+            AppRoute::ThreatReview(p) => format!("threat:{}", p.display()),
+            AppRoute::FullDiskAccess => "full_disk_access".into(),
         }
     }
 
@@ -59,6 +67,11 @@ impl AppRoute {
                 && !crate::env::has_parent_component(&p);
             return ok.then_some(AppRoute::UninstallApp(p));
         }
+        if let Some(path) = s.strip_prefix("threat:") {
+            let p = PathBuf::from(path.trim());
+            let ok = p.is_absolute() && !crate::env::has_parent_component(&p);
+            return ok.then_some(AppRoute::ThreatReview(p));
+        }
         if let Some(f) = s.strip_prefix("scan:") {
             return FeatureId::parse(f).map(AppRoute::Scan);
         }
@@ -69,6 +82,7 @@ impl AppRoute {
             "guide:ai_agents" | "ai_agents_guide" | "guide" => Some(AppRoute::AgentGuide),
             "unused_apps" => Some(AppRoute::UnusedApps),
             "connect_ai" | "welcome" => Some(AppRoute::ConnectAi),
+            "full_disk_access" | "fda" => Some(AppRoute::FullDiskAccess),
             other => FeatureId::parse(other).map(AppRoute::Feature),
         }
     }
@@ -88,6 +102,8 @@ mod tests {
             AppRoute::UnusedApps,
             AppRoute::ConnectAi,
             AppRoute::UninstallApp(PathBuf::from("/Applications/Editor.app")),
+            AppRoute::ThreatReview(PathBuf::from("/Library/LaunchAgents/com.x.helper.plist")),
+            AppRoute::FullDiskAccess,
         ];
         for f in FeatureId::ALL {
             all.push(AppRoute::Feature(f));
@@ -103,6 +119,8 @@ mod tests {
         assert_eq!(AppRoute::parse("nowhere"), None);
         assert_eq!(AppRoute::parse("scan:nowhere"), None);
         assert_eq!(AppRoute::parse("uninstall:relative/X.app"), None);
+        assert_eq!(AppRoute::parse("threat:relative/x.plist"), None);
+        assert_eq!(AppRoute::parse("threat:/Library/../etc/x.plist"), None);
         assert_eq!(AppRoute::parse("uninstall:/Applications/notes.txt"), None);
         assert_eq!(
             AppRoute::parse("uninstall:/Applications/../etc/X.app"),
