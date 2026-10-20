@@ -57,11 +57,7 @@ pub struct State {
 impl State {
     /// Ask for the tile of `id` to be scanned again (when there are results showing it).
     pub fn refresh_tile(&mut self, id: FeatureId) {
-        if self
-            .result
-            .as_ref()
-            .is_some_and(|r| r.tile(id).is_some())
-            && !self.refresh.contains(&id)
+        if self.result.as_ref().is_some_and(|r| r.tile(id).is_some()) && !self.refresh.contains(&id)
         {
             self.refresh.push(id);
         }
@@ -430,7 +426,8 @@ fn results(app: &mut CleanApp, ui: &mut Ui) {
                     for (j, tile) in chunk.iter().enumerate() {
                         let (k, _) = kit::appear(ui, ("sweep-tiles", &key), i * per_row + j);
                         ui.scope(|ui| {
-                            ui.multiply_opacity(k);
+                            // Present from the first frame, fading up (REVIEW-C C10).
+                            ui.multiply_opacity(0.3 + 0.7 * k);
                             tile_ui(app, ui, tile, tile_w, tile_h);
                         });
                     }
@@ -612,8 +609,8 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile, w: f32, tile_h: 
         controls,
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
-            if empty {
-                // Nothing to review: look at this one module again (REVIEW-U N1).
+            if empty && cleaned {
+                // Cleaned since the scan: look at this one module again (REVIEW-U N1).
                 let r = kit::secondary_resp(ui, &t, "Scan Again");
                 r.widget_info(|| {
                     egui::WidgetInfo::labeled(

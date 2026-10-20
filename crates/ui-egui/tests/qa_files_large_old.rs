@@ -41,6 +41,8 @@ fn downloads_scan_select_clean_undo() {
     // The tool sits in the "Files" section of the sidebar.
     click(&mut h, "Files");
     click(&mut h, "Large & Old Files");
+    // The places are in the "Where to look" pop-up (REVIEW-C C38).
+    click(&mut h, "Home folder");
     click(&mut h, "Downloads");
     assert!(has(&h, "Looking in: Downloads"));
     assert_eq!(
@@ -84,6 +86,8 @@ fn typed_folder_checked_with_enter_and_esc() {
     // The tool sits in the "Files" section of the sidebar.
     click(&mut h, "Files");
     click(&mut h, "Large & Old Files");
+    // The places are in the "Where to look" pop-up (REVIEW-C C38).
+    click(&mut h, "Home folder");
     click(&mut h, "Another folder");
     type_into(&mut h, "Folder path", "~/Documents");
     click(&mut h, "Use Folder");
@@ -96,6 +100,7 @@ fn typed_folder_checked_with_enter_and_esc() {
     assert!(!has(&h, "Folder path"));
     assert!(!has_text(&h, "is protected"));
     // Enter confirms a good folder.
+    click(&mut h, "Home folder");
     click(&mut h, "Another folder");
     type_into(&mut h, "Folder path", "~/Work");
     h.key_press(egui::Key::Enter);
@@ -130,6 +135,7 @@ fn downloads_by_source_app() {
     // The tool sits in the "Files" section of the sidebar.
     click(&mut h, "Files");
     click(&mut h, "Large & Old Files");
+    click(&mut h, "Home folder");
     click(&mut h, "Downloads by source app");
     click(&mut h, "Scan");
     let safari = tree_size(&a).0 + tree_size(&b).0;

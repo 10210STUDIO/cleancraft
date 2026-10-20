@@ -380,6 +380,13 @@ fn ignore_and_history_survive_a_restart() {
     click(&mut h, "History");
     let moved = executor::history(&mac.env);
     assert!(!moved.is_empty());
+    // The files of a cleanup wait behind a disclosure next to Undo All (fix5).
+    if moved.len() > 1 {
+        click(
+            &mut h,
+            &format!("Show {} items of System Junk", moved.len()),
+        );
+    }
     click_nth(&mut h, "Undo", 0);
     assert!(has(&h, "Put back."));
     let undone = executor::history(&mac.env)

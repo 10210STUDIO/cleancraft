@@ -133,16 +133,33 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             }
             ui.add_space(2.0);
             ui.spacing_mut().item_spacing.x = space::GUTTER;
-            // Three columns that stack their cards, so no column ends in a hole.
+            // Three columns that stack their cards; the last card of each column grows so
+            // the three end level (REVIEW-C C25), by what was missing on the frame before.
+            let key = egui::Id::new("monitor-col-extra");
+            let extra: [f32; 3] = ui.data(|d| d.get_temp(key)).unwrap_or([0.0; 3]);
+            let mut bottoms = [0.0f32; 3];
             ui.columns(3, |cols| {
+                cols[0].data_mut(|d| d.insert_temp(extra_id(), extra[0]));
                 cpu_card(app, &mut cols[0], &snap);
                 memory_card(app, &mut cols[1], &snap);
                 cols[1].add_space(space::GUTTER - 8.0);
+                cols[1].data_mut(|d| d.insert_temp(extra_id(), extra[1]));
                 network_card(app, &mut cols[1], &snap);
                 storage_card(app, &mut cols[2], &snap);
                 cols[2].add_space(space::GUTTER - 8.0);
+                cols[2].data_mut(|d| d.insert_temp(extra_id(), extra[2]));
                 battery_card(app, &mut cols[2], &snap);
+                for (i, c) in cols.iter().enumerate() {
+                    bottoms[i] = c.min_rect().bottom() - extra[i];
+                }
             });
+            let low = bottoms.iter().copied().fold(f32::MIN, f32::max);
+            let want = bottoms.map(|b| (low - b).max(0.0).round());
+            if want.iter().zip(extra).any(|(a, b)| (a - b).abs() > 0.5) {
+                ui.data_mut(|d| d.insert_temp(key, want));
+                // Next frame (a discarded pass would take another reading).
+                ui.ctx().request_repaint();
+            }
             if !snap.problems.is_empty() {
                 ui.add_space(8.0);
                 kit::dim(ui, &t, &format!("Not read: {}", snap.problems.join("; ")));
@@ -165,7 +182,17 @@ fn card(app: &CleanApp, ui: &mut Ui, icon: Icon, title: &str, add: impl FnOnce(&
             kit::card_head(ui, &t, icon, t.sec_a, title);
             ui.add_space(2.0);
             add(ui);
+            // The room that makes its column end level with the others (set by the page).
+            let extra: f32 = ui.data_mut(|d| d.remove_temp(extra_id())).unwrap_or(0.0);
+            if extra > 0.0 {
+                ui.add_space(extra);
+            }
         });
+}
+
+/// Extra height for the next card drawn (the last of its column).
+fn extra_id() -> egui::Id {
+    egui::Id::new("monitor-card-extra")
 }
 
 fn big(app: &CleanApp, ui: &mut Ui, text: &str) {
@@ -360,7 +387,7 @@ fn memory_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
             ui.horizontal(|ui| {
                 if kit::pill(ui, &t, "Free Up RAM", kit::Kind::Secondary, None)
                     .on_hover_text(
-                        "Clear memory macOS keeps as disk cache (asks for your password)",
+                        "Clear memory macOS keeps as disk cache (asks for your password). The same as the Free up RAM task in Tune-up, and logged in History the same way.",
                     )
                     .clicked()
                 {
@@ -378,37 +405,51 @@ fn memory_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
 fn storage_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
     let t = app.t;
     let mut go = false;
-    card(app, ui, Icon::DiskMap, "Storage", |ui| {
-        let st = &s.storage;
-        match (st.free, st.total) {
-            (Some(free), Some(total)) => {
-                big(app, ui, &format!("{} free", human_size(free)));
-                let w = ui.available_width();
-                let used = 1.0 - free as f32 / total.max(1) as f32;
-                kit::bar(ui, &t, used, level_color(app, used), w);
-                row(app, ui, "Disk size", &human_size(total));
-            }
-            _ => big(app, ui, UNKNOWN),
-        }
-        row(
-            app,
-            ui,
-            "Trash",
-            &st.trash.map(human_size).unwrap_or_else(|| UNKNOWN.into()),
-        );
-        if let Some(n) = &st.trash_note {
-            kit::dim(ui, &t, n);
-        }
-        ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            if kit::pill(ui, &t, "Free Up Space", kit::Kind::Secondary, None)
-                .on_hover_text("Open Quick Sweep to find what you can remove")
-                .clicked()
+    kit::card(&t)
+        .inner_margin(egui::Margin::same(18))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.spacing_mut().item_spacing.y = 8.0;
+            kit::card_head(ui, &t, Icon::DiskMap, t.sec_a, "Storage");
+            ui.add_space(2.0);
+            let st = &s.storage;
             {
-                go = true;
+                let a: &CleanApp = app;
+                match (st.free, st.total) {
+                    (Some(free), Some(total)) => {
+                        big(a, ui, &format!("{} free", human_size(free)));
+                        let w = ui.available_width();
+                        let used = 1.0 - free as f32 / total.max(1) as f32;
+                        kit::bar(ui, &t, used, level_color(a, used), w);
+                        row(a, ui, "Disk size", &human_size(total));
+                    }
+                    _ => big(a, ui, UNKNOWN),
+                }
+                row(
+                    a,
+                    ui,
+                    "Trash",
+                    &st.trash.map(human_size).unwrap_or_else(|| UNKNOWN.into()),
+                );
             }
+            if let Some(n) = &st.trash_note {
+                kit::dim(ui, &t, n);
+            }
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                if kit::pill(ui, &t, "Free Up Space", kit::Kind::Secondary, None)
+                    .on_hover_text("Open Quick Sweep to find what you can remove")
+                    .clicked()
+                {
+                    go = true;
+                }
+                // What waits in the Trash comes back with Finder's Empty Trash, right here
+                // (REVIEW-U U4, U22).
+                if st.trash.is_some_and(|b| b > 0) {
+                    super::extras_cleanup::empty_trash(app, ui, "Empty Trash...");
+                }
+            });
         });
-    });
     if go {
         app.act();
         app.navigate(FeatureId::SmartCare.as_str());

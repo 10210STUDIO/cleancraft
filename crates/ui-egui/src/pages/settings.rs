@@ -147,9 +147,17 @@ fn quarantine_line(app: &mut CleanApp, ui: &mut Ui) {
                 Err(e) => app.warn(format!("Could not open Finder: {e}")),
             }
         }
-        if kit::pill(ui, &t, MOVE_QUARANTINE, kit::Kind::Secondary, Some(Icon::Trash))
-            .on_hover_text("Move everything in the quarantine to the Trash. You can put it back from History.")
-            .clicked()
+        if kit::pill(
+            ui,
+            &t,
+            MOVE_QUARANTINE,
+            kit::Kind::Secondary,
+            Some(Icon::Trash),
+        )
+        .on_hover_text(
+            "Move everything in the quarantine to the Trash. You can put it back from History.",
+        )
+        .clicked()
         {
             app.act();
             app.settings_page.confirm_quarantine = true;
@@ -161,6 +169,9 @@ fn quarantine_line(app: &mut CleanApp, ui: &mut Ui) {
 }
 
 pub const MOVE_QUARANTINE: &str = "Move Quarantine to Trash...";
+
+/// The AI assistants switch, also its accessible name.
+pub const AGENTS_SWITCH: &str = "Let AI assistants clean after you confirm (MCP)";
 
 /// The confirmation, then the move, with Undo in the notice and in History.
 fn confirm_quarantine(app: &mut CleanApp, ui: &mut Ui, bytes: u64, items: usize) {
@@ -329,13 +340,17 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                 let mut m = app.settings.method;
                 for (value, text) in [
                     (Method::Trash, "The Trash (empty it yourself when you are sure)"),
-                    (
-                        Method::Quarantine,
-                        "CleanCraft quarantine (~/Library/Application Support/CleanCraft/Quarantine)",
-                    ),
+                    (Method::Quarantine, "CleanCraft quarantine"),
                 ] {
                     if kit::radio(ui, &t, m == value, text).clicked() {
                         m = value;
+                    }
+                    // Where the quarantine is, as a dim line under its choice (REVIEW-U U26).
+                    if value == Method::Quarantine {
+                        ui.horizontal(|ui| {
+                            ui.add_space(28.0);
+                            kit::dim(ui, &t, &app.env.display(&app.env.quarantine_dir()));
+                        });
                     }
                 }
                 if m != app.settings.method {
@@ -477,25 +492,26 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
             ui.add_space(space::M);
             kit::card(&t).show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                heading(ui, &t, Icon::Sweep, "AI agents");
-                if kit::check_text(
+                heading(ui, &t, Icon::Sweep, "AI assistants");
+                // A switch like the Sounds group, in plain words (REVIEW-U U26).
+                if switch_row(
                     ui,
                     &t,
-                    &mut app.settings.agents_may_clean,
-                    "Let AI agents (MCP) carry out confirmed cleanups",
-                )
-                .changed()
-                {
+                    app.settings.agents_may_clean,
+                    AGENTS_SWITCH,
+                    "Assistants",
+                ) {
+                    app.settings.agents_may_clean = !app.settings.agents_may_clean;
                     changed = true;
                 }
                 ui.horizontal(|ui| {
-                    ui.add_space(28.0);
+                    ui.add_space(272.0);
                     ui.add(
                         egui::Label::new(
                             RichText::new(if app.settings.agents_may_clean {
-                                "Agents can move the items of a plan you confirmed. Everything they move is in History, with Undo."
+                                "Assistants can move the items of a plan you confirmed. Everything they move is in History, with Undo."
                             } else {
-                                "Off: agents can scan and propose, but nothing moves unless you clean here."
+                                "Off: assistants can scan and propose, but nothing moves unless you clean here."
                             })
                             .font(font(size::FOOTNOTE, Weight::Regular))
                             .color(t.text_faint),

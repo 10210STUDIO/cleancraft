@@ -244,8 +244,7 @@ pub fn moved_text<'a>(reports: impl IntoIterator<Item = &'a Report>) -> String {
 }
 
 /// The line under [`moved_text`]: when the space really comes back.
-pub const SPACE_NOTE: &str =
-    "The space comes back when the Trash is emptied (the quarantine goes to the Trash from Settings).";
+pub const SPACE_NOTE: &str = "The space comes back when the Trash is emptied (the quarantine goes to the Trash from Settings).";
 
 /// Every plan-based feature, in sidebar order.
 pub fn registry() -> Vec<Box<dyn Feature>> {

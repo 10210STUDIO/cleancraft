@@ -80,7 +80,10 @@ fn quarantine_goes_to_the_trash_and_nothing_is_deleted() {
         assert!(original(r).starts_with(m.env.quarantine_dir()));
         assert!(r.feature.is_none());
     }
-    assert_eq!(in_trash_bytes, bytes, "every byte still exists, in the Trash");
+    assert_eq!(
+        in_trash_bytes, bytes,
+        "every byte still exists, in the Trash"
+    );
     // The cleanup's records now point at the Trash, so its Undo still works.
     for r in &clean.moved {
         let now = record(&m, &r.id);
@@ -145,7 +148,10 @@ fn an_item_that_cannot_move_stays_in_the_quarantine() {
     m.env.inject_fault(&items[0], Fault::PermissionDenied);
     let rep = move_quarantine_to_trash(&m.env, &mut |_, _| {}).unwrap();
     assert_eq!(rep.skipped.len(), 1);
-    assert_eq!(rep.skipped[0], (items[0].clone(), SkipReason::PermissionDenied));
+    assert_eq!(
+        rep.skipped[0],
+        (items[0].clone(), SkipReason::PermissionDenied)
+    );
     assert_eq!(rep.moved.len(), items.len() - 1);
     assert_eq!(quarantine_items(&m.env), vec![items[0].clone()]);
 }

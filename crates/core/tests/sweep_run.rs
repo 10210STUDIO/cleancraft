@@ -217,11 +217,23 @@ fn scan_one_brings_a_single_tile_up_to_date() {
     let old = trash(&before.tile(FeatureId::TrashBins).unwrap().data);
     // Something lands in the Trash after the sweep scanned (a module cleanup).
     let new = m.home_file(".Trash/new.zip", 300_000);
-    let one = |id| sweep::scan_one(&m.env, &Settings::default(), &s, id, &AtomicBool::new(false), &|_| {});
+    let one = |id| {
+        sweep::scan_one(
+            &m.env,
+            &Settings::default(),
+            &s,
+            id,
+            &AtomicBool::new(false),
+            &|_| {},
+        )
+    };
     let fresh = one(FeatureId::TrashBins).expect("the Trash is a source");
     assert_eq!(trash(&fresh), old + tree_size(&new).0);
     // Count modules and failing modules answer too; an unknown module has no tile.
-    assert!(matches!(one(FeatureId::Updater), Some(TileData::Count { count: 3, .. })));
+    assert!(matches!(
+        one(FeatureId::Updater),
+        Some(TileData::Count { count: 3, .. })
+    ));
     assert!(matches!(one(FeatureId::Malware), Some(TileData::Failed(_))));
     assert!(one(FeatureId::Duplicates).is_none());
     // The sweep itself is unchanged: same tiles in the same order.

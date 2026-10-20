@@ -61,7 +61,8 @@ fn duplicate_sets_keep_one_copy() {
     click(&mut h, "Scan");
     let sa = tree_size(&a_dl).0;
     let sb = tree_size(&b1).0;
-    assert!(has(&h, &human_size(3 * sa + 2 * sb)), "total");
+    // REVIEW-C C39: the headline counts what can go, every copy but the kept one.
+    assert!(has(&h, &human_size(2 * sa + sb)), "total");
     assert!(has(
         &h,
         &format!(

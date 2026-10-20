@@ -541,7 +541,15 @@ pub fn apply(ctx: &egui::Context, t: &Tokens) {
         // Static text keeps the arrow, as in Mac apps (no I-beam over every label).
         style.interaction.selectable_labels = false;
         // Overlay scroll bars that show while scrolling or hovered, like macOS (REVIEW-C C35).
-        style.spacing.scroll = egui::style::ScrollStyle::floating();
+        // Nothing at rest; over the list only a faint thin handle (no track), the full bar
+        // when the pointer is on it.
+        style.spacing.scroll = egui::style::ScrollStyle {
+            dormant_background_opacity: 0.0,
+            dormant_handle_opacity: 0.0,
+            active_background_opacity: 0.0,
+            active_handle_opacity: 0.35,
+            ..egui::style::ScrollStyle::floating()
+        };
         style.text_styles = [
             (TextStyle::Small, font(size::FOOTNOTE, Weight::Regular)),
             (TextStyle::Body, font(size::BODY, Weight::Regular)),

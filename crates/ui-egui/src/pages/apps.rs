@@ -723,6 +723,42 @@ fn group_count(st: &State, g: Group) -> (usize, u64) {
 
 fn browse(app: &mut CleanApp, ui: &mut Ui) {
     let t = app.t;
+    // The headline every results page has (REVIEW-C C20): what the apps take, how many,
+    // and Scan Again on the right.
+    let (n_apps, apps_size) = group_count(&app.apps, Group::All);
+    let loading = app.apps.load.is_some();
+    ui.horizontal_top(|ui| {
+        kit::display_count(ui, &t, "apps-total", apps_size);
+        ui.add_space(4.0);
+        ui.vertical(|ui| {
+            ui.add_space(kit::baseline_offset(size::DISPLAY, size::TITLE3));
+            ui.label(
+                RichText::new(if n_apps == 1 {
+                    "in 1 app".to_string()
+                } else {
+                    format!("in {n_apps} apps")
+                })
+                .font(font(size::TITLE3, Weight::Medium))
+                .color(t.text_dim),
+            );
+        });
+        ui.allocate_ui_with_layout(
+            vec2(ui.available_width(), kit::DISPLAY_ROW_H),
+            Layout::right_to_left(Align::Center),
+            |ui| {
+                if loading {
+                    let (r, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
+                    let time = ui.input(|i| i.time);
+                    kit::progress_ring(ui.painter(), r.center(), 16.0, &t, time);
+                    ui.ctx().request_repaint();
+                } else if kit::secondary(ui, &t, "Scan Again") {
+                    app.act();
+                    start_load(app);
+                }
+            },
+        );
+    });
+    ui.add_space(space::M);
     // Toolbar.
     ui.horizontal(|ui| {
         let r = kit::search_field(ui, &t, &mut app.apps.search, "Search apps", 240.0);
@@ -752,18 +788,6 @@ fn browse(app: &mut CleanApp, ui: &mut Ui) {
             app.act();
             app.apps.sort = sort;
         }
-        let loading = app.apps.load.is_some();
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if loading {
-                let (r, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
-                let time = ui.input(|i| i.time);
-                kit::progress_ring(ui.painter(), r.center(), 16.0, &t, time);
-                ui.ctx().request_repaint();
-            } else if kit::secondary(ui, &t, "Scan Again") {
-                app.act();
-                start_load(app);
-            }
-        });
     });
     if app.apps.selected.is_some() {
         return;
@@ -880,9 +904,9 @@ fn apps_list(app: &mut CleanApp, ui: &mut Ui, h: f32) {
             &t,
             Icon::Search,
             if searching {
-                "No app matches your search."
+                "No app matches your search"
             } else {
-                "No apps here."
+                "No apps here"
             },
             if searching {
                 "Search looks at app names, developers and bundle ids."
@@ -1024,9 +1048,9 @@ fn files_list(app: &mut CleanApp, ui: &mut Ui, h: f32) {
             &t,
             if searching { Icon::Search } else { Icon::Check },
             if searching {
-                "No file matches your search."
+                "No file matches your search"
             } else {
-                "Nothing here."
+                "Nothing found"
             },
             if searching {
                 "Try another word, or clear the search box."
@@ -1065,19 +1089,10 @@ fn files_list(app: &mut CleanApp, ui: &mut Ui, h: f32) {
 }
 
 /// A centred empty state: a badge, a line, and what to do about it.
+/// The one empty state of the app (REVIEW-C C30), with the room above it these lists use.
 fn empty_state(ui: &mut Ui, t: &crate::theme::Tokens, icon: Icon, title: &str, hint: &str) {
-    ui.add_space(space::XXL);
-    ui.vertical_centered(|ui| {
-        kit::badge(ui, t.sec_a, icon, 56.0);
-        ui.add_space(space::M);
-        ui.label(
-            RichText::new(title)
-                .font(font(size::TITLE3, Weight::SemiBold))
-                .color(t.text),
-        );
-        ui.add_space(space::XS);
-        kit::dim(ui, t, hint);
-    });
+    ui.add_space(space::L);
+    kit::empty_state(ui, t, icon, title, hint);
     ui.add_space(space::S);
 }
 
@@ -1319,22 +1334,19 @@ fn files_bottom_bar(app: &mut CleanApp, ui: &mut Ui) {
         .map(|p| (p.selected_count(), p.selected_size()))
         .unwrap_or((0, 0));
     kit::bottom_bar(ui, &t, egui::Id::new("apps-files-bottom"), |ui| {
-        ui.label(
-            RichText::new(human_size(size))
-                .font(font(size::TITLE2, Weight::Bold))
-                .color(t.text),
-        );
-        kit::quiet_label(
+        kit::bar_figure(
             ui,
             &t,
+            &human_size(size),
             &format!("{} selected", cleancraft_core::fsutil::items(n)),
             &format!("{n} selected, {}", human_size(size)),
+            false,
         );
-        if n == 0 {
-            ui.add_space(space::S);
-            kit::dim(ui, &t, "Tick files to remove them.");
-        }
+        ui.add_space(space::M);
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if n == 0 {
+                kit::bar_hint(ui, &t, "Tick files to remove them.");
+            }
             if n > 0 && kit::danger(ui, &t, "Remove Selected") {
                 app.act();
                 app.apps.pending = app.apps.extras.clone();
@@ -1469,35 +1481,26 @@ fn detail(app: &mut CleanApp, ui: &mut Ui) {
         .filter(|i| i.category != uninstaller::CAT_APP)
         .count();
     kit::bottom_bar(ui, &t, egui::Id::new("apps-detail-bottom"), |ui| {
-        let hint = block.is_none() && files_sel == 0;
-        ui.allocate_ui_with_layout(
-            vec2(320.0, 44.0),
-            egui::Layout::top_down(Align::Min),
-            |ui| {
-                ui.spacing_mut().item_spacing.y = 1.0;
-                // Centred on the bar's line, with or without the hint under it.
-                let two = hint || block.is_some();
-                ui.add_space(if two { 2.0 } else { 12.0 });
-                ui.label(
-                    RichText::new(format!(
-                        "{} selected, {}",
-                        plan.selected_count(),
-                        human_size(plan.selected_size())
-                    ))
-                    .font(font(size::BODY, Weight::SemiBold))
-                    .color(if block.is_some() { t.text_dim } else { t.text }),
-                );
-                match &block {
-                    Some(Block::Running) => {
-                        kit::dim(ui, &t, &format!("Quit {name} to choose what to remove."))
-                    }
-                    Some(Block::System(_)) => kit::dim(ui, &t, "macOS keeps this app."),
-                    Some(Block::Ignored(_)) => kit::dim(ui, &t, "On your ignore list."),
-                    None if hint => kit::dim(ui, &t, "Select files to reset the app."),
-                    None => {}
-                }
-            },
+        // The same bar as every page with a selection (REVIEW-C C19): the size, the count,
+        // the hint in the room left, the buttons.
+        let n = plan.selected_count();
+        let size = plan.selected_size();
+        kit::bar_figure(
+            ui,
+            &t,
+            &human_size(size),
+            &format!("{} selected", cleancraft_core::fsutil::items(n)),
+            &format!("{n} selected, {}", human_size(size)),
+            block.is_some(),
         );
+        ui.add_space(space::M);
+        let hint = match &block {
+            Some(Block::Running) => Some(format!("Quit {name} to choose what to remove.")),
+            Some(Block::System(_)) => Some("macOS keeps this app.".to_string()),
+            Some(Block::Ignored(_)) => Some("On your ignore list.".to_string()),
+            None if files_sel == 0 => Some("Select files to reset the app.".to_string()),
+            None => None,
+        };
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             // A blocked action is a quiet, disabled button (a pale red one reads as broken).
             let can_uninstall = block.is_none()
@@ -1528,7 +1531,7 @@ fn detail(app: &mut CleanApp, ui: &mut Ui) {
             }
             let can_reset = block.is_none() && files_sel > 0;
             let rs = ui.add_enabled_ui(can_reset, |ui| {
-                kit::pill(ui, &t, "Reset", kit::Kind::Secondary, None)
+                kit::pill(ui, &t, "Reset App...", kit::Kind::Secondary, None)
             });
             let rs = rs
                 .inner
@@ -1557,7 +1560,7 @@ fn detail(app: &mut CleanApp, ui: &mut Ui) {
                 rebuild_detail(app, Some(&plan));
             }
             if !app.settings.is_ignored(&path) && !matches!(block, Some(Block::System(_))) {
-                let ig = kit::secondary_resp(ui, &t, "Ignore");
+                let ig = kit::secondary_resp(ui, &t, "Hide from List");
                 if ig
                     .on_hover_text("Never offer this app for removal (Settings > Ignore list)")
                     .clicked()
@@ -1567,6 +1570,9 @@ fn detail(app: &mut CleanApp, ui: &mut Ui) {
                     app.save_settings();
                     close_detail(app);
                 }
+            }
+            if let Some(h) = &hint {
+                kit::bar_hint(ui, &t, h);
             }
         });
     });
@@ -2153,12 +2159,17 @@ fn updates_page(app: &mut CleanApp, ui: &mut Ui) {
                 .filter(|u| !u.available && u.error.is_none())
                 .collect();
             ui.add_space(space::S);
-            // Two cards side by side: your apps that need nothing, and macOS.
+            // Two cards side by side: your apps that need nothing, and macOS, of one height
+            // (the taller one's, from the frame before: REVIEW-C C36).
+            let h_key = egui::Id::new("updates-cards-h");
+            let same_h: f32 = ui.data(|d| d.get_temp(h_key)).unwrap_or(0.0);
+            let mut tallest = 0.0f32;
             ui.columns(2, |cols| {
                 // Columns are justified; text in a card is not.
                 cols[0].with_layout(egui::Layout::top_down(Align::Min), |ui| {
                 kit::card(&t).show(ui, |ui| {
                     ui.set_width(ui.available_width());
+                    ui.set_min_height(same_h);
                     kit::card_head(ui, &t, Icon::Check, t.success, "Up to date");
                     ui.add_space(space::XS);
                     if current.is_empty() {
@@ -2200,12 +2211,14 @@ fn updates_page(app: &mut CleanApp, ui: &mut Ui) {
                             );
                         }
                     }
+                    tallest = tallest.max(ui.min_rect().height());
                 });
                 });
                 // Columns are justified; text in a card is not.
                 cols[1].with_layout(egui::Layout::top_down(Align::Min), |ui| {
                 kit::card(&t).show(ui, |ui| {
                     ui.set_width(ui.available_width());
+                    ui.set_min_height(same_h);
                     kit::card_head(ui, &t, Icon::Gear, t.sec_a, "macOS");
                     ui.add_space(space::XS);
                     if let Some(e) = &r.macos_error {
@@ -2249,9 +2262,14 @@ fn updates_page(app: &mut CleanApp, ui: &mut Ui) {
                             }
                         }
                     }
+                    tallest = tallest.max(ui.min_rect().height());
                 });
                 });
             });
+            if (tallest - same_h).abs() > 0.5 {
+                ui.data_mut(|d| d.insert_temp(h_key, tallest));
+                ui.ctx().request_discard("update cards take one height");
+            }
         });
     kit::scroll_fade_page(ui, &fade_out, &t);
 }

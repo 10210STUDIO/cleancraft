@@ -246,7 +246,11 @@ fn check_texts_follow_the_rules_and_name_no_competitor() {
                     .split(|c: char| !c.is_alphanumeric())
                     .any(|w| w == concat!("n", "or"))
                 {
-                    bad.push(format!("{}:{}: the banned conjunction in {s:?}", p.display(), n + 1));
+                    bad.push(format!(
+                        "{}:{}: the banned conjunction in {s:?}",
+                        p.display(),
+                        n + 1
+                    ));
                 }
                 for name in [
                     "the reference app",

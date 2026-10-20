@@ -383,7 +383,11 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: cleancraft_core::FeatureId) {
                 ui,
                 &t,
                 f,
-                &format!("Measuring {what}..."),
+                &if what.is_empty() {
+                    "Measuring...".to_string()
+                } else {
+                    format!("Measuring {what}...")
+                },
                 &status,
                 secs,
                 true,
@@ -513,20 +517,21 @@ fn idle(app: &mut CleanApp, ui: &mut Ui) {
                     app.disk_map.error = None;
                 }
                 let can = !app.disk_map.folder_text.trim().is_empty();
-                let clicked = ui
-                    .add_enabled_ui(can, |ui| {
-                        kit::pill(
-                            ui,
-                            &t,
-                            "Map Folder",
-                            kit::Kind::Secondary,
-                            Some(Icon::Folder),
-                        )
-                    })
-                    .inner
-                    .clicked();
+                // Always a live button (a faint disabled one read as broken, REVIEW-C C29);
+                // with an empty field it says what to do.
+                let clicked = kit::pill(
+                    ui,
+                    &t,
+                    "Map Folder",
+                    kit::Kind::Secondary,
+                    Some(Icon::Folder),
+                )
+                .clicked();
                 if (clicked || enter) && can {
                     folder_go = true;
+                } else if clicked {
+                    app.act();
+                    app.disk_map.error = Some("Type a folder first, or use Choose Folder.".into());
                 }
                 let picking = app.disk_map.pick.is_some();
                 let ch = ui
@@ -926,7 +931,13 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
             ui.set_min_size(vec2(ui.available_width(), h - 18.0));
             let kids = &node.children;
             if kids.is_empty() {
-                ui.label(RichText::new("Nothing here.").color(t.text_dim));
+                kit::empty_state(
+                    ui,
+                    &t,
+                    Icon::Folder,
+                    "This folder is empty",
+                    "Go back up to see what takes the space.",
+                );
                 return;
             }
             let total = node.size.max(1);
@@ -993,12 +1004,16 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                         // The block's colour as a short bar, then the item's own kind icon
                         // (folder, archive, picture...), like every other file list.
                         ui.painter().rect_filled(
-                            egui::Rect::from_center_size(dot - vec2(6.0, 0.0), vec2(3.0, 22.0)),
+                            egui::Rect::from_center_size(dot - vec2(8.0, 0.0), vec2(3.0, 22.0)),
                             1.5,
                             color,
                         );
-                        let ir =
-                            egui::Rect::from_center_size(dot + vec2(8.0, 0.0), vec2(26.0, 26.0));
+                        // A kind tile like every result list (REVIEW-C C28).
+                        let tile =
+                            egui::Rect::from_center_size(dot + vec2(14.0, 0.0), vec2(32.0, 32.0));
+                        ui.painter()
+                            .rect_filled(tile, 8.0, Color32::from_white_alpha(14));
+                        let ir = egui::Rect::from_center_size(tile.center(), vec2(22.0, 22.0));
                         crate::images::paint_file_icon(
                             ui,
                             ir,
@@ -1020,7 +1035,7 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                             t.text,
                             Align::Max,
                         );
-                        let x0 = r.left() + 70.0;
+                        let x0 = r.left() + 80.0;
                         let name_w = (r.right() - size_w - 20.0 - x0).max(40.0);
                         let nf = font(size::BODY, Weight::Medium);
                         let name_s = kit::truncate_middle(ui.ctx(), &c.name, &nf, name_w);
@@ -1059,7 +1074,85 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                             egui::pos2(x0, r.top() + 31.0),
                             egui::pos2(r.right() - 12.0, r.top() + 46.0),
                         );
-                        if let Some(why) = &locked {
+                        if let Some(why) = &locked
+                            && why.ends_with("(use System Junk or App Remover)")
+                        {
+                            // The tools that handle app data, one click away (REVIEW-U U24).
+                            let lf = font(size::FOOTNOTE, Weight::Regular);
+                            let lead = "App data in Library. Use";
+                            let g = kit::galley(ui, lead, lf.clone(), t.text_dim);
+                            let mut x = line.left();
+                            kit::text_at(
+                                ui,
+                                egui::Rect::from_min_size(
+                                    egui::pos2(x, line.top()),
+                                    vec2(g.size().x + 2.0, line.height()),
+                                ),
+                                lead,
+                                &format!("Locked: {why}"),
+                                lf.clone(),
+                                t.text_dim,
+                                Align::Min,
+                            );
+                            x += g.size().x + 6.0;
+                            for (k, (label, page)) in [
+                                ("System Junk", "system_junk"),
+                                ("App Remover", "uninstaller"),
+                            ]
+                            .into_iter()
+                            .enumerate()
+                            {
+                                let lw = kit::galley(ui, label, lf.clone(), t.sec_a).size().x;
+                                if x + lw > line.right() {
+                                    break;
+                                }
+                                let lr = egui::Rect::from_min_size(
+                                    egui::pos2(x, line.top()),
+                                    vec2(lw, line.height()),
+                                );
+                                let resp =
+                                    ui.interact(lr, row.id.with(("tool", k)), Sense::click());
+                                kit::feel_ring(ui, &t, &resp, lr, 3.0);
+                                resp.widget_info(|| {
+                                    egui::WidgetInfo::labeled(
+                                        egui::WidgetType::Link,
+                                        true,
+                                        format!("Open {label}"),
+                                    )
+                                });
+                                let col = if resp.hovered() {
+                                    icons::lerp(t.sec_a, Color32::WHITE, 0.35)
+                                } else {
+                                    icons::lerp(t.sec_a, Color32::WHITE, 0.15)
+                                };
+                                ui.painter().text(
+                                    lr.left_center(),
+                                    egui::Align2::LEFT_CENTER,
+                                    label,
+                                    lf.clone(),
+                                    col,
+                                );
+                                ui.painter().hline(
+                                    lr.x_range(),
+                                    lr.center().y + 7.0,
+                                    egui::Stroke::new(1.0, col.gamma_multiply(0.6)),
+                                );
+                                if resp.clicked() {
+                                    app.act();
+                                    app.navigate(page);
+                                }
+                                x += lw;
+                                if k == 0 {
+                                    let or = kit::galley(ui, "or", lf.clone(), t.text_dim);
+                                    ui.painter().galley(
+                                        egui::pos2(x + 4.0, line.center().y - or.size().y / 2.0),
+                                        or.clone(),
+                                        t.text_dim,
+                                    );
+                                    x += or.size().x + 8.0;
+                                }
+                            }
+                        } else if let Some(why) = &locked {
                             let text = format!("locked: {why}");
                             let lf = font(size::FOOTNOTE, Weight::Regular);
                             // The whole reason when it fits; else its first clause (never a
@@ -1169,11 +1262,8 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
         return;
     };
     let rep = rep.clone();
-    let summary = format!(
-        "{} moved. {} skipped.",
-        cleancraft_core::fsutil::items(rep.moved.len()),
-        rep.skipped.len()
-    );
+    // Skipped items only when there are some (REVIEW-U U25, REVIEW-C C31).
+    let summary = kit::moved_summary(rep.moved.len(), rep.skipped.len());
     super::plan_page::done_view(
         app,
         ui,

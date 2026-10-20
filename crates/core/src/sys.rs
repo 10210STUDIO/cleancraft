@@ -788,7 +788,10 @@ mod tests {
             "p12\ncSafari\nn/Users/a/x.db\nnlocalhost:443\np40\ncGoogle Chrome Helper (Renderer)\nn/Users/a/c (deleted)\n",
         );
         assert!(v.contains(&(PathBuf::from("/Users/a/x.db"), "Safari".into())));
-        assert!(v.contains(&(PathBuf::from("/Users/a/c (deleted)"), "Google Chrome".into())));
+        assert!(v.contains(&(
+            PathBuf::from("/Users/a/c (deleted)"),
+            "Google Chrome".into()
+        )));
         assert!(v.contains(&(PathBuf::from("/Users/a/c"), "Google Chrome".into())));
         assert_eq!(v.len(), 3);
         assert_eq!(app_of_command("Slack Helper"), "Slack");

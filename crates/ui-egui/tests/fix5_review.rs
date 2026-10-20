@@ -169,7 +169,10 @@ fn d1_trash_bins_bar_has_no_overlap_at_the_smallest_window() {
     go(&mut h, "trash_bins");
     click(&mut h, "Scan");
     rest(&mut h);
-    assert!(!has_text(&h, "items selected"), "nothing can be selected here");
+    assert!(
+        !has_text(&h, "items selected"),
+        "nothing can be selected here"
+    );
     let all = texts(&h);
     let bar: Vec<_> = all.iter().filter(|(_, _, r)| r.top() > 590.0).collect();
     assert!(
@@ -227,7 +230,10 @@ fn u04_quick_sweep_done_offers_empty_trash() {
     assert!(has_text(&h, "moved to the Trash"));
     let b = buttons(&h);
     assert!(b.iter().any(|l| l == "Empty Trash..."), "{b:?}");
-    assert!(has_text(&h, "The space comes back when the Trash is emptied."));
+    assert!(has_text(
+        &h,
+        "The space comes back when the Trash is emptied."
+    ));
     assert!(!has_text(&h, "quarantine is cleared"));
 }
 
@@ -252,7 +258,11 @@ fn n1_cleaned_tile_says_so_and_offers_a_scan() {
     settle(&mut h);
     assert!(has_text(&h, "Cleaned just now."));
     assert!(!has_text(&h, "0 of 0"));
-    assert_eq!(count(&h, "Include"), includes - 1, "no Include on a cleaned tile");
+    assert_eq!(
+        count(&h, "Include"),
+        includes - 1,
+        "no Include on a cleaned tile"
+    );
     assert!(has(&h, "Scan Mail Downloads again"));
 }
 
@@ -274,10 +284,7 @@ fn d2_hovered_privacy_row_keeps_its_tag_before_the_buttons() {
         .collect();
     assert!(cut.is_empty(), "tags cut with their asides kept: {cut:?}");
     // Hover the first row's name.
-    let reveal_rows: Vec<Rect> = h
-        .query_all_by_label("Reveal")
-        .map(|n| n.rect())
-        .collect();
+    let reveal_rows: Vec<Rect> = h.query_all_by_label("Reveal").map(|n| n.rect()).collect();
     let first = reveal_rows
         .iter()
         .copied()
@@ -320,16 +327,13 @@ fn n3_ignore_notice_has_undo() {
         .collect();
     h.get_all_by_label("Ignore").next().unwrap().click();
     settle(&mut h);
-    let path = h
-        .state()
-        .settings
-        .ignore
-        .last()
-        .cloned()
-        .expect("ignored");
+    let path = h.state().settings.ignore.last().cloned().expect("ignored");
     let was = before.iter().find(|b| b.0 == path).unwrap().1;
     let id = {
-        let p = h.state().plans[&FeatureId::SystemJunk].plan.clone().unwrap();
+        let p = h.state().plans[&FeatureId::SystemJunk]
+            .plan
+            .clone()
+            .unwrap();
         let it = p.items.iter().find(|i| i.path == path).unwrap();
         assert!(it.locked.is_some() && !it.selected);
         it.id
@@ -343,7 +347,10 @@ fn n3_ignore_notice_has_undo() {
         .as_ref()
         .unwrap()
         .items[id];
-    assert!(it.locked.is_none() && it.selected == was, "row back as it was");
+    assert!(
+        it.locked.is_none() && it.selected == was,
+        "row back as it was"
+    );
     assert!(has_text(&h, "is no longer ignored"));
 }
 
@@ -414,7 +421,10 @@ fn u05_quarantine_to_trash_is_listed_in_history_with_undo_all() {
     go(&mut h, "system_junk");
     click(&mut h, "Scan");
     clean_here(&mut h);
-    assert!(has_text(&h, "moved to the Trash (Settings)"), "Done says where");
+    assert!(
+        has_text(&h, "moved to the Trash (Settings)"),
+        "Done says where"
+    );
     go(&mut h, "settings");
     click(&mut h, "Move Quarantine to Trash...");
     assert!(has_text(&h, "Move the quarantine to the Trash"));
@@ -461,6 +471,375 @@ fn d4_task_errors_are_plain_sentences() {
     let p = cleancraft_ui_egui::pages::tasks::plain_reason(
         "Could not list local snapshots: fake: no answer for `/usr/bin/tmutil listlocalsnapshots /`",
     );
-    assert_eq!(p, "Could not list local snapshots. This task cannot run now.");
+    assert_eq!(
+        p,
+        "Could not list local snapshots. This task cannot run now."
+    );
     assert!(!p.contains('`'));
+}
+
+/// C10 (S2): on the first results frame the list already shows its rows (they fade in, they
+/// are not missing) and the bottom bar is where it stays.
+#[test]
+fn c10_first_results_frame_has_rows_and_the_bar_in_place() {
+    let m = junk();
+    let mut h = harness(&m);
+    go(&mut h, "system_junk");
+    h.get_by_label("Scan").click();
+    h.step();
+    h.step();
+    let probe = std::env::var("FIX5_PROBE").is_ok();
+    if probe {
+        let img = h.render().expect("render");
+        img.save("/tmp/claude-0/-home-claude/cb89f4a3-398a-5ab4-a872-bb5977d98224/scratchpad/c10-frame1.png").unwrap();
+    }
+    let bar = |h: &H| {
+        texts(h)
+            .into_iter()
+            .find(|(s, _, _)| s.ends_with("selected"))
+            .map(|t| t.2.top())
+    };
+    let rows = |h: &H| {
+        texts(h)
+            .into_iter()
+            .filter(|(s, _, r)| s == "Demo-abc" && r.left() > 560.0)
+            .count()
+    };
+    let (bar1, rows1) = (bar(&h), rows(&h));
+    if probe {
+        for i in 0..6 {
+            eprintln!("frame {i}: bar {:?}", bar(&h));
+            h.step();
+        }
+    }
+    rest(&mut h);
+    if probe {
+        let img = h.render().expect("render");
+        img.save("/tmp/claude-0/-home-claude/cb89f4a3-398a-5ab4-a872-bb5977d98224/scratchpad/c10-final.png").unwrap();
+    }
+    assert_eq!(rows1, rows(&h), "rows missing on the first results frame");
+    assert!(rows1 > 0);
+    let (a, b) = (bar1.expect("bar on frame 1"), bar(&h).unwrap());
+    assert!(
+        (a - b).abs() < 1.0,
+        "bottom bar at {a} on frame 1, {b} after"
+    );
+}
+
+/// C15 (S2): Quick Sweep names the same modules in every phase: the idle chips, the
+/// scanning chips and the result tiles.
+#[test]
+fn c15_quick_sweep_lists_the_same_modules_in_every_phase() {
+    let mac = sweep_mac();
+    let mut h = harness(&mac);
+    let src = testkit_monitor::sweep_sources();
+    h.state_mut().sweep.sources = Some(src.clone());
+    settle(&mut h);
+    let titles: Vec<&str> = src.ids().iter().map(|i| i.title()).collect();
+    let shown = |h: &H| -> Vec<String> {
+        let t = texts(h);
+        titles
+            .iter()
+            .filter(|n| t.iter().any(|(s, _, _)| s == *n))
+            .map(|n| n.to_string())
+            .collect()
+    };
+    let idle = shown(&h);
+    h.state_mut().sweep.phase = cleancraft_ui_egui::pages::sweep::Phase::Scanning(
+        cleancraft_ui_egui::jobs::Job::waiting("System Junk"),
+    );
+    settle(&mut h);
+    let scanning = shown(&h);
+    h.state_mut().sweep.phase = cleancraft_ui_egui::pages::sweep::Phase::Idle;
+    settle(&mut h);
+    click(&mut h, "Scan");
+    rest(&mut h);
+    let tiles: Vec<FeatureId> = h
+        .state()
+        .sweep
+        .result
+        .as_ref()
+        .unwrap()
+        .tiles
+        .iter()
+        .map(|t| t.id)
+        .collect();
+    assert_eq!(idle.len(), titles.len(), "idle chips {idle:?}");
+    assert_eq!(idle, scanning);
+    assert_eq!(tiles, src.ids());
+}
+
+/// C21 (S2): on a results page Tab follows reading order: Search and Sort before the
+/// bottom bar's Review and Clean, and one stop per category.
+#[test]
+fn c21_tab_follows_reading_order_with_one_stop_per_category() {
+    let m = junk();
+    let mut h = harness(&m);
+    go(&mut h, "system_junk");
+    click(&mut h, "Scan");
+    rest(&mut h);
+    let mut order: Vec<String> = Vec::new();
+    for _ in 0..60 {
+        h.key_press(egui::Key::Tab);
+        h.step();
+        h.step();
+        let f = h
+            .root()
+            .children_recursive()
+            .find(|n| n.accesskit_node().is_focused())
+            .and_then(|n| n.accesskit_node().label())
+            .unwrap_or_default();
+        if order.last() == Some(&f) {
+            continue;
+        }
+        if f == "Review and Clean" {
+            order.push(f);
+            break;
+        }
+        order.push(f);
+    }
+    let pos = |l: &str| order.iter().position(|x| x == l);
+    let search = pos("Search").expect("Search reached");
+    let review = pos("Review and Clean").expect("Review and Clean reached");
+    assert!(search < review, "order: {order:?}");
+    // Each category is one stop (its checkbox), not the row and then its checkbox.
+    let plan = h.state().plans[&FeatureId::SystemJunk]
+        .plan
+        .clone()
+        .unwrap();
+    for c in &plan.categories {
+        let n = order.iter().filter(|l| l.contains(&c.title)).count();
+        assert!(n <= 1, "{} reached {n} times: {order:?}", c.title);
+    }
+}
+
+fn remover_mac() -> FakeMac {
+    use cleancraft_core::testkit_apps::{AppSpec, FakeMacApps};
+    let mac = FakeMac::new();
+    let editor = mac.app_spec(&AppSpec {
+        size: 3_000_000,
+        ..AppSpec::new("Editor", "com.example.Editor", "2.0")
+    });
+    mac.app("Safari", "com.apple.Safari", "18.0");
+    mac.last_opened(&editor, 2);
+    mac.spotlight_finds_nothing();
+    mac.home_file(
+        "Library/Application Support/com.example.Editor/db.sqlite",
+        400_000,
+    );
+    mac.home_file("Library/Caches/com.example.Editor/blob", 900_000);
+    base(&mac);
+    mac
+}
+
+fn x_of(h: &H, label: &str) -> f32 {
+    h.get_by_label(label).rect().left()
+}
+
+/// D3 (S3): the App Remover Done screen orders its buttons like every module Done screen:
+/// Empty Trash..., Undo, Show History, Done.
+#[test]
+fn d3_app_remover_done_buttons_in_the_module_order() {
+    let mac = remover_mac();
+    let mut h = harness(&mac);
+    go(&mut h, "uninstaller");
+    click(&mut h, "Editor");
+    click(&mut h, "Uninstall");
+    click(&mut h, "Move to Trash");
+    let xs: Vec<f32> = ["Empty Trash...", "Undo", "Show History", "Done"]
+        .iter()
+        .map(|l| x_of(&h, l))
+        .collect();
+    assert!(xs.windows(2).all(|w| w[0] < w[1]), "{xs:?}");
+}
+
+/// C19 and C20: App Remover uses the shared bottom bar (figure, then "N items selected") and
+/// its list has the headline every results page has.
+#[test]
+fn c19_c20_app_remover_bar_and_headline() {
+    let mac = remover_mac();
+    let mut h = harness(&mac);
+    go(&mut h, "uninstaller");
+    assert!(has_text(&h, "in 2 apps"), "App Remover list headline");
+    click(&mut h, "Editor");
+    let n = h.state().apps.detail.as_ref().unwrap().selected_count();
+    // Shown "4 items selected" after the 24 pt figure; announced with the size.
+    assert!(texts(&h).iter().any(|t| t.0 == format!("{n} items selected")));
+    assert!(has_text(&h, &format!("{n} selected, ")));
+    // U15: plain action names.
+    assert!(has(&h, "Reset App...") && has(&h, "Hide from List"));
+}
+
+/// D6 (S3): row names are whole at 1060 when the path can shrink instead.
+#[test]
+fn d6_trash_row_names_are_whole_at_1060() {
+    let mac = testkit_cleanup::trash_mac();
+    base(&mac);
+    let mut h = harness_at(&mac, 1060.0, 680.0);
+    go(&mut h, "trash_bins");
+    click(&mut h, "Scan");
+    rest(&mut h);
+    let painted: Vec<String> = texts(&h).into_iter().map(|t| t.0).collect();
+    assert!(
+        painted.iter().any(|s| s == "Trash of the startup disk"),
+        "{painted:?}"
+    );
+}
+
+/// C39 (S3): the Duplicates headline counts what can be freed (every copy but the kept one).
+#[test]
+fn c39_duplicates_headline_counts_the_copies_that_can_go() {
+    let m = FakeMac::sample();
+    let dup: Vec<u8> = (0..300_000u32)
+        .map(|i| (i.wrapping_mul(7919) >> 3) as u8)
+        .collect();
+    for p in ["Downloads/a.bin", "Music/old/a.bin", "Projects/a.bin"] {
+        m.write(&m.env.home_path(p), &dup);
+    }
+    base(&m);
+    let mut h = harness(&m);
+    go(&mut h, "duplicates");
+    click(&mut h, "Scan");
+    let plan = h.state().plans[&FeatureId::Duplicates]
+        .plan
+        .clone()
+        .unwrap();
+    let (bytes, n) = cleancraft_ui_egui::pages::plan_page::duplicate_copies(&plan);
+    assert_eq!(n, 2);
+    assert_eq!(bytes, 2 * plan.items[0].size);
+    assert!(has_text(&h, "in 2 duplicate copies"));
+    assert!(has(&h, &human_size(bytes)));
+}
+
+/// C37, U25: Disk Map says "Measuring..." with nothing after it, and its Done summary
+/// mentions skipped items only when there are some.
+#[test]
+fn c37_disk_map_measuring_has_no_space_before_the_dots() {
+    let m = FakeMac::new();
+    base(&m);
+    let mut h = harness(&m);
+    go(&mut h, "disk_map");
+    h.state_mut().disk_map.phase = cleancraft_ui_egui::pages::disk_map::Phase::Scanning(
+        cleancraft_ui_egui::jobs::Job::waiting("x"),
+    );
+    settle(&mut h);
+    assert!(!texts(&h).iter().any(|t| t.0.contains(" ...")));
+    assert!(texts(&h).iter().any(|t| t.0 == "Measuring..."));
+}
+
+/// C29: the Map Folder button is live; with nothing typed it says what to do.
+#[test]
+fn c29_map_folder_is_live_and_explains_an_empty_field() {
+    let m = FakeMac::new();
+    base(&m);
+    let mut h = harness(&m);
+    go(&mut h, "disk_map");
+    assert!(buttons(&h).iter().any(|b| b == "Map Folder"));
+    click(&mut h, "Map Folder");
+    assert!(has_text(&h, "Type a folder first"));
+}
+
+/// C30 (S3): empty states say it once, without a full stop.
+#[test]
+fn c30_empty_states_have_no_full_stop() {
+    let m = FakeMac::new();
+    base(&m);
+    let mut h = harness(&m);
+    go(&mut h, "system_junk");
+    click(&mut h, "Scan");
+    assert!(has(&h, "Nothing to clean here"));
+    let mac = remover_mac();
+    let mut h = harness(&mac);
+    go(&mut h, "uninstaller");
+    h.state_mut().apps.search = "zzz".into();
+    settle(&mut h);
+    assert!(has(&h, "No app matches your search"));
+}
+
+/// C33 (S3): switches announce as switches; a result checkbox tells size and reason too.
+#[test]
+fn c33_switch_role_and_row_descriptions() {
+    let m = junk();
+    let mut h = harness(&m);
+    go(&mut h, "settings");
+    let n = h.get_by_label("Play sounds");
+    assert_eq!(n.accesskit_node().role(), Role::Switch);
+    go(&mut h, "system_junk");
+    click(&mut h, "Scan");
+    let n = h.get_by_label("Demo-abc");
+    let d = n.accesskit_node().description().unwrap_or_default();
+    assert!(d.contains("MB") && d.contains("Derived data"), "{d:?}");
+}
+
+/// U26: AI assistants is a switch in plain words; the quarantine path is a dim line.
+#[test]
+fn u26_settings_assistants_switch_and_quarantine_line() {
+    let m = FakeMac::new();
+    base(&m);
+    let mut h = harness(&m);
+    go(&mut h, "settings");
+    let n = h.get_by_label("Let AI assistants clean after you confirm (MCP)");
+    assert_eq!(n.accesskit_node().role(), Role::Switch);
+    assert!(has(&h, "CleanCraft quarantine"));
+    assert!(has_text(
+        &h,
+        "Library/Application Support/CleanCraft/Quarantine"
+    ));
+}
+
+/// U21, C27: startup rows say who signed in plain words, and Remove shows on hover only.
+#[test]
+fn u21_c27_startup_rows() {
+    let m = cleancraft_core::testkit_perf::startup_mac();
+    base(&m);
+    let mut h = harness(&m);
+    go(&mut h, "login_items");
+    rest(&mut h);
+    assert!(!has_text(&h, "Ad hoc"));
+    let painted_remove = |h: &H| texts(h).iter().filter(|t| t.0 == "Remove").count();
+    assert!(
+        h.query_all_by_label_contains("Remove ").next().is_some(),
+        "still there for VoiceOver"
+    );
+    let at_rest = painted_remove(&h);
+    let r = h
+        .query_all_by_label_contains("Remove ")
+        .next()
+        .unwrap()
+        .rect();
+    h.hover_at(r.center() - egui::vec2(300.0, 0.0));
+    rest(&mut h);
+    assert!(
+        painted_remove(&h) > at_rest,
+        "Remove shows when its row is hovered"
+    );
+}
+
+/// U22, U4: Live Monitor empties the Trash from its Storage card.
+#[test]
+fn u22_live_monitor_offers_empty_trash() {
+    let m = FakeMac::new();
+    testkit_monitor::answer_all(m.env.fake_sys().unwrap());
+    m.home_file(".Trash/old.zip", 2_500_000);
+    base(&m);
+    let mut h = harness(&m);
+    go(&mut h, "monitor");
+    rest(&mut h);
+    assert!(buttons(&h).iter().any(|b| b == "Empty Trash..."));
+}
+
+/// U24: the locked Library row on Disk Map links to the tools that handle app data.
+#[test]
+fn u24_disk_map_library_row_links_to_the_tools() {
+    let m = FakeMac::sample();
+    base(&m);
+    let mut h = harness(&m);
+    go(&mut h, "disk_map");
+    click(&mut h, "Map Home Folder");
+    rest(&mut h);
+    click(&mut h, "Open System Junk");
+    assert_eq!(
+        h.state().page,
+        cleancraft_ui_egui::Page::Feature(FeatureId::SystemJunk)
+    );
 }

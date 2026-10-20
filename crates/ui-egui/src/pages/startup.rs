@@ -190,6 +190,15 @@ fn start(app: &mut CleanApp, a: Action) {
     }));
 }
 
+/// [`row_button`], returning its response.
+fn row_button_resp(ui: &mut Ui, text: &str, name: String, tip: &str) -> egui::Response {
+    let t = crate::theme::Tokens::dark();
+    let icon = (text == "Remove").then_some(crate::icons::Icon::Trash);
+    let r = kit::ghost(ui, &t, text, icon);
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name.clone()));
+    r.on_hover_text(tip)
+}
+
 /// A small button whose accessible name says which item it acts on.
 fn row_button(ui: &mut Ui, text: &str, name: String, tip: &str) -> bool {
     let t = crate::theme::Tokens::dark();
@@ -462,7 +471,11 @@ fn launch_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot, d: Domain) {
                 .as_deref()
                 .and_then(|p| cleancraft_core::sys::app_bundle_of(std::path::Path::new(p)))
                 .map(|a| cleancraft_core::apps::resolve(&app.env, &a.to_string_lossy()));
-            ui.horizontal(|ui| {
+            // Remove shows while the row is hovered or the keyboard is on it, like the row
+            // actions of every other list (REVIEW-C C27); it is always there for VoiceOver.
+            let hov_id = egui::Id::new(("startup-row-hover", &it.label));
+            let row_hot: bool = ui.data(|d| d.get_temp(hov_id)).unwrap_or(false);
+            let row = ui.horizontal(|ui| {
                 split_row(
                     ui,
                     |ui| {
@@ -537,16 +550,31 @@ fn launch_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot, d: Domain) {
                         ui.add_space(space::XS);
                         // Removing moves the file: a quieter, separate action with the
                         // Trash glyph, never next to the switch's own spot.
-                        if removable
-                            && row_button(
-                                ui,
-                                "Remove",
-                                format!("Remove {}", it.label),
-                                "Move this agent's file to the Trash (asks first)",
-                            )
-                        {
-                            app.act();
-                            open_remove(app, it);
+                        if removable {
+                            let r = ui
+                                .scope(|ui| {
+                                    if !row_hot {
+                                        ui.multiply_opacity(0.0);
+                                    }
+                                    row_button_resp(
+                                        ui,
+                                        "Remove",
+                                        format!("Remove {}", it.label),
+                                        "Move its file to the Trash (asks first). Turn Off keeps it.",
+                                    )
+                                })
+                                .inner;
+                            let focused = r.has_focus();
+                            ui.data_mut(|d| {
+                                d.insert_temp(
+                                    egui::Id::new(("startup-remove-focus", &it.label)),
+                                    focused,
+                                )
+                            });
+                            if r.clicked() {
+                                app.act();
+                                open_remove(app, it);
+                            }
                         }
                         if d.admin() {
                             kit::dim(ui, &t, "needs password");
@@ -554,6 +582,15 @@ fn launch_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot, d: Domain) {
                     },
                 );
             });
+            let focus_on_remove: bool = ui
+                .data(|d| d.get_temp(egui::Id::new(("startup-remove-focus", &it.label))))
+                .unwrap_or(false);
+            let hot = ui.rect_contains_pointer(row.response.rect.expand2(egui::vec2(0.0, 3.0)))
+                || focus_on_remove;
+            if hot != row_hot {
+                ui.data_mut(|d| d.insert_temp(hov_id, hot));
+                ui.ctx().request_repaint();
+            }
             if k + 1 < n {
                 ui.add_space(2.0);
                 let y = ui.cursor().min.y;

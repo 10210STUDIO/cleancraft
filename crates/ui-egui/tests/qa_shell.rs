@@ -31,6 +31,8 @@ fn history_lists_moves_with_disk_numbers_and_puts_one_back() {
     assert_eq!(h.state().page, cleancraft_ui_egui::Page::History);
     let recs = executor::history(&mac.env);
     assert!(recs.len() >= 3, "{} records", recs.len());
+    // The files of a cleanup wait behind a disclosure next to Undo All (fix5).
+    click(&mut h, &format!("Show {} items of System Junk", recs.len()));
     for r in &recs {
         let ActionKind::Moved {
             original, stored, ..
@@ -104,10 +106,7 @@ fn settings_are_saved_and_change_what_happens() {
     click(&mut h, "Settings");
 
     // Removal method: quarantine.
-    click(
-        &mut h,
-        "CleanCraft quarantine (~/Library/Application Support/CleanCraft/Quarantine)",
-    );
+    click(&mut h, "CleanCraft quarantine");
     assert_eq!(Settings::load(&mac.env).method, Method::Quarantine);
 
     // Ignore list: empty, then a real path.
@@ -125,10 +124,10 @@ fn settings_are_saved_and_change_what_happens() {
 
     // Agents may clean and a threshold: each saved.
     // Lower on the page (15 pt body text since round 3): scroll to it like a user.
-    h.get_by_label("Let AI agents (MCP) carry out confirmed cleanups")
+    h.get_by_label("Let AI assistants clean after you confirm (MCP)")
         .scroll_to_me();
     steps(&mut h);
-    click(&mut h, "Let AI agents (MCP) carry out confirmed cleanups");
+    click(&mut h, "Let AI assistants clean after you confirm (MCP)");
     assert!(Settings::load(&mac.env).agents_may_clean);
     h.get_by_role_and_label(Role::Slider, "Large file minimum (MB)")
         .click();
@@ -183,7 +182,12 @@ fn settings_that_cannot_be_saved_say_so() {
     std::fs::create_dir_all(Settings::path(&mac.env)).unwrap();
     let mut h = harness(&mac);
     click(&mut h, "Settings");
-    click(&mut h, "Let AI agents (MCP) carry out confirmed cleanups");
+    // Lower on the page: scroll to it like a user (the switch row is taller than the old
+    // checkbox, fix5 U26).
+    h.get_by_label("Let AI assistants clean after you confirm (MCP)")
+        .scroll_to_me();
+    steps(&mut h);
+    click(&mut h, "Let AI assistants clean after you confirm (MCP)");
     assert!(has_text(&h, "Settings could not be saved"));
     assert!(!Settings::load(&mac.env).agents_may_clean);
 }

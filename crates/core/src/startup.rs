@@ -67,7 +67,8 @@ impl Signer {
                 .or_else(|| authority.strip_prefix("Apple Distribution: "))
                 .unwrap_or(authority)
                 .to_string(),
-            Signer::AdHoc => "Ad hoc signature (no developer identity)".into(),
+            // Plain words (REVIEW-U U21): "ad hoc" means nobody known signed it.
+            Signer::AdHoc => "Not signed by a known developer".into(),
             Signer::Unsigned => "Not signed".into(),
             Signer::Missing => "Program missing".into(),
             Signer::Unknown { message } => format!("Signature unknown ({message})"),

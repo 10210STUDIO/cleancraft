@@ -24,7 +24,7 @@ fn ignored_app_leaves_the_list_and_is_never_offered() {
     assert!(has(&h, "Keep Me") && has(&h, "Other"));
     click(&mut h, "Keep Me");
     assert!(has(&h, "Uninstall"), "detail of the app is open");
-    click(&mut h, "Ignore");
+    click(&mut h, "Hide from List");
     // Saved, as Settings shows it.
     let saved = Settings::load(&mac.env);
     assert!(saved.ignore.contains(&keep), "{:?}", saved.ignore);

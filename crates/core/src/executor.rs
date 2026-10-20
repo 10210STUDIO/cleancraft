@@ -1099,7 +1099,9 @@ pub fn move_quarantine_to_trash(
     for (n, q) in items.iter().enumerate() {
         progress(n, total);
         let skip = if !q.starts_with(&qdir) || !env.contains(q) || !env.contains(&trash) {
-            Some(SkipReason::Refused("outside the CleanCraft quarantine".into()))
+            Some(SkipReason::Refused(
+                "outside the CleanCraft quarantine".into(),
+            ))
         } else {
             match &open {
                 Ok(list) => in_use(list, q),
@@ -1186,9 +1188,10 @@ pub fn move_quarantine_to_trash(
         let mut recs = history(env);
         for (q, dest) in &moved {
             let _ = fs::rename(dest, q);
-            report
-                .skipped
-                .push((q.clone(), SkipReason::Other(format!("could not log the action: {e}"))));
+            report.skipped.push((
+                q.clone(),
+                SkipReason::Other(format!("could not log the action: {e}")),
+            ));
         }
         for r in recs.iter_mut().filter(|r| r.plan_id == plan_id) {
             r.undone = Some(now);

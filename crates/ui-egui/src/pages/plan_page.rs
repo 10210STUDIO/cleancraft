@@ -420,7 +420,7 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             kit::done_hero(ui, &t, f, 150.0, started);
             ui.add_space(space::M);
             ui.label(
-                RichText::new("Nothing to clean here.")
+                RichText::new("Nothing to clean here")
                     .font(font(size::TITLE2, Weight::SemiBold))
                     .color(t.text),
             );
@@ -460,18 +460,35 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         return;
     }
     // Summary: the big total and the sentence under it.
+    // Duplicates count what can be freed: every copy but the one each set keeps
+    // (REVIEW-C C39).
+    let (total, line) = if f == FeatureId::Duplicates {
+        let (bytes, n) = duplicate_copies(&plan);
+        (
+            bytes,
+            format!(
+                "in {n} duplicate {}",
+                if n == 1 { "copy" } else { "copies" }
+            ),
+        )
+    } else {
+        (
+            plan.total_size(),
+            format!(
+                "found in {}",
+                cleancraft_core::fsutil::items(plan.items.len())
+            ),
+        )
+    };
     ui.horizontal_top(|ui| {
-        kit::display_count(ui, &t, ("plan-total", &plan.id), plan.total_size());
+        kit::display_count(ui, &t, ("plan-total", &plan.id), total);
         ui.add_space(4.0);
         ui.vertical(|ui| {
             ui.add_space(kit::baseline_offset(size::DISPLAY, size::TITLE3));
             ui.label(
-                RichText::new(format!(
-                    "found in {}",
-                    cleancraft_core::fsutil::items(plan.items.len())
-                ))
-                .font(font(size::TITLE3, Weight::Medium))
-                .color(t.text_dim),
+                RichText::new(line)
+                    .font(font(size::TITLE3, Weight::Medium))
+                    .color(t.text_dim),
             );
             for note in &plan.notes {
                 kit::dim(ui, &t, note);
@@ -489,7 +506,9 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         );
     });
 
-    // Bottom bar first, so it always has its place at the bottom of the window.
+    // The bar's place is kept at the bottom of the window; it is laid out after the
+    // toolbar and the lists so Tab and VoiceOver meet it last, in reading order (REVIEW-C
+    // C21).
     let any_selectable = app
         .plan_state(f)
         .plan
@@ -501,71 +520,66 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         .as_ref()
         .map(|p| (p.selected_count(), p.selected_size()))
         .unwrap_or((0, 0));
-    egui::Panel::bottom(egui::Id::new(("plan-bottom", f.as_str())))
-        .show_separator_line(false)
-        .frame(egui::Frame::new().inner_margin(egui::Margin {
-            left: 0,
-            right: 0,
-            top: 12,
-            bottom: 0,
-        }))
-        .show(ui, |ui| {
-            ui.set_clip_rect(ui.ctx().content_rect());
-            kit::bar_frame(&t).show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.horizontal(|ui| {
-                    ui.set_min_height(44.0);
-                    // Trash Bins: nothing can be ticked there, so the bar shows what the
-                    // Trash holds, not "0 items selected" (REVIEW-C D1, REVIEW-U U3).
-                    let trash_only = f == FeatureId::TrashBins && !any_selectable;
-                    let (figure, line, full) = if trash_only {
-                        (
-                            human_size(plan.total_size()),
-                            "in the Trash".to_string(),
-                            format!("{} in the Trash", human_size(plan.total_size())),
-                        )
-                    } else {
-                        (
-                            human_size(sel_size),
-                            format!("{} selected", cleancraft_core::fsutil::items(sel_count)),
-                            format!("{sel_count} selected, {}", human_size(sel_size)),
-                        )
-                    };
-                    ui.label(
-                        RichText::new(figure)
-                            .font(font(size::NUMBER_S, Weight::Bold))
-                            .color(t.text),
-                    );
-                    ui.add_space(space::XS);
-                    kit::quiet_label(ui, &t, &line, &full);
-                    ui.add_space(space::M);
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if sel_count > 0 && kit::primary(ui, &t, "Review and Clean") {
-                            app.act();
-                            app.plan_state(f).phase = Phase::Confirm;
-                        } else if sel_count == 0 && any_selectable {
-                            kit::dim(ui, &t, "Tick the items to clean.");
-                        } else if sel_count == 0 && f == FeatureId::TrashBins {
-                            // The page's one action sits where every other page has its
-                            // main button (REVIEW-U U3).
-                            super::extras_cleanup::trash_bar(app, ui);
-                            // The hint gets only the room left between the figure and the
-                            // button, shortened at its end (never under the figure).
-                            let hint = "Finder empties the Trash. CleanCraft cannot put those items back.";
-                            let fid = font(size::FOOTNOTE, Weight::Regular);
-                            let room = ui.available_width() - space::S;
-                            if room > 120.0 {
-                                let shown = kit::truncate_end(ui.ctx(), hint, &fid, room);
-                                let r = ui.label(RichText::new(&shown).font(fid).color(t.text_faint));
-                                if shown != hint {
-                                    r.on_hover_text(hint);
-                                }
-                            }
-                        }
-                    });
+    let full = ui.available_rect_before_wrap();
+    let bar_h = 12.0 + kit::BAR_H;
+    let content = Rect::from_min_max(full.min, pos2(full.right(), full.bottom() - bar_h));
+    let bar = Rect::from_min_max(pos2(full.left(), full.bottom() - bar_h), full.max);
+    ui.scope_builder(egui::UiBuilder::new().max_rect(content), |ui| {
+        results_body(app, ui, f, &plan);
+    });
+    ui.scope_builder(egui::UiBuilder::new().max_rect(bar), |ui| {
+        ui.add_space(12.0);
+        ui.set_clip_rect(ui.ctx().content_rect());
+        kit::bar_frame(&t).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.set_min_height(44.0);
+                // Trash Bins: nothing can be ticked there, so the bar shows what the
+                // Trash holds, not "0 items selected" (REVIEW-C D1, REVIEW-U U3).
+                let trash_only = f == FeatureId::TrashBins && !any_selectable;
+                let (figure, line, full) = if trash_only {
+                    (
+                        human_size(plan.total_size()),
+                        "in the Trash".to_string(),
+                        format!("{} in the Trash", human_size(plan.total_size())),
+                    )
+                } else {
+                    (
+                        human_size(sel_size),
+                        format!("{} selected", cleancraft_core::fsutil::items(sel_count)),
+                        format!("{sel_count} selected, {}", human_size(sel_size)),
+                    )
+                };
+                kit::bar_figure(ui, &t, &figure, &line, &full, false);
+                ui.add_space(space::M);
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if sel_count > 0 && kit::primary(ui, &t, "Review and Clean") {
+                        app.act();
+                        app.plan_state(f).phase = Phase::Confirm;
+                    } else if sel_count == 0 && any_selectable {
+                        kit::dim(ui, &t, "Tick the items to clean.");
+                    } else if sel_count == 0 && f == FeatureId::TrashBins {
+                        // The page's one action sits where every other page has its
+                        // main button (REVIEW-U U3).
+                        super::extras_cleanup::trash_bar(app, ui);
+                        // The hint gets only the room left between the figure and the
+                        // button, shortened at its end (never under the figure).
+                        kit::bar_hint(
+                            ui,
+                            &t,
+                            "Finder empties the Trash. CleanCraft cannot put those items back.",
+                        );
+                    }
                 });
             });
         });
+    });
+    ui.advance_cursor_after_rect(full);
+}
+
+/// The toolbar and the two columns of a results page.
+fn results_body(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan) {
+    let t = app.t;
     ui.add_space(space::M);
     // One toolbar over both columns: search, sort and selection. A module's own buttons
     // (Wi-Fi Settings, Reset Permissions, Select Copies...) join the row when they fit and
@@ -739,7 +753,8 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                             // Rows fade in one after the other when the results arrive.
                             let (k, _) = kit::appear(ui, ("plan-rows", &plan.id), first + i);
                             ui.scope(|ui| {
-                                ui.multiply_opacity(k);
+                                // Present from the first frame, fading up (REVIEW-C C10).
+                                ui.multiply_opacity(0.3 + 0.7 * k);
                                 match row {
                                     Row::Item(id) => item_row(app, ui, f, &plan, *id),
                                     Row::Group(g) => group_row(app, ui, f, g),
@@ -862,7 +877,14 @@ pub fn category_row(
     check: Option<(bool, bool, bool, String)>,
 ) -> CatResp {
     let w = ui.available_width();
-    let (r, resp) = ui.allocate_exact_size(vec2(w, hit::CATEGORY), Sense::click());
+    // One Tab stop per category (REVIEW-C C21): with a checkbox the checkbox is the stop
+    // (Space ticks it, Return shows the category); without one, the row.
+    let sense = if check.is_some() {
+        Sense::CLICK
+    } else {
+        Sense::click()
+    };
+    let (r, resp) = ui.allocate_exact_size(vec2(w, hit::CATEGORY), sense);
     resp.widget_info(|| {
         egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, current, label)
     });
@@ -886,6 +908,7 @@ pub fn category_row(
     }
     let mut x = r.left() + 10.0;
     let mut check_changed = None;
+    let mut cb_enter = false;
     if let Some((enabled, on, mixed, name)) = check {
         let cb_rect = Rect::from_center_size(pos2(x + 10.0, r.top() + 17.0), vec2(22.0, 22.0));
         let mut v = on;
@@ -896,6 +919,7 @@ pub fn category_row(
         if cb.changed() {
             check_changed = Some(v);
         }
+        cb_enter = cb.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         x += 28.0;
     } else {
         p.circle_filled(pos2(x + 10.0, r.top() + 17.0), 5.0, color);
@@ -979,7 +1003,7 @@ pub fn category_row(
         kit::paint_bar(&p, bar, t, share, color);
     }
     CatResp {
-        row_clicked: resp.clicked(),
+        row_clicked: resp.clicked() || cb_enter,
         row: resp,
         check_changed,
     }
@@ -1034,6 +1058,28 @@ pub fn rows(st: &PlanState) -> Vec<Row> {
 /// Other features may use `group` only to show headers (e.g. one set per app).
 pub fn keeps_a_copy(f: FeatureId) -> bool {
     matches!(f, FeatureId::Duplicates | FeatureId::SimilarPhotos)
+}
+
+/// Bytes and number of the copies a duplicates plan could free: in each set, every copy but
+/// one (the copies are the same size; the largest is the one counted as kept).
+pub fn duplicate_copies(plan: &Plan) -> (u64, usize) {
+    let mut sets: std::collections::BTreeMap<&str, Vec<u64>> = Default::default();
+    let (mut bytes, mut n) = (0u64, 0usize);
+    for it in &plan.items {
+        match &it.group {
+            Some(g) => sets.entry(g.as_str()).or_default().push(it.size),
+            None => {
+                bytes += it.size;
+                n += 1;
+            }
+        }
+    }
+    for sizes in sets.values() {
+        let max = sizes.iter().copied().max().unwrap_or(0);
+        bytes += sizes.iter().sum::<u64>() - max;
+        n += sizes.len().saturating_sub(1);
+    }
+    (bytes, n)
 }
 
 /// After a bulk selection: every set keeps one copy (the suggested one).
@@ -1167,6 +1213,10 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
     let cb_rect = Rect::from_center_size(pos2(r.left() + 20.0, r.center().y), vec2(22.0, 22.0));
     let mut on = selected_now;
     let cb = kit::check_or_lock(ui, &t, cb_rect, &mut on, &name, locked);
+    // Its size and why it is listed are heard too, not only the name (REVIEW-C C33).
+    let described = format!("{}, {}", human_size(it.size), reason_text(it));
+    ui.ctx()
+        .accesskit_node_builder(cb.id, |b| b.set_description(described));
     let row_click = row.clicked() && !locked;
     if row_click {
         on = !selected_now;
@@ -1228,7 +1278,20 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
     // Line 2 (why it is listed) runs under the size too, to the row's end.
     let tag_room = (r.right() - 12.0 - x0).max(60.0);
     let name_font = font(size::BODY, Weight::SemiBold);
-    let name_s = kit::truncate_middle(ui.ctx(), &name, &name_font, text_w * 0.62);
+    // The name comes first: whole while the path keeps at least a short stub, shortened
+    // only after the path has shrunk to it (REVIEW-C D6). A display name ("Trash of the
+    // startup disk") ends in an ellipsis; a file name keeps its end (".ipsw").
+    const MIN_PATH: f32 = 64.0;
+    let name_room = (text_w - 12.0 - MIN_PATH).max(text_w * 0.5);
+    let file_name = it
+        .path
+        .file_name()
+        .is_some_and(|n| n.to_string_lossy() == name);
+    let name_s = if file_name {
+        kit::truncate_middle(ui.ctx(), &name, &name_font, name_room)
+    } else {
+        kit::truncate_end(ui.ctx(), &name, &name_font, name_room)
+    };
     let name_w = kit::galley(ui, &name_s, name_font.clone(), t.text).size().x;
     // Painted only: the checkbox already carries the name for VoiceOver.
     p.text(

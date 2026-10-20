@@ -290,6 +290,7 @@ fn mac_settings() -> FakeMac {
 const CLICKABLE: &[Role] = &[
     Role::Button,
     Role::CheckBox,
+    Role::Switch,
     Role::RadioButton,
     Role::ComboBox,
     Role::Link,

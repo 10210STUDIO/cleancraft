@@ -702,7 +702,13 @@ impl CleanApp {
                                 self.notice_undo = None;
                             }
                             if let Some(name) = self.notice_undo.as_ref().map(|u| u.0.clone()) {
-                                let r = kit::pill(ui, &t, "Undo", kit::Kind::Secondary, Some(Icon::Undo));
+                                let r = kit::pill(
+                                    ui,
+                                    &t,
+                                    "Undo",
+                                    kit::Kind::Secondary,
+                                    Some(Icon::Undo),
+                                );
                                 r.widget_info(|| {
                                     egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name)
                                 });

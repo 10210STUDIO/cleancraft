@@ -46,7 +46,7 @@ fn lists_everything_with_signer_state_and_count() {
     }
     assert!(has_text(&h, "Example Corp (ABCDE12345)"));
     assert!(has(&h, "Not signed"));
-    assert!(has(&h, "Ad hoc signature (no developer identity)"));
+    assert!(has(&h, "Not signed by a known developer"));
     assert!(has(&h, "Program missing: this item does nothing"));
     assert!(has(&h, "Part of macOS"));
     // The Apple item has no buttons.
