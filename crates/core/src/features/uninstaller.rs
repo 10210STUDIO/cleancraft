@@ -116,30 +116,8 @@ fn stem(name: &str) -> &str {
     name.rsplit_once('.').map(|(s, _)| s).unwrap_or(name)
 }
 
-/// The plan to uninstall (`reset` false) or reset (`reset` true) the app at `app_path`.
-/// `reset` keeps the bundle: it is listed, locked, so the plan says what stays.
-pub fn uninstall_plan(
-    env: &Env,
-    settings: &Settings,
-    app_path: &Path,
-    reset: bool,
-) -> anyhow::Result<Plan> {
-    let all = apps::inventory(env, false, &|_| {});
-    let Some(app) = all.iter().find(|a| a.path == app_path).cloned() else {
-        bail!(
-            "{} is not an app in the Applications folders",
-            env.display(app_path)
-        );
-    };
-    Ok(plan_for(env, settings, &all, &app, reset))
-}
-
-/// [`uninstall_plan`] for `app` of the app list `all` (read once for several apps).
-fn plan_for(env: &Env, settings: &Settings, all: &[AppInfo], app: &AppInfo, reset: bool) -> Plan {
-    let app = app.clone();
-    let mut plan = Plan::new(FeatureId::Uninstaller);
-    let allow = Uninstaller.allow_roots(env);
-    plan.add_category(CAT_APP, "Application", "The app itself.", Risk::High);
+/// The three leftover categories of an uninstall plan (sure, maybe, shared).
+pub fn add_leftover_categories(plan: &mut Plan) {
     plan.add_category(
         CAT_HIGH,
         "Files named after the app's id",
@@ -158,27 +136,25 @@ fn plan_for(env: &Env, settings: &Settings, all: &[AppInfo], app: &AppInfo, rese
         "Removing these can affect other apps from this maker.",
         Risk::High,
     );
-    let bundle = plan.push(
-        app.path.clone(),
-        tree_size(&app.path).0,
-        CAT_APP,
-        format!("{} {}", app.name, app.version).trim().to_string(),
-        Risk::High,
-        !reset,
-    );
-    if reset {
-        plan.lock(bundle, "Kept: a reset keeps the app");
-    } else if !env.can_modify(&app.path) {
-        // Installed by a package: owned by the system, so it moves with the administrator
-        // password. (/Applications is shared with the admin group, so only the bundle counts.)
-        plan.mark_admin(bundle);
-    }
+}
+
+/// Add `app`'s leftovers to `plan` (categories from [`add_leftover_categories`]): files named
+/// after its id are selected, the rest only shown. Ignored paths, paths outside `allow` and
+/// files of macOS are left out. The app bundle itself is not added.
+pub fn push_leftovers(
+    env: &Env,
+    settings: &Settings,
+    app: &AppInfo,
+    all: &[AppInfo],
+    allow: &[PathBuf],
+    plan: &mut Plan,
+) {
     // Another copy of the same app (same bundle id) keeps using the files named after the id.
     let twin = all
         .iter()
         .find(|a| a.path != app.path && a.bundle_id.eq_ignore_ascii_case(&app.bundle_id));
-    for (path, label, conf) in find_leftovers(env, &app, all) {
-        if settings.is_ignored(&path) || policy::check(env, &allow, &path).is_err() {
+    for (path, label, conf) in find_leftovers(env, app, all) {
+        if settings.is_ignored(&path) || policy::check(env, allow, &path).is_err() {
             continue;
         }
         // Apple's App Store apps (iMovie, GarageBand) are removable, but their files named
@@ -226,6 +202,49 @@ fn plan_for(env: &Env, settings: &Settings, all: &[AppInfo], app: &AppInfo, rese
             plan.mark_admin(id);
         }
     }
+}
+
+/// The plan to uninstall (`reset` false) or reset (`reset` true) the app at `app_path`.
+/// `reset` keeps the bundle: it is listed, locked, so the plan says what stays.
+pub fn uninstall_plan(
+    env: &Env,
+    settings: &Settings,
+    app_path: &Path,
+    reset: bool,
+) -> anyhow::Result<Plan> {
+    let all = apps::inventory(env, false, &|_| {});
+    let Some(app) = all.iter().find(|a| a.path == app_path).cloned() else {
+        bail!(
+            "{} is not an app in the Applications folders",
+            env.display(app_path)
+        );
+    };
+    Ok(plan_for(env, settings, &all, &app, reset))
+}
+
+/// [`uninstall_plan`] for `app` of the app list `all` (read once for several apps).
+fn plan_for(env: &Env, settings: &Settings, all: &[AppInfo], app: &AppInfo, reset: bool) -> Plan {
+    let app = app.clone();
+    let mut plan = Plan::new(FeatureId::Uninstaller);
+    let allow = Uninstaller.allow_roots(env);
+    plan.add_category(CAT_APP, "Application", "The app itself.", Risk::High);
+    add_leftover_categories(&mut plan);
+    let bundle = plan.push(
+        app.path.clone(),
+        tree_size(&app.path).0,
+        CAT_APP,
+        format!("{} {}", app.name, app.version).trim().to_string(),
+        Risk::High,
+        !reset,
+    );
+    if reset {
+        plan.lock(bundle, "Kept: a reset keeps the app");
+    } else if !env.can_modify(&app.path) {
+        // Installed by a package: owned by the system, so it moves with the administrator
+        // password. (/Applications is shared with the admin group, so only the bundle counts.)
+        plan.mark_admin(bundle);
+    }
+    push_leftovers(env, settings, &app, all, &allow, &mut plan);
     if settings.is_ignored(&app.path) {
         let why = format!(
             "{} is on your ignore list (Settings), so CleanCraft does not remove it",
@@ -388,6 +407,16 @@ pub struct BatchApp {
     pub running: bool,
 }
 
+/// CleanCraft's own bundle: never offered for removal in bulk (remove it by hand in Finder).
+pub fn is_cleancraft(app: &Path) -> bool {
+    app.file_name()
+        .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("CleanCraft.app"))
+        || apps::read_bundle(app).is_some_and(|b| {
+            b.bundle_id
+                .eq_ignore_ascii_case("com.cristianizzo.cleancraft")
+        })
+}
+
 /// The group key of an app's items in a batch plan.
 pub fn group_key(app: &Path) -> String {
     format!("{GROUP_PREFIX}{}", app.display())
@@ -437,6 +466,9 @@ pub fn batch_plan(
         };
         if app.apple || apps::macos_app(&app.path) || apps::in_system(env, &app.path) {
             bail!("{} is part of macOS and cannot be removed", app.name);
+        }
+        if is_cleancraft(&app.path) {
+            bail!("CleanCraft does not remove itself in a batch");
         }
         if settings.is_ignored(&app.path) {
             bail!(

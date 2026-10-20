@@ -617,3 +617,59 @@ fn renders() {
         }
     }
 }
+
+#[test]
+fn select_all_while_searching_ticks_only_the_apps_shown_and_never_cleancraft() {
+    let m = mac();
+    let me = m
+        .mac
+        .app("CleanCraft", "com.cristianizzo.cleancraft", "1.0");
+    let mut h = harness(&m.mac);
+    go(&mut h);
+    assert!(
+        h.get_by_label("Select CleanCraft")
+            .accesskit_node()
+            .is_disabled()
+    );
+    type_into(&mut h, "Search apps", "o");
+    // Shown: Editor, Viewer, Jotter (and CleanCraft, locked); Safari hidden.
+    click(&mut h, "Select all in All Apps");
+    assert!(has_text(&h, "Select all 3 apps?"));
+    click(&mut h, "Select 3 Apps");
+    let p = picked(&h);
+    assert_eq!(p.len(), 3);
+    assert!(!p.contains(&me) && !p.contains(&m.safari));
+    // Another group while searching: only what is shown.
+    click(&mut h, "Clear Selection");
+    h.state_mut().apps.group = cleancraft_ui_egui::pages::apps::Group::Other;
+    h.state_mut().apps.search = "jot".into();
+    settle(&mut h);
+    click(&mut h, "Select all in Other Sources");
+    assert_eq!(picked(&h), vec![m.jotter.clone()]);
+}
+
+#[test]
+fn an_app_already_in_the_trash_offers_its_leftovers_only() {
+    let m = mac();
+    // Dragged to the Trash by hand: the bundle sits in ~/.Trash, its files stay.
+    let trashed = m.mac.env.user_trash().join("Viewer.app");
+    std::fs::create_dir_all(m.mac.env.user_trash()).unwrap();
+    std::fs::rename(&m.viewer, &trashed).unwrap();
+    let mut h = harness(&m.mac);
+    go(&mut h);
+    {
+        let app = h.state_mut();
+        cleancraft_ui_egui::pages::apps::open_app(app, &trashed);
+    }
+    settle(&mut h);
+    assert!(has_text(&h, "Viewer is already in the Trash"));
+    for f in &m.sure[1].1 {
+        assert!(has(&h, &shown(&m, f)), "{} not listed", f.display());
+    }
+    assert!(!has(&h, "Uninstall") && !has(&h, "Reset App..."));
+    click(&mut h, "Remove Leftovers");
+    assert!(has_text(&h, "Move 2 items"));
+    click(&mut h, "Move to Trash");
+    assert!(m.sure[1].1.iter().all(|f| !f.exists()));
+    assert!(trashed.exists(), "the app in the Trash is left alone");
+}

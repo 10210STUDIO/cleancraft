@@ -381,3 +381,19 @@ fn app_sizes_include_the_whole_bundle_and_sort_biggest_first() {
     assert_eq!(v[0].path, m.viewer);
     let _: &Path = &m.safari;
 }
+
+#[test]
+fn cleancraft_itself_is_never_in_a_batch() {
+    let m = mac();
+    let me = m
+        .mac
+        .app("CleanCraft", "com.cristianizzo.cleancraft", "1.0");
+    let err =
+        uninstaller::batch_plan(&m.mac.env, &set(), &[m.editor.clone(), me.clone()]).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("CleanCraft does not remove itself")
+    );
+    assert!(uninstaller::is_cleancraft(&me));
+    assert!(!uninstaller::is_cleancraft(&m.editor));
+}

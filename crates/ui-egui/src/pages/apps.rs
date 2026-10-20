@@ -320,7 +320,13 @@ fn rebuild_detail(app: &mut CleanApp, keep: Option<&Plan>) {
         .running
         .then(|| app_quit::running_parts(&app.env, &path));
     app.apps.checked_running = Some(std::time::Instant::now());
-    match uninstaller::uninstall_plan(&app.env, &app.settings, &path, false) {
+    // An app already in the Trash (the drag-to-Trash offer): only what it left behind.
+    let plan = if cleancraft_core::watch::in_trash(&app.env, &path) {
+        cleancraft_core::watch::trashed_app_plan(&app.env, &app.settings, &path)
+    } else {
+        uninstaller::uninstall_plan(&app.env, &app.settings, &path, false)
+    };
+    match plan {
         Ok(mut p) => {
             if let Some(old) = keep.filter(|o| o.notes.is_empty()) {
                 copy_selection(old, &mut p);
@@ -634,7 +640,7 @@ fn poll_running(app: &mut CleanApp) -> bool {
 
 /// Can this app be ticked? Never an app that is part of macOS.
 fn pickable(a: &AppInfo) -> bool {
-    !a.apple
+    !a.apple && !uninstaller::is_cleancraft(&a.path)
 }
 
 /// Tick or untick apps; the sizes of newly ticked ones are measured in the background.
@@ -1079,12 +1085,7 @@ fn visible_apps(st: &State, settings: &cleancraft_core::Settings) -> Vec<AppInfo
         .flatten()
         .filter(|a| st.group.has(a, now))
         .filter(|a| !settings.is_ignored(&a.path))
-        .filter(|a| {
-            q.is_empty()
-                || a.name.to_lowercase().contains(&q)
-                || a.bundle_id.to_lowercase().contains(&q)
-                || a.vendor.to_lowercase().contains(&q)
-        })
+        .filter(|a| q.is_empty() || matches_search(a, &q))
         .cloned()
         .collect();
     match st.sort {
@@ -1142,14 +1143,23 @@ fn group_count(st: &State, g: Group) -> (usize, u64) {
 }
 
 /// The apps of group `g` that can be ticked (not part of macOS, not on the ignore list).
+/// While searching, only the apps shown.
 fn group_apps(st: &State, settings: &cleancraft_core::Settings, g: Group) -> Vec<PathBuf> {
     let now = now();
+    let q = st.search.trim().to_lowercase();
     st.list
         .iter()
         .flatten()
         .filter(|a| g.has(a, now) && pickable(a) && !settings.is_ignored(&a.path))
+        .filter(|a| q.is_empty() || st.group != g || matches_search(a, &q))
         .map(|a| a.path.clone())
         .collect()
+}
+
+fn matches_search(a: &AppInfo, q: &str) -> bool {
+    a.name.to_lowercase().contains(q)
+        || a.bundle_id.to_lowercase().contains(q)
+        || a.vendor.to_lowercase().contains(q)
 }
 
 /// The "select all in this group" box of a group row: (enabled, on, mixed, name).
@@ -1216,7 +1226,7 @@ fn confirm_select_all(app: &mut CleanApp, ui: &mut Ui) {
             Icon::Remover,
             t.sec_a,
             &format!("Select all {n} apps?"),
-            "Every app you installed is ticked for removal. Apps that are part of macOS stay unticked. Nothing is removed until you review and confirm.",
+            "Every app listed is ticked for removal. Apps that are part of macOS stay unticked. Nothing is removed until you review and confirm.",
         );
         ui.add_space(space::L);
         let (g, c) = kit::dialog_actions(ui, &t, &format!("Select {n} Apps"), kit::Kind::Primary);
@@ -2022,6 +2032,10 @@ fn block_of(app: &CleanApp, plan: &Plan, path: &Path) -> Option<Block> {
     if plan.notes.is_empty() {
         return None;
     }
+    // An app already in the Trash (the Trash offer): only running blocks its leftovers.
+    if cleancraft_core::watch::in_trash(&app.env, path) {
+        return app.apps.running.then_some(Block::Running);
+    }
     if app.settings.is_ignored(path) {
         return Some(Block::Ignored(plan.notes[0].clone()));
     }
@@ -2118,107 +2132,125 @@ fn detail(app: &mut CleanApp, ui: &mut Ui) {
         block_banner(app, ui, b, &name, &path);
         ui.add_space(space::S);
     }
-    let shared_lock = plan.notes.first().cloned();
+    let trashed = cleancraft_core::watch::in_trash(&app.env, &path);
+    // The lock every row carries (the banner says it once).
+    let shared_lock = plan
+        .items
+        .first()
+        .and_then(|i| i.locked.clone())
+        .filter(|l| {
+            plan.items
+                .iter()
+                .all(|i| i.locked.as_deref() == Some(l.as_str()))
+        });
+    if trashed && let Some(note) = plan.notes.first() {
+        kit::strip(ui, Icon::Trash, t.text_dim, note);
+        ui.add_space(space::S);
+    }
     let files_sel = plan
         .selected()
         .filter(|i| i.category != uninstaller::CAT_APP)
         .count();
-    kit::bottom_bar(ui, &t, egui::Id::new("apps-detail-bottom"), |ui| {
-        // The same bar as every page with a selection (REVIEW-C C19): the size, the count,
-        // the hint in the room left, the buttons.
-        let n = plan.selected_count();
-        let size = plan.selected_size();
-        kit::bar_figure(
-            ui,
-            &t,
-            &human_size(size),
-            &format!("{} selected", cleancraft_core::fsutil::items(n)),
-            &format!("{n} selected, {}", human_size(size)),
-            block.is_some(),
-        );
-        ui.add_space(space::M);
-        let hint = match &block {
-            Some(Block::Running) => Some(format!("Quit {name} to choose what to remove.")),
-            Some(Block::System(_)) => Some("macOS keeps this app.".to_string()),
-            Some(Block::Ignored(_)) => Some("On your ignore list.".to_string()),
-            None if files_sel == 0 => Some("Select files to reset the app.".to_string()),
-            None => None,
-        };
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            // A blocked action is a quiet, disabled button (a pale red one reads as broken).
-            let can_uninstall = block.is_none()
-                && plan
-                    .items
-                    .iter()
-                    .any(|i| i.category == uninstaller::CAT_APP && i.locked.is_none());
-            let kind = if can_uninstall {
-                kit::Kind::Danger
-            } else {
-                kit::Kind::Secondary
+    if trashed {
+        trashed_bar(app, ui, &plan, block.is_some(), &name);
+    } else {
+        kit::bottom_bar(ui, &t, egui::Id::new("apps-detail-bottom"), |ui| {
+            // The same bar as every page with a selection (REVIEW-C C19): the size, the count,
+            // the hint in the room left, the buttons.
+            let n = plan.selected_count();
+            let size = plan.selected_size();
+            kit::bar_figure(
+                ui,
+                &t,
+                &human_size(size),
+                &format!("{} selected", cleancraft_core::fsutil::items(n)),
+                &format!("{n} selected, {}", human_size(size)),
+                block.is_some(),
+            );
+            ui.add_space(space::M);
+            let hint = match &block {
+                Some(Block::Running) => Some(format!("Quit {name} to choose what to remove.")),
+                Some(Block::System(_)) => Some("macOS keeps this app.".to_string()),
+                Some(Block::Ignored(_)) => Some("On your ignore list.".to_string()),
+                None if files_sel == 0 => Some("Select files to reset the app.".to_string()),
+                None => None,
             };
-            let un = ui
-                .add_enabled_ui(can_uninstall, |ui| {
-                    kit::pill(ui, &t, "Uninstall", kind, None)
-                })
-                .inner;
-            let why_not = match &block {
-                Some(Block::Running) => format!("Quit {name} first."),
-                Some(Block::System(s) | Block::Ignored(s)) => s.clone(),
-                None => String::new(),
-            };
-            let un = un.on_disabled_hover_text(&why_not);
-            if un.clicked() && can_uninstall {
-                app.act();
-                app.apps.pending = app.apps.detail.clone();
-                app.apps.phase = Phase::Confirm(Action::Uninstall);
-            }
-            let can_reset = block.is_none() && files_sel > 0;
-            let rs = ui.add_enabled_ui(can_reset, |ui| {
-                kit::pill(ui, &t, "Reset App...", kit::Kind::Secondary, None)
-            });
-            let rs = rs
-                .inner
-                .on_hover_text("Remove the app's settings and data, keep the app")
-                .on_disabled_hover_text(if block.is_some() {
-                    why_not.as_str()
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                // A blocked action is a quiet, disabled button (a pale red one reads as broken).
+                let can_uninstall = block.is_none()
+                    && plan
+                        .items
+                        .iter()
+                        .any(|i| i.category == uninstaller::CAT_APP && i.locked.is_none());
+                let kind = if can_uninstall {
+                    kit::Kind::Danger
                 } else {
-                    "Select the files to remove first. The app stays."
-                });
-            if rs.clicked() && can_reset {
-                app.act();
-                match uninstaller::uninstall_plan(&app.env, &app.settings, &path, true) {
-                    Ok(mut p) => {
-                        copy_selection(&plan, &mut p);
-                        app.apps.pending = Some(p);
-                        app.apps.phase = Phase::Confirm(Action::Reset);
-                    }
-                    Err(e) => app.apps.error = Some(format!("{e:#}")),
+                    kit::Kind::Secondary
+                };
+                let un = ui
+                    .add_enabled_ui(can_uninstall, |ui| {
+                        kit::pill(ui, &t, "Uninstall", kind, None)
+                    })
+                    .inner;
+                let why_not = match &block {
+                    Some(Block::Running) => format!("Quit {name} first."),
+                    Some(Block::System(s) | Block::Ignored(s)) => s.clone(),
+                    None => String::new(),
+                };
+                let un = un.on_disabled_hover_text(&why_not);
+                if un.clicked() && can_uninstall {
+                    app.act();
+                    app.apps.pending = app.apps.detail.clone();
+                    app.apps.phase = Phase::Confirm(Action::Uninstall);
                 }
-            }
-            if kit::pill(ui, &t, "Scan Again", kit::Kind::Secondary, None)
-                .on_hover_text("Look at the app's files again")
-                .clicked()
-            {
-                app.act();
-                rebuild_detail(app, Some(&plan));
-            }
-            if !app.settings.is_ignored(&path) && !matches!(block, Some(Block::System(_))) {
-                let ig = kit::secondary_resp(ui, &t, "Hide from List");
-                if ig
-                    .on_hover_text("Never offer this app for removal (Settings > Ignore list)")
+                let can_reset = block.is_none() && files_sel > 0;
+                let rs = ui.add_enabled_ui(can_reset, |ui| {
+                    kit::pill(ui, &t, "Reset App...", kit::Kind::Secondary, None)
+                });
+                let rs = rs
+                    .inner
+                    .on_hover_text("Remove the app's settings and data, keep the app")
+                    .on_disabled_hover_text(if block.is_some() {
+                        why_not.as_str()
+                    } else {
+                        "Select the files to remove first. The app stays."
+                    });
+                if rs.clicked() && can_reset {
+                    app.act();
+                    match uninstaller::uninstall_plan(&app.env, &app.settings, &path, true) {
+                        Ok(mut p) => {
+                            copy_selection(&plan, &mut p);
+                            app.apps.pending = Some(p);
+                            app.apps.phase = Phase::Confirm(Action::Reset);
+                        }
+                        Err(e) => app.apps.error = Some(format!("{e:#}")),
+                    }
+                }
+                if kit::pill(ui, &t, "Scan Again", kit::Kind::Secondary, None)
+                    .on_hover_text("Look at the app's files again")
                     .clicked()
                 {
                     app.act();
-                    app.settings.ignore.push(path.clone());
-                    app.save_settings();
-                    close_detail(app);
+                    rebuild_detail(app, Some(&plan));
                 }
-            }
-            if let Some(h) = &hint {
-                kit::bar_hint(ui, &t, h);
-            }
+                if !app.settings.is_ignored(&path) && !matches!(block, Some(Block::System(_))) {
+                    let ig = kit::secondary_resp(ui, &t, "Hide from List");
+                    if ig
+                        .on_hover_text("Never offer this app for removal (Settings > Ignore list)")
+                        .clicked()
+                    {
+                        app.act();
+                        app.settings.ignore.push(path.clone());
+                        app.save_settings();
+                        close_detail(app);
+                    }
+                }
+                if let Some(h) = &hint {
+                    kit::bar_hint(ui, &t, h);
+                }
+            });
         });
-    });
+    }
     ui.add_space(space::XS);
     let h = ui.available_height() - 4.0;
     let mut toggles = Vec::new();
@@ -2262,6 +2294,50 @@ fn detail(app: &mut CleanApp, ui: &mut Ui) {
     if app.apps.confirm_admin {
         confirm_admin(app, ui, &name);
     }
+}
+
+/// The bar of an app already in the Trash: its leftovers only (Remove Leftovers).
+fn trashed_bar(app: &mut CleanApp, ui: &mut Ui, plan: &Plan, blocked: bool, name: &str) {
+    let t = app.t;
+    let n = plan.selected_count();
+    let size = plan.selected_size();
+    kit::bottom_bar(ui, &t, egui::Id::new("apps-trashed-bottom"), |ui| {
+        kit::bar_figure(
+            ui,
+            &t,
+            &human_size(size),
+            &format!("{} selected", cleancraft_core::fsutil::items(n)),
+            &format!("{n} selected, {}", human_size(size)),
+            blocked,
+        );
+        ui.add_space(space::M);
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let can = !blocked && n > 0;
+            let kind = if can {
+                kit::Kind::Danger
+            } else {
+                kit::Kind::Secondary
+            };
+            let r = ui
+                .add_enabled_ui(can, |ui| kit::pill(ui, &t, "Remove Leftovers", kind, None))
+                .inner
+                .on_disabled_hover_text(if blocked {
+                    format!("Quit {name} first.")
+                } else {
+                    "Select the files to remove first.".to_string()
+                });
+            if r.clicked() && can {
+                app.act();
+                app.apps.pending = app.apps.detail.clone();
+                app.apps.phase = Phase::Confirm(Action::RemoveFiles);
+            }
+            if blocked {
+                kit::bar_hint(ui, &t, &format!("Quit {name} to remove its files."));
+            } else if n == 0 {
+                kit::bar_hint(ui, &t, "Tick the files to remove.");
+            }
+        });
+    });
 }
 
 /// A group of the app's files: a dot in the group's colour, its title, size and count, and
