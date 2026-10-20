@@ -6,6 +6,7 @@
 //! with an undo.
 
 pub mod app_icons;
+pub mod app_quit;
 pub mod apps;
 pub mod env;
 pub mod executor;
@@ -31,6 +32,7 @@ pub mod testkit_files;
 pub mod testkit_icons;
 pub mod testkit_monitor;
 pub mod testkit_perf;
+pub mod testkit_quit;
 pub mod updater;
 
 pub use env::{Env, Fault};

@@ -417,6 +417,41 @@ pub struct FakeState {
     /// Programs started without waiting ([`Sys::spawn`]), as "program arg arg". Kept apart
     /// from `calls` so fire-and-forget helpers do not disturb tests that count commands.
     pub spawned: Vec<String>,
+    /// What a command changes in the fake Mac when it runs with a successful answer (same keys
+    /// as `answers`; administrator commands as "admin:<command>"): processes that stop or
+    /// start, answers that change (`launchctl print` after a `bootout`).
+    pub effects: BTreeMap<String, FakeEffect>,
+}
+
+/// The side effects of one scripted command ([`FakeState::effects`]).
+#[derive(Clone, Debug, Default)]
+pub struct FakeEffect {
+    /// Pids that stop running.
+    pub stop: Vec<u32>,
+    /// Processes that start (a helper that relaunches itself).
+    pub start: Vec<RunningApp>,
+    /// Answers replaced: (key, stdout).
+    pub answers: Vec<(String, String)>,
+}
+
+impl FakeState {
+    fn apply_effect(&mut self, key: &str) {
+        let Some(e) = self.effects.get(key).cloned() else {
+            return;
+        };
+        self.running.retain(|r| !e.stop.contains(&r.pid));
+        self.running.extend(e.start);
+        for (k, out) in e.answers {
+            self.answers.insert(
+                k,
+                CmdOut {
+                    status: 0,
+                    stdout: out,
+                    stderr: String::new(),
+                },
+            );
+        }
+    }
 }
 
 impl FakeSys {
@@ -478,6 +513,11 @@ impl FakeSys {
 
     pub fn admin_calls(&self) -> Vec<String> {
         self.with(|s| s.admin_calls.clone())
+    }
+
+    /// When `key` runs with a successful answer, apply `effect` (see [`FakeState::effects`]).
+    pub fn on_run(&self, key: &str, effect: FakeEffect) {
+        self.with(|s| s.effects.insert(key.to_string(), effect));
     }
 
     pub fn set_open(&self, path: &Path) {
@@ -562,9 +602,16 @@ impl FakeSys {
                     format!("fake: no answer for `{line}`"),
                 ));
             };
-            let out = s.answers[*key].clone();
+            let key = key.to_string();
+            let out = s.answers[&key].clone();
             if out.ok()
-                && let Some(files) = s.creates.get(*key)
+                && let Some(k) = keys.iter().find(|k| s.effects.contains_key(**k))
+            {
+                let k = k.to_string();
+                s.apply_effect(&k);
+            }
+            if out.ok()
+                && let Some(files) = s.creates.get(&key)
             {
                 for (f, bytes) in files {
                     if let Some(root) = &s.root {
@@ -618,10 +665,12 @@ impl Sys for FakeSys {
                     )),
                 }
             } else {
-                Ok(s.answers
-                    .get(&format!("admin:{shell_command}"))
-                    .cloned()
-                    .unwrap_or_default())
+                let key = format!("admin:{shell_command}");
+                let out = s.answers.get(&key).cloned().unwrap_or_default();
+                if out.ok() {
+                    s.apply_effect(&key);
+                }
+                Ok(out)
             }
         })
     }

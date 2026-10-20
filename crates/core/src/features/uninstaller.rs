@@ -179,8 +179,8 @@ pub fn uninstall_plan(
         if apps::apple_part(&path, 3, true).is_some() {
             continue;
         }
-        let size = tree_size(&path).0;
-        let (cat, why, sel) = match conf {
+        let (size, unreadable) = leftover_size(env, &path);
+        let (cat, mut why, sel) = match conf {
             Confidence::High if twin.is_some() => (
                 CAT_SHARED,
                 format!(
@@ -209,6 +209,9 @@ pub fn uninstall_plan(
                 false,
             ),
         };
+        if unreadable > 0 {
+            why.push_str(SIZE_PARTIAL);
+        }
         let id = plan.push(path.clone(), size, cat, why, Risk::High, sel);
         if let Some(parent) = path.parent()
             && !env.can_modify(parent)
@@ -233,6 +236,46 @@ pub fn uninstall_plan(
         plan.notes.push(why);
     }
     Ok(plan)
+}
+
+/// Added to a leftover's reason when part of it could not be read: its size is a lower bound
+/// (often 0 KB for a folder macOS keeps private, or one owned by another user).
+pub const SIZE_PARTIAL: &str = ". Some of it could not be read, so it may be bigger than shown";
+
+/// The size shown for an item is only what could be read ([`SIZE_PARTIAL`]).
+pub fn size_is_partial(item: &crate::plan::Item) -> bool {
+    item.reason.ends_with(SIZE_PARTIAL)
+}
+
+/// Size of a leftover with the shared formula ([`tree_size`]: allocated blocks, links not
+/// followed, a hard-linked file once), and how many parts could not be read. Folders an
+/// injected `PermissionDenied` fault covers count as unreadable (tests run as root here).
+pub fn leftover_size(env: &Env, p: &Path) -> (u64, u32) {
+    fn walk(env: &Env, p: &Path, seen: &mut std::collections::HashSet<(u64, u64)>) -> (u64, u32) {
+        let Ok(md) = std::fs::symlink_metadata(p) else {
+            return (0, 1);
+        };
+        let mut total = 0;
+        if crate::fsutil::link_id(&md).is_none_or(|id| seen.insert(id)) {
+            total += crate::fsutil::entry_size(&md);
+        }
+        let mut unreadable = 0;
+        if md.is_dir() {
+            let denied = matches!(env.fault_for(p), Some(crate::env::Fault::PermissionDenied));
+            match std::fs::read_dir(p) {
+                Ok(rd) if !denied => {
+                    for e in rd.flatten() {
+                        let (s, u) = walk(env, &e.path(), seen);
+                        total += s;
+                        unreadable += u;
+                    }
+                }
+                _ => unreadable += 1,
+            }
+        }
+        (total, unreadable)
+    }
+    walk(env, p, &mut std::collections::HashSet::new())
 }
 
 /// Why nothing of this app may be touched now: part of macOS, or running.
