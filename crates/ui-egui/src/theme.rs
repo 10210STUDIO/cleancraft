@@ -512,6 +512,8 @@ pub fn apply(ctx: &egui::Context, t: &Tokens) {
         style.animation_time = motion::HOVER;
         // Static text keeps the arrow, as in Mac apps (no I-beam over every label).
         style.interaction.selectable_labels = false;
+        // Overlay scroll bars that show while scrolling or hovered, like macOS (REVIEW-C C35).
+        style.spacing.scroll = egui::style::ScrollStyle::floating();
         style.text_styles = [
             (TextStyle::Small, font(size::FOOTNOTE, Weight::Regular)),
             (TextStyle::Body, font(size::BODY, Weight::Regular)),

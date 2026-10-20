@@ -280,19 +280,23 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     }
     if let Some(e) = app.plan_state(f).error.clone() {
         let (text, needs_access) = friendly_error(&e);
-        ui.horizontal(|ui| {
-            let w = if needs_access { 200.0 } else { 0.0 };
-            ui.scope(|ui| {
-                ui.set_max_width(ui.available_width() - w);
-                kit::strip(ui, Icon::Warning, t.warning, &text);
-            });
-            if needs_access && kit::secondary(ui, &t, "Open Privacy Settings") {
+        if needs_access {
+            if kit::banner(
+                ui,
+                &t,
+                Icon::Warning,
+                t.warning,
+                &text,
+                "Open Privacy Settings",
+            ) {
                 app.act();
                 if let Err(e) = cleancraft_core::permissions::open_fda_settings(&app.env) {
                     app.warn(format!("Could not open System Settings: {e}"));
                 }
             }
-        });
+        } else {
+            kit::strip(ui, Icon::Warning, t.warning, &text);
+        }
         ui.add_space(space::S);
     }
     match phase {
@@ -598,7 +602,7 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     let avail_h = ui.available_height() - 4.0;
     let body =
         egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), avail_h));
-    let left_w = if body.width() < 760.0 { 236.0 } else { 272.0 };
+    let left_w = if body.width() < 760.0 { 260.0 } else { 272.0 };
     let left = egui::Rect::from_min_size(body.min, egui::vec2(left_w, avail_h));
     let right = egui::Rect::from_min_max(
         egui::pos2(left.right() + space::GUTTER, body.top()),
@@ -803,33 +807,50 @@ pub fn category_row(
         if cb.changed() {
             check_changed = Some(v);
         }
-        x += 30.0;
+        x += 28.0;
     } else {
         p.circle_filled(pos2(x + 10.0, r.top() + 17.0), 5.0, color);
-        x += 30.0;
+        x += 28.0;
     }
-    let size_g = kit::galley(ui, size_text, font(size::BODY, Weight::SemiBold), t.text);
+    // Names are never cut in the middle (REVIEW-C C4): when the name and the size do not fit
+    // on line 1 together, the size moves to line 2 (after the bar) and the name gets the
+    // whole line; only a name longer than the whole line ends in an ellipsis.
+    let name_font = font(size::BODY, Weight::SemiBold);
+    let size_g = kit::galley(ui, size_text, name_font.clone(), t.text);
     let size_w = size_g.size().x;
-    p.galley(
-        pos2(
-            r.right() - 10.0 - size_w,
-            r.top() + 17.0 - size_g.size().y / 2.0,
-        ),
-        size_g,
-        t.text,
-    );
+    let full_name_w = kit::galley(ui, title, name_font.clone(), t.text).size().x;
     let title_w = r.right() - 18.0 - size_w - x;
-    let title_s = kit::truncate_middle(
-        ui.ctx(),
-        title,
-        &font(size::BODY, Weight::SemiBold),
-        title_w,
-    );
+    let size_on_line1 = full_name_w <= title_w;
+    let small_size = if size_on_line1 {
+        None
+    } else {
+        Some(kit::galley(
+            ui,
+            size_text,
+            font(size::FOOTNOTE, Weight::SemiBold),
+            t.text,
+        ))
+    };
+    let title_s = if size_on_line1 {
+        title.to_string()
+    } else {
+        kit::truncate_end(ui.ctx(), title, &name_font, r.right() - 10.0 - x)
+    };
+    if size_on_line1 {
+        p.galley(
+            pos2(
+                r.right() - 10.0 - size_w,
+                r.top() + 17.0 - size_g.size().y / 2.0,
+            ),
+            size_g,
+            t.text,
+        );
+    }
     p.text(
         pos2(x, r.top() + 17.0),
         egui::Align2::LEFT_CENTER,
         title_s,
-        font(size::BODY, Weight::SemiBold),
+        name_font,
         if current {
             t.text
         } else {
@@ -848,11 +869,21 @@ pub fn category_row(
         count_g,
         t.text_faint,
     );
+    let mut bar_right = r.right() - 10.0;
+    if let Some(g) = small_size {
+        let w = g.size().x;
+        p.galley(
+            pos2(r.right() - 10.0 - w, r.top() + 35.0 - g.size().y / 2.0),
+            g,
+            t.text,
+        );
+        bar_right -= w + 8.0;
+    }
     let bar = Rect::from_min_max(
         pos2(x + count_w.max(56.0) + 10.0, r.top() + 32.5),
-        pos2(r.right() - 10.0, r.top() + 37.5),
+        pos2(bar_right, r.top() + 37.5),
     );
-    if share > 0.0 {
+    if share > 0.0 && bar.width() > 12.0 {
         kit::paint_bar(&p, bar, t, share, color);
     }
     CatResp {
@@ -1043,22 +1074,7 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
     // Checkbox, named after the file.
     let cb_rect = Rect::from_center_size(pos2(r.left() + 20.0, r.center().y), vec2(22.0, 22.0));
     let mut on = selected_now;
-    let cb = kit::place(ui, cb_rect, |ui| {
-        if locked {
-            // Still a (disabled) checkbox for VoiceOver and tests; a padlock on screen.
-            ui.multiply_opacity(0.0);
-        }
-        ui.add_enabled_ui(!locked, |ui| kit::check(ui, &t, &mut on, &name))
-            .inner
-    });
-    if locked {
-        icons::paint(
-            &p,
-            Rect::from_center_size(cb_rect.center(), egui::Vec2::splat(isz::INLINE + 2.0)),
-            Icon::Lock,
-            t.text_faint,
-        );
-    }
+    let cb = kit::check_or_lock(ui, &t, cb_rect, &mut on, &name, locked);
     let row_click = row.clicked() && !locked;
     if row_click {
         on = !selected_now;
@@ -1144,7 +1160,7 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
     let path_w = (path_end - path_x).max(24.0);
     let pf = font(size::FOOTNOTE, Weight::Regular);
     let path_s = kit::truncate_middle(ui.ctx(), &shown, &pf, path_w);
-    kit::text_at(
+    let path_resp = kit::text_at(
         ui,
         Rect::from_min_size(pos2(path_x, r.top() + 11.0), vec2(path_w, 19.0)),
         &path_s,
@@ -1152,8 +1168,8 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
         pf,
         t.text_faint,
         Align::Min,
-    )
-    .on_hover_text(&shown);
+    );
+    kit::row_tip(&path_resp, r, &shown);
     // The reason as a tag. A reason that repeats the row's name ("Trash of USB: 1 item" on
     // the row "Trash of USB") shows only the rest.
     let why_full = match &it.locked {
@@ -1185,8 +1201,13 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
     let tg = kit::galley(ui, &tag_s, tag_font.clone(), color);
     let tag_r = Rect::from_min_size(pos2(x0, r.top() + 31.0), tg.size() + vec2(16.0, 5.0));
     p.rect_filled(tag_r, tag_r.height() / 2.0, color.gamma_multiply(0.16));
-    kit::text_at(ui, tag_r, &tag_s, &why_full, tag_font, color, Align::Center)
-        .on_hover_text(&why_full);
+    let tag_resp = kit::text_at(ui, tag_r, &tag_s, &why_full, tag_font, color, Align::Center);
+    let tip = if locked {
+        why_full.clone()
+    } else {
+        format!("{why_full}\n{}", kit::risk_note(it.risk))
+    };
+    kit::row_tip(&tag_resp, r, &tip);
     // Why a locked row cannot be ticked, after the tag when it fits whole (never cut: the
     // padlock and the tag's tooltip carry it otherwise).
     if let Some(l) = &it.locked {
@@ -1459,11 +1480,7 @@ fn done(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         return;
     };
     let rep = rep.clone();
-    let summary = format!(
-        "{} moved. {} skipped.",
-        cleancraft_core::fsutil::items(rep.moved.len()),
-        rep.skipped.len()
-    );
+    let summary = kit::moved_summary(rep.moved.len(), rep.skipped.len());
     done_view(app, ui, f, &rep, &summary, |app, ui| {
         let t = app.t;
         if !rep.moved.is_empty()

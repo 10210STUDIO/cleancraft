@@ -332,7 +332,7 @@ fn review_c3_clicking_a_result_row_toggles_it() {
 
 /// C4 (S2): category names are never shortened in the middle ("Deve...aches") at 1060 x 680.
 #[test]
-#[ignore = "REVIEW-C C4 open: 21 System Junk category names cut"]
+
 fn review_c4_category_names_are_whole_at_the_smallest_window() {
     let mut bad = std::collections::BTreeSet::new();
     for (page, mac) in [

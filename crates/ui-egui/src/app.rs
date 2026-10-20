@@ -287,6 +287,10 @@ impl CleanApp {
     }
 
     pub fn ui(&mut self, ui: &mut Ui) {
+        // A switch or checkbox toggled last frame: its click sound (when turned on).
+        if kit::take_tap(ui.ctx()) {
+            crate::sound::play(&self.env, crate::sound::Cue::Tap);
+        }
         self.t = self.t.for_section(self.section());
         let t = self.t;
         let full = ui.max_rect();

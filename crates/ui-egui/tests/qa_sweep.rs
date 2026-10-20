@@ -129,10 +129,7 @@ fn run_lists_everything_moves_exactly_that_and_undo_per_module() {
         &h,
         &format!("{} moved to the Trash", human_size(expect_freed))
     ));
-    assert!(has(
-        &h,
-        &format!("2 moved, 0 skipped, {}", human_size(mail_size))
-    ));
+    assert!(has(&h, &format!("2 moved, {}", human_size(mail_size))));
     // Undo only Mail (second result card).
     assert_eq!(h.query_all_by_label("Undo").count(), 2);
     click_nth(&mut h, "Undo", 1);
