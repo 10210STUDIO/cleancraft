@@ -181,12 +181,12 @@ fn parts() -> &'static Parts {
 /// Optical fit of an icon: (scale, shift right, shift up) in scene units.
 fn fit(icon: SectionIcon) -> (f32, f32, f32) {
     match icon {
-        SectionIcon::QuickSweep => (0.956, 0.026, -0.109),
-        SectionIcon::Clean => (1.03, 0.064, 0.05),
-        SectionIcon::Protect => (0.985, -0.037, -0.148),
+        SectionIcon::QuickSweep => (0.945, 0.003, 0.054),
+        SectionIcon::Clean => (1.03, 0.044, 0.03),
+        SectionIcon::Protect => (0.97, -0.014, -0.032),
         SectionIcon::Speed => (1.0, 0.012, 0.027),
         SectionIcon::Apps => (0.959, -0.046, -0.042),
-        SectionIcon::Files => (0.925, -0.03, 0.056),
+        SectionIcon::Files => (0.925, -0.03, 0.036),
         SectionIcon::Monitor => (1.05, -0.06, -0.056),
         SectionIcon::History => (0.881, -0.031, -0.028),
         SectionIcon::Settings => (1.0, -0.034, -0.03),
@@ -466,33 +466,31 @@ mod tests {
     }
 
     /// REVIEW-C C24: the sidebar icons weigh alike (ink within 25 % of each other) and sit
-    /// centred (ink centroid within 0.5 pt of the square's centre at 22.5 pt).
+    /// centred (the box of what they paint within 0.5 pt of the square's centre at 22.5 pt).
     #[test]
     fn sidebar_icons_weigh_alike_and_sit_centred() {
         let px = 90u32; // 22.5 pt at 4x, enough to measure
         let pt = px as f32 / 22.5;
+        let n = px as usize;
         let mut inks = Vec::new();
         for icon in SectionIcon::ALL {
             let img = image(icon, px);
-            let n = px as usize;
-            let (mut ink, mut cx, mut cy) = (0.0f32, 0.0f32, 0.0f32);
+            let mut ink = 0.0f32;
+            let (mut x0, mut y0, mut x1, mut y1) = (n, n, 0, 0);
             for y in 0..n {
                 for x in 0..n {
-                    let a = alpha_at(&img, x, y) as f32 / 255.0;
-                    ink += a;
-                    cx += a * (x as f32 + 0.5);
-                    cy += a * (y as f32 + 0.5);
+                    let a = alpha_at(&img, x, y);
+                    ink += a as f32 / 255.0;
+                    if a > 128 {
+                        (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+                    }
                 }
             }
-            let (cx, cy) = (cx / ink, cy / ink);
-            let off = ((cx - n as f32 / 2.0).powi(2) + (cy - n as f32 / 2.0).powi(2)).sqrt() / pt;
+            let cx = ((x0 + x1 + 1) as f32 / 2.0 - n as f32 / 2.0) / pt;
+            let cy = ((y0 + y1 + 1) as f32 / 2.0 - n as f32 / 2.0) / pt;
             let ink_pt = ink / (pt * pt);
-            eprintln!(
-                "{icon:?}: ink {ink_pt:.0} pt2, centroid off {off:.2} pt ({:.2}, {:.2})",
-                (cx - n as f32 / 2.0) / pt,
-                (cy - n as f32 / 2.0) / pt
-            );
-            inks.push((icon, ink_pt, off));
+            eprintln!("{icon:?}: ink {ink_pt:.0} pt2, box centre off ({cx:.2}, {cy:.2}) pt");
+            inks.push((icon, ink_pt, cx.abs().max(cy.abs())));
         }
         let max = inks.iter().map(|i| i.1).fold(0.0, f32::max);
         let min = inks.iter().map(|i| i.1).fold(f32::MAX, f32::min);

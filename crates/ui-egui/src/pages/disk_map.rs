@@ -723,11 +723,16 @@ fn map(app: &mut CleanApp, ui: &mut Ui) {
     let n = app.disk_map.selection().len();
     let size = app.disk_map.selected_size();
     kit::bottom_bar(ui, &t, egui::Id::new("disk-map-bottom"), |ui| {
-        ui.label(
-            RichText::new(format!("{n} selected, {}", human_size(size)))
-                .font(font(size::BODY, Weight::SemiBold))
-                .color(t.text),
+        // The bar every page with a selection has (REVIEW-C C19).
+        kit::bar_figure(
+            ui,
+            &t,
+            &human_size(size),
+            &format!("{} selected", cleancraft_core::fsutil::items(n)),
+            &format!("{n} selected, {}", human_size(size)),
+            false,
         );
+        ui.add_space(theme::space::M);
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if n > 0 && kit::primary(ui, &t, "Review and Remove") {
                 app.act();
@@ -738,7 +743,7 @@ fn map(app: &mut CleanApp, ui: &mut Ui) {
                 app.disk_map.selected.clear();
             }
             if n == 0 {
-                kit::dim(
+                kit::bar_hint(
                     ui,
                     &t,
                     "Click a block to open it. Tick items in the list to remove them.",
@@ -1079,7 +1084,7 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                         {
                             // The tools that handle app data, one click away (REVIEW-U U24).
                             let lf = font(size::FOOTNOTE, Weight::Regular);
-                            let lead = "App data in Library. Use";
+                            let lead = "Use";
                             let g = kit::galley(ui, lead, lf.clone(), t.text_dim);
                             let mut x = line.left();
                             kit::text_at(

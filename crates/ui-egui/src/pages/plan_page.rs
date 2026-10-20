@@ -718,7 +718,7 @@ fn results_body(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan) {
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         ui.spacing_mut().item_spacing.y = 2.0;
-                        categories(app, ui, f, &plan);
+                        categories(app, ui, f, plan);
                     });
                 kit::scroll_fade(ui, &out, t.glass_solid());
             });
@@ -756,7 +756,7 @@ fn results_body(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan) {
                                 // Present from the first frame, fading up (REVIEW-C C10).
                                 ui.multiply_opacity(0.3 + 0.7 * k);
                                 match row {
-                                    Row::Item(id) => item_row(app, ui, f, &plan, *id),
+                                    Row::Item(id) => item_row(app, ui, f, plan, *id),
                                     Row::Group(g) => group_row(app, ui, f, g),
                                 }
                             });

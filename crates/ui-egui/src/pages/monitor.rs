@@ -436,7 +436,8 @@ fn storage_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
                 kit::dim(ui, &t, n);
             }
             ui.add_space(6.0);
-            ui.horizontal(|ui| {
+            // Two buttons wrap to two rows in a narrow column (1060 pt window).
+            ui.horizontal_wrapped(|ui| {
                 if kit::pill(ui, &t, "Free Up Space", kit::Kind::Secondary, None)
                     .on_hover_text("Open Quick Sweep to find what you can remove")
                     .clicked()

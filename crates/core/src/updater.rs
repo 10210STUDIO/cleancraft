@@ -35,7 +35,8 @@ pub enum Source {
 impl Source {
     pub fn label(self) -> &'static str {
         match self {
-            Source::Sparkle => "Developer updates",
+            // Plain words (REVIEW-U U15).
+            Source::Sparkle => "From the developer",
             Source::AppStore => "App Store",
         }
     }

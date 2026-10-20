@@ -664,7 +664,11 @@ fn c19_c20_app_remover_bar_and_headline() {
     click(&mut h, "Editor");
     let n = h.state().apps.detail.as_ref().unwrap().selected_count();
     // Shown "4 items selected" after the 24 pt figure; announced with the size.
-    assert!(texts(&h).iter().any(|t| t.0 == format!("{n} items selected")));
+    assert!(
+        texts(&h)
+            .iter()
+            .any(|t| t.0 == format!("{n} items selected"))
+    );
     assert!(has_text(&h, &format!("{n} selected, ")));
     // U15: plain action names.
     assert!(has(&h, "Reset App...") && has(&h, "Hide from List"));
