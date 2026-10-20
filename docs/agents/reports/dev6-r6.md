@@ -51,3 +51,7 @@ The brief asked for `xcrun simctl delete unavailable`, `docker image prune`, `do
 - `docker system df` table and Docker Desktop's "not running" text; docker found at /usr/local/bin or inside Docker.app when CleanCraft runs as an app (no shell PATH).
 - `brew cleanup -n` line format, run from an app.
 - git ls-files speed in a big repository; Documents access prompt when a code folder lives in Documents.
+
+## Gate
+
+Every workspace test target passed: 82 targets, run one at a time with each test binary deleted after it ran, because the shared disk dropped under 2 GB. That covers the core lib and all core test files, the mcp lib, the ui-egui lib and all 45 ui test files (qa_every_control included, with the new page), the app crate and the doc tests. `cargo clippy --workspace --all-targets -- -D warnings` is clean and `cargo fmt --all --check` is clean. target/ is deleted.
