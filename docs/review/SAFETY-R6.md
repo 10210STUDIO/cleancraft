@@ -92,7 +92,19 @@ running when off, missing lock reason). S3 = wording or hygiene.
 
 ## Defects
 
-(filled as owners commit; see the table at the end)
+| ID | Sev | Owner | What | Proof | Status |
+|---|---|---|---|---|---|
+| SAF6-1 | S1 | dev6 | Tool cleanups ran permanent deletes (`simctl delete unavailable`, `docker image/builder prune`, `brew cleanup`), and deleted what was there at run time, not the list shown | static `d456_no_permanent_developer_cleanup_commands` (WIP, before commit) | lead approved the safer design 17:46; verify on commit |
+| SAF6-2 | S1 | dev6 | `git ls-files -- <rel>` without `--literal-pathspecs`: a folder named `app [old]` is a glob, git-tracked `target/` unlocked | WIP review | approved fix; verify on commit |
+| SAF6-3 | S2 | dev6 | Python venvs preselected in inactive projects | WIP review | approved fix; verify on commit |
+| SAF6-5 | S2 | health6 | `mcp_setup::connect` replaces a symlinked settings file (`~/.claude.json`) with a plain file | `saf6_5_connect_keeps_a_linked_settings_file_a_link` | open |
+| SAF6-6 | S1 (MAC-CHECK) | tray6 | Notification texts follow the `-e` options without `--`: a name starting with `-e` becomes an AppleScript statement (`do shell script`) | `saf6_6_notification_texts_never_become_statements` | open |
+
+Checked and found right (passing guards): `t1_scheduled_scan_moves_nothing`, `t4_login_agent_plist_is_an_argument_array`,
+`w1_really_trashed_app_offers_its_leftovers_without_moving_them`, `w3_link_in_trash_to_installed_app_selects_nothing`,
+`w6_leftovers_route_for_an_installed_app_selects_nothing`, `h_connect_writes_valid_json_and_keeps_other_servers`,
+static guards `x2_processes_start_only_in_sys`, `t1_background_code_never_reaches_removal`; UI way-forward rule
+`review_safety6_ui::way_forward_*` (Mail open, Trash Bins, browsers open).
 
 ## Verification log
 
