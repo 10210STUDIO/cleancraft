@@ -10,6 +10,19 @@
 //! Downloads, then the oldest modified. [`check_keeps`] refuses a plan where every copy of a
 //! set is selected, so a set can never lose all its copies; the same rule guards Similar
 //! Images.
+//!
+//! Quick Sweep's "Duplicate Downloads" tile ([`DownloadDuplicates`]) runs the same matching on
+//! `~/Downloads` alone, with only the files changed in the last [`RECENT_DAYS`] days (a file's
+//! modification time; browsers set it when the download finishes). It is the Duplicates
+//! feature for the executor (same id, allow-list and checks), so its Review opens the
+//! Duplicates page on that plan.
+//!
+//! APFS clones (a copy made with Finder's Duplicate or `cp -c` shares its data blocks until one
+//! side changes) cannot be told apart from real copies with the command-line tools macOS ships:
+//! `stat -f %b` reports the full allocation for each clone, `ls`, `mdls` and `diskutil` show
+//! nothing about shared blocks, and the clone id is only in `getattrlist` (ATTR_CMNEXT_CLONEID),
+//! which needs a system call this crate does not make (no unsafe code). So clones are listed
+//! like any copy; moving one frees less than its size. See docs/features-r6/files6.md.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
@@ -31,6 +44,12 @@ pub struct Duplicates;
 pub const MIN_LEN: u64 = 100_000;
 /// Bytes hashed in the first pass (64 KiB).
 pub const PARTIAL: usize = 64 * 1024;
+/// Quick Sweep's Duplicate Downloads tile: only files changed in this many days (3 months).
+pub const RECENT_DAYS: i64 = 90;
+
+/// Quick Sweep's tile: duplicates in Downloads among files of the last [`RECENT_DAYS`] days.
+/// The executor sees the Duplicates feature (same id, allow-list and checks).
+pub struct DownloadDuplicates;
 
 /// How to choose the copy kept in each set.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -353,6 +372,43 @@ pub fn content_matcher() -> impl Fn(&Path, &Path) -> bool {
     }
 }
 
+impl Feature for DownloadDuplicates {
+    fn id(&self) -> FeatureId {
+        FeatureId::Duplicates
+    }
+
+    fn allow_roots(&self, env: &Env) -> Vec<PathBuf> {
+        Duplicates.allow_roots(env)
+    }
+
+    fn scan(&self, ctx: &ScanCtx<'_>) -> anyhow::Result<Plan> {
+        scan_filtered(ctx, &Location::Downloads, Some(RECENT_DAYS))
+    }
+
+    fn prepare(&self, env: &Env, plan: &Plan) -> anyhow::Result<()> {
+        Duplicates.prepare(env, plan)
+    }
+
+    fn validate(
+        &self,
+        env: &Env,
+        settings: &crate::settings::Settings,
+        plan: &Plan,
+        item: &Item,
+    ) -> Result<(), String> {
+        Duplicates.validate(env, settings, plan, item)
+    }
+
+    fn validate_set(
+        &self,
+        env: &Env,
+        settings: &crate::settings::Settings,
+        plan: &Plan,
+    ) -> anyhow::Result<()> {
+        Duplicates.validate_set(env, settings, plan)
+    }
+}
+
 impl Feature for Duplicates {
     fn id(&self) -> FeatureId {
         FeatureId::Duplicates
@@ -397,7 +453,17 @@ impl Feature for Duplicates {
 }
 
 pub fn scan_location(ctx: &ScanCtx<'_>, loc: &Location) -> anyhow::Result<Plan> {
+    scan_filtered(ctx, loc, None)
+}
+
+/// [`scan_location`], comparing only files changed in the last `recent_days` days when set.
+pub fn scan_filtered(
+    ctx: &ScanCtx<'_>,
+    loc: &Location,
+    recent_days: Option<i64>,
+) -> anyhow::Result<Plan> {
     let env = ctx.env;
+    let since = recent_days.map(|d| super::large_old::now_secs() - d * 86_400);
     let allow = Duplicates.allow_roots(env);
     let mut plan = Plan::new(FeatureId::Duplicates);
     for (id, title, _) in KINDS {
@@ -436,6 +502,7 @@ pub fn scan_location(ctx: &ScanCtx<'_>, loc: &Location) -> anyhow::Result<Plan> 
             inode: inode_of(&f.md),
             path: f.path,
         })
+        .filter(|c| since.is_none_or(|s| c.modified.is_some_and(|m| m >= s)))
         .collect();
     (ctx.progress)("file contents");
     let (sets, unreadable) = find_groups(files, &|| ctx.cancelled());
@@ -459,6 +526,12 @@ pub fn scan_location(ctx: &ScanCtx<'_>, loc: &Location) -> anyhow::Result<Plan> 
     if unreadable > 0 {
         plan.notes.push(format!(
             "{unreadable} files could not be read and were left out."
+        ));
+    }
+    if let Some(d) = recent_days {
+        plan.notes.push(format!(
+            "Only files changed in the last {} months are compared.",
+            d / 30
         ));
     }
     if !w.unreadable.is_empty() {

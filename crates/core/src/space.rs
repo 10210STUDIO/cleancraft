@@ -11,6 +11,30 @@
 //!
 //! A tree is built once per scanned folder and kept: drilling down needs no new scan. After a
 //! removal or an undo only the folders that changed are measured again ([`Tree::refresh`]).
+//!
+//! Locations ([`MapLocation`]): the home folder, the startup disk (`/`) and each mounted
+//! external volume ([`external_volumes`], from `df -Pk` and `diskutil list -plist external`
+//! through `env.sys`), or a folder.
+//!
+//! The startup disk on APFS: `/` is the sealed, read-only system volume; the user's data lives
+//! on the Data volume, mounted at `/System/Volumes/Data` and joined into `/` by firmlinks
+//! (`/Users`, `/Applications`, `/Library`, `/private/var` and the others listed in
+//! `/usr/share/firmlinks`). A walk of `/` therefore crosses into the Data volume's device
+//! (allowed: [`BuildOpts::extra_devs`]) and skips `/System/Volumes/Data` itself, which would
+//! count every firmlinked folder a second time; `/Volumes` (other disks, and the link back to
+//! `/`) and `/dev` are skipped too ([`BuildOpts::skip`]). Every file is counted once: hard
+//! links by (device, inode) on their first path, symbolic links never followed.
+//!
+//! Folders that cannot be read (most often for want of Full Disk Access) are kept in the tree
+//! with [`Node::unreadable`] set and listed in [`Tree::unreadable_paths`]: the map says "could
+//! not be read" for them, never a bare 0, and for a whole disk it shows how much of the used
+//! space was not measured ([`not_measured`]).
+//!
+//! What may be selected ([`lock_reason`]): the allow-list is the home folder (minus protected
+//! places, Library, hidden items and apps) plus, on an external volume, its user folders; the
+//! volume's own system folders (`.Spotlight-V100`, `.Trashes`, `.fseventsd`,
+//! `Backups.backupdb` and every other hidden item) never. Everything else is shown locked with
+//! its reason: "part of macOS" or "outside your home folder".
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -33,6 +57,8 @@ pub struct Node {
     pub files: u64,
     /// A Photos library is somewhere below this folder: it can be viewed, never removed whole.
     pub holds_library: bool,
+    /// This folder could not be read: its size is not known (at least `size`).
+    pub unreadable: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -45,6 +71,19 @@ pub struct Tree {
     /// Every path of each file that has several hard links, by (device, inode). The first
     /// path (name order) carries the size; the others count 0.
     pub links: HashMap<(u64, u64), BTreeSet<PathBuf>>,
+    /// The folders that could not be read (their contents are not counted).
+    pub unreadable_paths: Vec<PathBuf>,
+    /// How the tree was walked (kept for refreshes).
+    pub opts: BuildOpts,
+}
+
+/// How a walk treats places: paths left out entirely, and other devices it may enter.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BuildOpts {
+    /// Left out of the tree (not counted, not shown).
+    pub skip: Vec<PathBuf>,
+    /// Devices besides the root's that the walk enters (the APFS Data volume behind `/`).
+    pub extra_devs: Vec<u64>,
 }
 
 /// Link paths by (device, inode).
@@ -56,9 +95,12 @@ struct Walker<'a> {
     known: &'a Links,
     /// Link paths met in this walk.
     found: Links,
-    unreadable: u32,
+    unreadable: Vec<PathBuf>,
     other_volumes: u32,
     files: u64,
+    opts: &'a BuildOpts,
+    /// For injected test faults (a folder macOS refuses to list).
+    env: Option<&'a Env>,
     cancel: &'a AtomicBool,
     progress: &'a (dyn Fn(u64, &Path) + Sync),
 }
@@ -92,9 +134,13 @@ impl Walker<'_> {
             children: Vec::new(),
             files: 0,
             holds_library: false,
+            unreadable: false,
         };
         if md.is_dir() {
-            if self.dev.is_some_and(|d| d != dev) {
+            if self
+                .dev
+                .is_some_and(|d| d != dev && !self.opts.extra_devs.contains(&dev))
+            {
                 self.other_volumes += 1;
                 return Some(n);
             }
@@ -102,11 +148,22 @@ impl Walker<'_> {
             if self.cancel.load(Ordering::Relaxed) {
                 return Some(n);
             }
-            match std::fs::read_dir(p) {
+            let denied = self.env.is_some_and(|e| {
+                matches!(e.fault_for(p), Some(crate::env::Fault::PermissionDenied))
+            });
+            let listing = if denied {
+                Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+            } else {
+                std::fs::read_dir(p)
+            };
+            match listing {
                 Ok(rd) => {
                     let mut kids: Vec<PathBuf> = rd.flatten().map(|e| e.path()).collect();
                     kids.sort();
                     for k in kids {
+                        if self.opts.skip.iter().any(|s| *s == k) {
+                            continue;
+                        }
                         if let Some(c) = self.node(&k) {
                             n.size += c.size;
                             n.files += c.files;
@@ -118,7 +175,10 @@ impl Walker<'_> {
                     n.children
                         .sort_by(|a, b| b.size.cmp(&a.size).then_with(|| a.name.cmp(&b.name)));
                 }
-                Err(_) => self.unreadable += 1,
+                Err(_) => {
+                    n.unreadable = true;
+                    self.unreadable.push(p.to_path_buf());
+                }
             }
         } else {
             n.files = 1;
@@ -148,7 +208,35 @@ impl Walker<'_> {
 
 /// Measure `root`. `progress` gets the number of files seen so far.
 pub fn build(root: &Path, cancel: &AtomicBool, progress: &(dyn Fn(u64, &Path) + Sync)) -> Tree {
-    build_with(root, cancel, progress, &Links::new(), None)
+    build_opts(root, &BuildOpts::default(), cancel, progress)
+}
+
+/// [`build`] with places skipped and devices allowed ([`BuildOpts`]).
+pub fn build_opts(
+    root: &Path,
+    opts: &BuildOpts,
+    cancel: &AtomicBool,
+    progress: &(dyn Fn(u64, &Path) + Sync),
+) -> Tree {
+    build_with(root, cancel, progress, &Links::new(), None, opts, None)
+}
+
+/// Measure a Disk Map location (see the module notes for the startup disk).
+pub fn build_location(
+    env: &Env,
+    loc: &MapLocation,
+    cancel: &AtomicBool,
+    progress: &(dyn Fn(u64, &Path) + Sync),
+) -> Tree {
+    build_with(
+        &loc.root(env),
+        cancel,
+        progress,
+        &Links::new(),
+        None,
+        &loc.build_opts(env),
+        Some(env),
+    )
 }
 
 /// [`build`] of a part of a tree whose other link paths are `known`; `dev` is the tree's
@@ -159,25 +247,31 @@ fn build_with(
     progress: &(dyn Fn(u64, &Path) + Sync),
     known: &Links,
     dev: Option<u64>,
+    opts: &BuildOpts,
+    env: Option<&Env>,
 ) -> Tree {
     let dev = dev.or_else(|| std::fs::symlink_metadata(root).ok().map(|m| dev_ino(&m).0));
     let mut w = Walker {
         dev,
         known,
         found: Links::new(),
-        unreadable: 0,
+        unreadable: Vec::new(),
         other_volumes: 0,
         files: 0,
+        opts,
+        env,
         cancel,
         progress,
     };
     let node = w.node(root);
     Tree {
         root: node,
-        unreadable: w.unreadable,
+        unreadable: w.unreadable.len() as u32,
         other_volumes: w.other_volumes,
         stopped: cancel.load(Ordering::Relaxed),
         links: w.found,
+        unreadable_paths: w.unreadable,
+        opts: opts.clone(),
     }
 }
 
@@ -286,9 +380,18 @@ impl Tree {
                 links.insert(*id, inside);
             }
         }
+        let unreadable_paths: Vec<PathBuf> = self
+            .unreadable_paths
+            .iter()
+            .filter(|q| q.starts_with(p))
+            .cloned()
+            .collect();
         Some(Tree {
             root: Some(node),
             links,
+            unreadable: unreadable_paths.len() as u32,
+            unreadable_paths,
+            opts: self.opts.clone(),
             ..Default::default()
         })
     }
@@ -305,7 +408,11 @@ impl Tree {
         }
         if p == root.path {
             let never = AtomicBool::new(false);
-            *self = build(p, &never, &|_, _| {});
+            let opts = self.opts.clone();
+            *self = build_opts(p, &opts, &never, &|_, _| {});
+            return;
+        }
+        if self.opts.skip.iter().any(|s| p.starts_with(s)) {
             return;
         }
         // The nearest folder from p upward whose parent is in the tree.
@@ -330,10 +437,14 @@ impl Tree {
         }
         let never = AtomicBool::new(false);
         let fresh = if std::fs::symlink_metadata(&target).is_ok() {
-            build_with(&target, &never, &|_, _| {}, &self.links, dev)
+            build_with(&target, &never, &|_, _| {}, &self.links, dev, &self.opts, None)
         } else {
             Tree::default()
         };
+        self.unreadable_paths.retain(|q| !q.starts_with(&target));
+        self.unreadable_paths
+            .extend(fresh.unreadable_paths.iter().cloned());
+        self.unreadable = self.unreadable_paths.len() as u32;
         let Some(root) = self.root.as_mut() else {
             return;
         };
@@ -384,11 +495,99 @@ impl Tree {
     }
 }
 
-/// Why `p` cannot be selected in the Disk Map, if it cannot. The allow-list is the home folder.
+/// Top-level folders of the startup disk that belong to macOS: shown, never selectable.
+pub const MACOS_TOP: &[&str] = &[
+    "System", "Library", "usr", "bin", "sbin", "private", "etc", "var", "tmp", "dev", "cores",
+    "Volumes",
+];
+
+/// Folders at the top of an external volume that the volume's system keeps: never selectable,
+/// with the reason shown. Every other hidden item at any depth is locked too.
+pub const VOLUME_SYSTEM: &[(&str, &str)] = &[
+    (".Spotlight-V100", "the disk's Spotlight index"),
+    (".Trashes", "the disk's Trash"),
+    (".fseventsd", "the disk's record of file changes"),
+    ("Backups.backupdb", "Time Machine backups"),
+    (".DocumentRevisions-V100", "saved versions of documents"),
+    (".TemporaryItems", "temporary files of the disk"),
+];
+
+/// The external volume folder (`/Volumes/<name>`) holding `p`, from the path alone: a real
+/// folder (not a link, which is how `/Volumes/Macintosh HD` points back to `/`) whose name is
+/// not hidden. The executor's allow-list ([`crate::features::space_lens::SpaceLens`]) only has
+/// the volumes `df` reports mounted.
+pub fn volume_root_of(env: &Env, p: &Path) -> Option<PathBuf> {
+    let vols = env.sys_path("/Volumes");
+    let rest = p.strip_prefix(&vols).ok()?;
+    let name = rest.components().next()?.as_os_str();
+    if name.to_string_lossy().starts_with('.') {
+        return None;
+    }
+    let root = vols.join(name);
+    match std::fs::symlink_metadata(&root) {
+        Ok(md) if md.is_dir() => Some(root),
+        _ => None,
+    }
+}
+
+/// Why `p`, on the external volume at `vol`, cannot be selected.
+fn volume_lock_reason(env: &Env, vol: &Path, p: &Path) -> Option<String> {
+    if p == vol {
+        return Some("the disk itself".into());
+    }
+    let rel = p.strip_prefix(vol).ok()?;
+    if let Some(first) = rel.components().next() {
+        let first = first.as_os_str().to_string_lossy();
+        if let Some((_, why)) = VOLUME_SYSTEM
+            .iter()
+            .find(|(n, _)| policy::same_name(std::ffi::OsStr::new(n), std::ffi::OsStr::new(&*first)))
+        {
+            return Some(format!("system data of this disk: {why}"));
+        }
+    }
+    if rel
+        .components()
+        .any(|c| c.as_os_str().to_string_lossy().starts_with('.'))
+    {
+        return Some("hidden system data of this disk".into());
+    }
+    if rel
+        .components()
+        .any(|c| Path::new(c.as_os_str()).extension().is_some_and(|e| e.eq_ignore_ascii_case("app")))
+    {
+        return Some("an app (use App Remover)".into());
+    }
+    if let Some(why) = policy::protected_reason(env, p) {
+        return Some(format!("protected: {why}"));
+    }
+    if let Err(r) = policy::check(env, &[vol.to_path_buf()], p) {
+        return Some(r.to_string());
+    }
+    None
+}
+
+/// Why `p` cannot be selected in the Disk Map, if it cannot. The allow-list is the home folder
+/// and the user folders of external volumes (see the module notes).
 pub fn lock_reason(env: &Env, p: &Path) -> Option<String> {
+    if let Some(vol) = volume_root_of(env, p) {
+        return volume_lock_reason(env, &vol, p);
+    }
     let home = env.home();
     if !p.starts_with(home) || p == home {
-        return Some("outside your home folder".into());
+        let top = p
+            .strip_prefix(env.root())
+            .ok()
+            .and_then(|r| r.components().next())
+            .map(|c| c.as_os_str().to_string_lossy().into_owned());
+        let macos = p == env.root()
+            || top
+                .as_deref()
+                .is_some_and(|t| MACOS_TOP.iter().any(|m| m.eq_ignore_ascii_case(t)));
+        return Some(if macos && p != home {
+            "part of macOS".into()
+        } else {
+            "outside your home folder".into()
+        });
     }
     if let Some(why) = policy::protected_reason(env, p) {
         return Some(format!("protected: {why}"));
@@ -515,6 +714,281 @@ pub fn disk_use(env: &Env, path: &Path) -> DiskUse {
         free: env.sys.free_space(path).ok(),
         ..Default::default()
     }
+}
+
+/// One line of `df -Pk`: the device, total and free bytes, and where it is mounted (as macOS
+/// writes it, may contain spaces).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DfLine {
+    pub device: String,
+    pub total: u64,
+    pub free: u64,
+    pub mount: String,
+}
+
+/// Every line of `df -Pk` (all mounted file systems). Columns: device, 1024-blocks, used,
+/// available, capacity, mount point (the rest of the line: names may hold spaces).
+pub fn parse_df_all(stdout: &str) -> Vec<DfLine> {
+    let mut out = Vec::new();
+    for line in stdout.lines().skip(1) {
+        let mut rest = line.trim_start();
+        let mut cols: Vec<&str> = Vec::new();
+        for _ in 0..5 {
+            let Some(end) = rest.find(char::is_whitespace) else {
+                break;
+            };
+            cols.push(&rest[..end]);
+            rest = rest[end..].trim_start();
+        }
+        if cols.len() < 5 || rest.is_empty() {
+            continue;
+        }
+        let (Ok(total), Ok(free)) = (cols[1].parse::<u64>(), cols[3].parse::<u64>()) else {
+            continue;
+        };
+        out.push(DfLine {
+            device: cols[0].to_string(),
+            total: total * 1024,
+            free: free * 1024,
+            mount: rest.trim_end().to_string(),
+        });
+    }
+    out
+}
+
+/// What `diskutil list -plist external` says: the external disks and their partitions and
+/// volumes ("disk4", "disk4s1", "disk5s1"), and the names of mounted ones by mount point.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ExternalDisks {
+    pub disks: BTreeSet<String>,
+    pub names: HashMap<String, String>,
+}
+
+/// Parse `diskutil list -plist external` (XML property list): `AllDisks` and, from
+/// `AllDisksAndPartitions` (with their `Partitions` and `APFSVolumes`), each `MountPoint` with
+/// its `VolumeName`.
+pub fn parse_diskutil_external(stdout: &str) -> Option<ExternalDisks> {
+    let v = plist::Value::from_reader_xml(stdout.as_bytes()).ok()?;
+    let d = v.as_dictionary()?;
+    let mut out = ExternalDisks::default();
+    for disk in d.get("AllDisks")?.as_array()? {
+        if let Some(s) = disk.as_string() {
+            out.disks.insert(s.to_string());
+        }
+    }
+    fn walk(v: &plist::Value, out: &mut ExternalDisks) {
+        let Some(d) = v.as_dictionary() else {
+            return;
+        };
+        if let Some(id) = d.get("DeviceIdentifier").and_then(|x| x.as_string()) {
+            out.disks.insert(id.to_string());
+        }
+        if let (Some(m), Some(n)) = (
+            d.get("MountPoint").and_then(|x| x.as_string()),
+            d.get("VolumeName").and_then(|x| x.as_string()),
+        ) {
+            out.names.insert(m.to_string(), n.to_string());
+        }
+        for key in ["Partitions", "APFSVolumes"] {
+            if let Some(a) = d.get(key).and_then(|x| x.as_array()) {
+                for x in a {
+                    walk(x, out);
+                }
+            }
+        }
+    }
+    if let Some(a) = d.get("AllDisksAndPartitions").and_then(|x| x.as_array()) {
+        for x in a {
+            walk(x, &mut out);
+        }
+    }
+    Some(out)
+}
+
+/// Volume names under `/Volumes` that are macOS's own, never listed.
+pub const SYSTEM_VOLUME_NAMES: &[&str] = &[
+    "Recovery",
+    "Preboot",
+    "VM",
+    "Update",
+    "xarts",
+    "iSCPreboot",
+    "Hardware",
+];
+
+/// A mounted external volume the Disk Map can measure.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Volume {
+    /// The name Finder shows.
+    pub name: String,
+    /// Where it is mounted (in the env: inside the fake root in tests).
+    pub mount: PathBuf,
+    pub total: u64,
+    pub free: u64,
+}
+
+/// The mounted external volumes, from `df -Pk` (every mount under `/Volumes` on a `/dev/disk`
+/// device; hidden and macOS volumes left out) checked against `diskutil list -plist external`
+/// when it answers (only disks it calls external: no disk images it does not list, no
+/// internal volumes). An empty list when `df` does not answer.
+pub fn external_volumes(env: &Env) -> Vec<Volume> {
+    let Ok(out) = env.sys.run("/bin/df", &["-Pk"]) else {
+        return Vec::new();
+    };
+    if !out.ok() {
+        return Vec::new();
+    }
+    let ext = env
+        .sys
+        .run("/usr/sbin/diskutil", &["list", "-plist", "external"])
+        .ok()
+        .filter(|o| o.ok())
+        .and_then(|o| parse_diskutil_external(&o.stdout));
+    let mut vols: Vec<Volume> = Vec::new();
+    for l in parse_df_all(&out.stdout) {
+        let Some(dev) = l.device.strip_prefix("/dev/") else {
+            continue;
+        };
+        if !dev.starts_with("disk") {
+            continue;
+        }
+        let Some(rest) = l.mount.strip_prefix("/Volumes/") else {
+            continue;
+        };
+        if rest.is_empty()
+            || rest.contains('/')
+            || rest.starts_with('.')
+            || rest.starts_with("com.apple.")
+            || SYSTEM_VOLUME_NAMES.iter().any(|n| n.eq_ignore_ascii_case(rest))
+        {
+            continue;
+        }
+        if let Some(e) = &ext
+            && !e.disks.contains(dev)
+        {
+            continue;
+        }
+        let mount = env.sys_path(&l.mount);
+        // A real folder, not a link (`/Volumes/Macintosh HD` links back to `/`).
+        if !std::fs::symlink_metadata(&mount).is_ok_and(|m| m.is_dir()) {
+            continue;
+        }
+        let name = ext
+            .as_ref()
+            .and_then(|e| e.names.get(&l.mount).cloned())
+            .unwrap_or_else(|| rest.to_string());
+        if vols.iter().any(|v| v.mount == mount) {
+            continue;
+        }
+        vols.push(Volume {
+            name,
+            mount,
+            total: l.total,
+            free: l.free,
+        });
+    }
+    vols.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    vols
+}
+
+/// Where the Disk Map measures.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum MapLocation {
+    #[default]
+    Home,
+    /// The whole startup disk, from `/`.
+    Startup,
+    Volume(Volume),
+    /// A folder (typed or chosen).
+    Folder(PathBuf),
+}
+
+impl MapLocation {
+    /// The folder walked.
+    pub fn root(&self, env: &Env) -> PathBuf {
+        match self {
+            MapLocation::Home => env.home().to_path_buf(),
+            MapLocation::Startup => env.sys_path("/"),
+            MapLocation::Volume(v) => v.mount.clone(),
+            MapLocation::Folder(p) => p.clone(),
+        }
+    }
+
+    /// The name shown: "Home folder", "Startup Disk", the volume's name, the folder's path.
+    pub fn label(&self, env: &Env) -> String {
+        match self {
+            MapLocation::Home => "Home folder".into(),
+            MapLocation::Startup => "Startup Disk".into(),
+            MapLocation::Volume(v) => v.name.clone(),
+            MapLocation::Folder(p) => env.display(p),
+        }
+    }
+
+    /// A stable key for snapshots: "home", "startup", "volume:<name>", "folder:<path>".
+    pub fn key(&self, env: &Env) -> String {
+        match self {
+            MapLocation::Home => "home".into(),
+            MapLocation::Startup => "startup".into(),
+            MapLocation::Volume(v) => format!("volume:{}", v.name),
+            MapLocation::Folder(p) => format!("folder:{}", env.display(p)),
+        }
+    }
+
+    /// Does this location cover a whole disk (so the used space can be compared)?
+    pub fn whole_disk(&self) -> bool {
+        matches!(self, MapLocation::Startup | MapLocation::Volume(_))
+    }
+
+    /// How to walk it (the startup disk: see the module notes).
+    pub fn build_opts(&self, env: &Env) -> BuildOpts {
+        match self {
+            MapLocation::Startup => {
+                let data = env.sys_path("/System/Volumes/Data");
+                BuildOpts {
+                    skip: vec![
+                        data.clone(),
+                        env.sys_path("/Volumes"),
+                        env.sys_path("/dev"),
+                    ],
+                    extra_devs: std::fs::symlink_metadata(&data)
+                        .ok()
+                        .map(|m| dev_ino(&m).0)
+                        .into_iter()
+                        .collect(),
+                }
+            }
+            _ => BuildOpts::default(),
+        }
+    }
+}
+
+/// The locations the picker offers: home folder, startup disk, then every external volume.
+pub fn locations(env: &Env) -> Vec<MapLocation> {
+    let mut v = vec![MapLocation::Home, MapLocation::Startup];
+    v.extend(external_volumes(env).into_iter().map(MapLocation::Volume));
+    v
+}
+
+/// The location a mapped folder is (for its name and its snapshot key).
+pub fn location_of(env: &Env, root: &Path, vols: &[Volume]) -> MapLocation {
+    if root == env.home() {
+        MapLocation::Home
+    } else if root == env.sys_path("/") {
+        MapLocation::Startup
+    } else if let Some(v) = vols.iter().find(|v| v.mount == root) {
+        MapLocation::Volume(v.clone())
+    } else {
+        MapLocation::Folder(root.to_path_buf())
+    }
+}
+
+/// For a whole disk: the part of its used space the walk did not count (folders that could
+/// not be read, space macOS keeps for itself such as snapshots and other APFS volumes).
+/// `None` when the use is unknown or the walk found as much.
+pub fn not_measured(tree: &Tree, disk: &DiskUse) -> Option<u64> {
+    let used = disk.used?;
+    let measured = tree.root.as_ref()?.size;
+    (used > measured).then(|| used - measured)
 }
 
 /// A rectangle: x, y, width, height.

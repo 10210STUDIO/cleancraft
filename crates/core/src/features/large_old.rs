@@ -18,6 +18,15 @@
 //! worth a look). Last opened = the later of the modification time and the last use: on macOS
 //! the Spotlight attribute `kMDItemLastUsedDate` (asked in batches of [`MDLS_BATCH`] files with
 //! one `mdls` call, cheap enough), otherwise, or when Spotlight has no answer, the access time.
+//! Each item's `modified` holds that last-opened time (seconds since the epoch), so "Sort by
+//! date" and the age groups both use it.
+//!
+//! Grouping ([`GroupBy`], remembered in `<data>/files.json`): by kind (the default), by size
+//! (under 50 MB, 50 MB to 1 GB, 1 to 5 GB, over 5 GB; decimal units like Finder) or by age
+//! (opened in the last 3 months, not opened in 3 to 6 months, 6 to 12 months, over a year,
+//! unknown; a month is 30 days and a year 365). [`regroup`] only rewrites the plan's
+//! categories: the items, their sizes and the selection stay as they are (nothing is ever
+//! preselected).
 
 use std::collections::HashMap;
 use std::fs::Metadata;
@@ -96,6 +105,162 @@ impl Location {
 pub struct ScanOptions {
     pub large_old: Location,
     pub duplicates: Location,
+    /// How Large & Old Files groups its results.
+    pub large_old_group: GroupBy,
+}
+
+/// How Large & Old Files groups its list.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum GroupBy {
+    #[default]
+    Kind,
+    Size,
+    Age,
+}
+
+impl GroupBy {
+    pub const ALL: [GroupBy; 3] = [GroupBy::Kind, GroupBy::Size, GroupBy::Age];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            GroupBy::Kind => "Kind",
+            GroupBy::Size => "Size",
+            GroupBy::Age => "Age",
+        }
+    }
+}
+
+/// 50 MB, 1 GB, 5 GB (decimal, like Finder and [`human_size`]).
+pub const SIZE_EDGES: [u64; 3] = [50_000_000, 1_000_000_000, 5_000_000_000];
+
+/// Size groups: (id, title, smallest size included, first size excluded).
+pub const SIZE_GROUPS: &[(&str, &str, u64, u64)] = &[
+    ("size_50mb_1gb", "50 MB to 1 GB", SIZE_EDGES[0], SIZE_EDGES[1]),
+    ("size_1gb_5gb", "1 to 5 GB", SIZE_EDGES[1], SIZE_EDGES[2]),
+    ("size_over_5gb", "Over 5 GB", SIZE_EDGES[2], u64::MAX),
+    ("size_under_50mb", "Under 50 MB", 0, SIZE_EDGES[0]),
+];
+
+/// Days in the age groups' months and year.
+pub const DAYS_3_MONTHS: i64 = 90;
+pub const DAYS_6_MONTHS: i64 = 180;
+pub const DAYS_YEAR: i64 = 365;
+
+/// Age groups: (id, title, fewest days since last opened included, first excluded).
+pub const AGE_GROUPS: &[(&str, &str, i64, i64)] = &[
+    (
+        "age_3_6_months",
+        "Not opened in 3 to 6 months",
+        DAYS_3_MONTHS,
+        DAYS_6_MONTHS,
+    ),
+    (
+        "age_6_12_months",
+        "Not opened in 6 to 12 months",
+        DAYS_6_MONTHS,
+        DAYS_YEAR,
+    ),
+    ("age_over_year", "Not opened for over a year", DAYS_YEAR, i64::MAX),
+    ("age_recent", "Opened in the last 3 months", i64::MIN, DAYS_3_MONTHS),
+];
+
+/// Items whose last-opened time is not known.
+pub const AGE_UNKNOWN: (&str, &str) = ("age_unknown", "Last opened at an unknown time");
+
+/// The size group of `bytes`.
+pub fn size_group(bytes: u64) -> &'static str {
+    SIZE_GROUPS
+        .iter()
+        .find(|(_, _, lo, hi)| bytes >= *lo && bytes < *hi)
+        .map(|g| g.0)
+        .unwrap_or("size_over_5gb")
+}
+
+/// The age group of an item last opened at `opened` (seconds), at time `now` (seconds).
+pub fn age_group(opened: Option<i64>, now: i64) -> &'static str {
+    let Some(t) = opened else {
+        return AGE_UNKNOWN.0;
+    };
+    let days = (now - t).div_euclid(86_400);
+    AGE_GROUPS
+        .iter()
+        .find(|(_, _, lo, hi)| days >= *lo && days < *hi)
+        .map(|g| g.0)
+        .unwrap_or(AGE_UNKNOWN.0)
+}
+
+/// The kind group of a Large & Old item: [`kind_of`], and a document package counts as a
+/// document.
+pub fn item_kind(p: &Path) -> &'static str {
+    let k = kind_of(p);
+    let package = k == "other"
+        && ext_in(p, PACKAGE_EXTS)
+        && std::fs::symlink_metadata(p).is_ok_and(|m| m.is_dir());
+    if package { "documents" } else { k }
+}
+
+/// Group a Large & Old Files plan by `by` (seconds `now` for the ages). Only the categories
+/// change: items, sizes and the selection are kept. A plan of Downloads by source app keeps
+/// its own groups.
+pub fn regroup(plan: &mut Plan, by: GroupBy, now: i64) {
+    if plan.feature != Some(FeatureId::LargeOldFiles) || is_by_source(plan) {
+        return;
+    }
+    const NOTE: &str = "Your own files. Look at each one before you select it.";
+    plan.categories.clear();
+    match by {
+        GroupBy::Kind => {
+            for (id, title, _) in KINDS {
+                plan.add_category(id, title, NOTE, Risk::High);
+            }
+        }
+        GroupBy::Size => {
+            for (id, title, _, _) in SIZE_GROUPS {
+                plan.add_category(id, title, NOTE, Risk::High);
+            }
+        }
+        GroupBy::Age => {
+            for (id, title, _, _) in AGE_GROUPS {
+                plan.add_category(id, title, NOTE, Risk::High);
+            }
+            plan.add_category(AGE_UNKNOWN.0, AGE_UNKNOWN.1, NOTE, Risk::High);
+        }
+    }
+    for it in &mut plan.items {
+        it.category = match by {
+            GroupBy::Kind => item_kind(&it.path),
+            GroupBy::Size => size_group(it.size),
+            GroupBy::Age => age_group(it.modified, now),
+        }
+        .to_string();
+    }
+}
+
+/// Which grouping a plan shows now (from its categories).
+pub fn grouped_by(plan: &Plan) -> GroupBy {
+    let has = |pre: &str| plan.categories.iter().any(|c| c.id.starts_with(pre));
+    if has("size_") {
+        GroupBy::Size
+    } else if has("age_") {
+        GroupBy::Age
+    } else {
+        GroupBy::Kind
+    }
+}
+
+/// A plan of "Downloads by source app" (grouped by the app that saved each file).
+pub fn is_by_source(plan: &Plan) -> bool {
+    plan.categories
+        .iter()
+        .any(|c| c.id.starts_with("src_") || c.id == super::downloads::NO_SOURCE)
+}
+
+/// Seconds since the epoch, now.
+pub fn now_secs() -> i64 {
+    secs(SystemTime::now())
 }
 
 impl ScanOptions {
@@ -635,7 +800,8 @@ pub fn scan_location(ctx: &ScanCtx<'_>, loc: &Location) -> anyhow::Result<Plan> 
             kind_of(&f.path)
         };
         let id = plan.push(f.path.clone(), f.size, cat, reason, Risk::High, false);
-        plan.items[id].modified = f.md.modified().ok().map(secs);
+        // The last-opened time: sorting by date and the age groups use it.
+        plan.items[id].modified = last.map(secs);
     }
     if !w.unreadable.is_empty() {
         plan.notes.push(format!(
@@ -647,6 +813,11 @@ pub fn scan_location(ctx: &ScanCtx<'_>, loc: &Location) -> anyhow::Result<Plan> 
     if w.stopped {
         plan.notes.push("Scan stopped before the end.".into());
     }
+    regroup(
+        &mut plan,
+        ScanOptions::load(env).large_old_group,
+        secs(now),
+    );
     Ok(plan)
 }
 

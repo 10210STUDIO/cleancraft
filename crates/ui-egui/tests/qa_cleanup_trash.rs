@@ -69,7 +69,7 @@ fn sizes_locked_items_and_empty_in_finder() {
     ));
     assert!(has_text(
         &h,
-        "erase it in Mail with Mailbox > Erase Deleted Items"
+        "Only Mail can erase deleted mail"
     ));
     assert!(
         !has(&h, "Review and Clean"),
