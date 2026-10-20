@@ -29,6 +29,9 @@ pub struct Settings {
     pub keep_languages: Vec<String>,
     /// Quick Sweep: modules the user turned off (shown dimmed, not run).
     pub sweep_skip: Vec<crate::plan::FeatureId>,
+    /// The filters and sort order each list keeps between launches, by list ("apps",
+    /// "plan.system_junk", "history"...). Searches are not kept.
+    pub lists: std::collections::BTreeMap<String, ListPrefs>,
     /// Play interface sounds (scan finished, cleanup finished, errors).
     pub sounds: bool,
     /// Loudness of interface sounds, 0.0 to 1.0.
@@ -76,6 +79,7 @@ impl Default for Settings {
             menu_bar: true,
             keep_languages: Vec::new(),
             sweep_skip: Vec::new(),
+            lists: Default::default(),
             sounds: true,
             sound_volume: DEFAULT_SOUND_VOLUME,
             sound_ticks: false,
@@ -148,6 +152,18 @@ impl Settings {
             .iter()
             .any(|i| p.starts_with(i) || crate::policy::starts_with_ci(p, i))
     }
+}
+
+/// What a list remembers: its filters that are on and its sort order.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(default)]
+pub struct ListPrefs {
+    /// Keys of the filters that are on ("app_store", "unused").
+    pub filters: Vec<String>,
+    /// Key of the sort order ("size", "name"); empty means the list's first one.
+    pub sort: String,
+    /// The sort runs the other way round from its usual direction (smallest first).
+    pub reverse: bool,
 }
 
 #[cfg(test)]

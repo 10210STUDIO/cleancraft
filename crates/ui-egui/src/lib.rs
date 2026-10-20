@@ -7,6 +7,7 @@ pub mod icons;
 pub mod images;
 pub mod jobs;
 pub mod kit;
+pub mod kit_list;
 pub mod logo;
 pub mod motion;
 pub mod pages;
