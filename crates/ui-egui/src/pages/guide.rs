@@ -157,7 +157,7 @@ pub fn inline(t: &Tokens, text: &str, size_pt: f32, color: Color32, wrap: f32) -
 pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
     let t = app.t;
     ui.horizontal(|ui| {
-        if kit::ghost(ui, &t, "Settings", Some(Icon::Back)).clicked() {
+        if kit::ghost(ui, &t, "Back to Settings", Some(Icon::Back)).clicked() {
             app.act();
             app.open_route(&AppRoute::Settings);
         }

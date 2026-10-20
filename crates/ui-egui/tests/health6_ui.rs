@@ -12,10 +12,32 @@ use cleancraft_core::{FeatureId, mcp_setup};
 use cleancraft_ui_egui::app::Page;
 use cleancraft_ui_egui::pages::health::{self, Read};
 use common::{H, click, harness, has, has_text, steps};
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
+
+/// Click the first widget with this label (the sidebar entry before the switcher segment).
+fn click_first(h: &mut H, label: &str) {
+    h.get_all_by_label(label).next().expect(label).click();
+    steps(h);
+}
+
+/// The app in a tall window, so every card of a long page is on screen.
+fn tall(mac: &FakeMac) -> H {
+    let app = cleancraft_ui_egui::CleanApp::new(mac.env.clone()).with_sync();
+    let mut h = egui_kittest::Harness::builder()
+        .with_size(egui::vec2(1280.0, 2400.0))
+        .build_ui_state(
+            |ui, app: &mut cleancraft_ui_egui::CleanApp| {
+                app.logic(&ui.ctx().clone());
+                app.ui(ui);
+            },
+            app,
+        );
+    steps(&mut h);
+    h
+}
 
 fn open_health(h: &mut H) {
-    click(h, "Live Monitor");
+    click_first(h, "Live Monitor");
     click(h, "Mac Health");
     assert_eq!(h.state().page, Page::Health);
     steps(h);
@@ -47,11 +69,13 @@ fn health_is_a_tool_of_live_monitor_and_reads_good() {
     assert!(has_text(&h, "macOS 15.1"));
     assert!(has_text(&h, "Free space"));
     // The switcher goes back to Live Monitor, and the sidebar remembers Mac Health.
-    click(&mut h, "Live Monitor");
+    // The switcher's Live Monitor segment (the second node with that name).
+    h.get_all_by_label("Live Monitor").nth(1).unwrap().click();
+    steps(&mut h);
     assert_eq!(h.state().page, Page::Feature(FeatureId::Monitor));
     click(&mut h, "Mac Health");
     click(&mut h, "Quick Sweep");
-    click(&mut h, "Live Monitor");
+    click_first(&mut h, "Live Monitor");
     assert_eq!(h.state().page, Page::Health);
 }
 
@@ -108,7 +132,7 @@ fn every_card_opens_its_page() {
     ];
     for (headline, action, route) in cases {
         let mac = th::troubled_mac_now();
-        let mut h = harness(&mac);
+        let mut h = tall(&mac);
         open_health(&mut h);
         assert!(has(&h, "Needs attention"), "state");
         assert!(has_text(&h, headline), "card {headline}");
@@ -151,6 +175,13 @@ fn why_lists_the_deciding_cards_and_rules_are_shown() {
         .expect("why line")
         .accesskit_node()
         .label()
+        .or(None)
+        .map(|s| s.to_string())
+        .or_else(|| {
+            h.query_all_by_label_contains("Why: ")
+                .next()
+                .and_then(|n| n.accesskit_node().value().map(|v| v.to_string()))
+        })
         .unwrap_or_default();
     for c in h.state().health.cards.clone() {
         assert_eq!(
@@ -332,7 +363,7 @@ fn guide_page_renders_and_links() {
     assert_eq!(h.state().page, Page::ConnectAi);
     h.state_mut().open_route(&AppRoute::AgentGuide);
     steps(&mut h);
-    click(&mut h, "Settings");
+    click(&mut h, "Back to Settings");
     assert_eq!(h.state().page, Page::Settings);
 }
 
@@ -348,7 +379,7 @@ fn first_launch_asks_once_and_not_now_is_remembered() {
     h.state_mut().launch_checks();
     steps(&mut h);
     assert_eq!(h.state().page, Page::ConnectAi);
-    assert!(has(&h, "Use CleanCraft from your AI apps?"));
+    assert!(has_text(&h, "AI apps such as Claude can ask CleanCraft"));
     assert!(has_text(&h, "Claude Desktop"));
     assert!(has_text(&h, "Claude Code"));
     click(&mut h, "Not Now");
@@ -396,7 +427,10 @@ fn connect_desktop_with_undo_and_the_separate_clean_switch() {
     );
     assert!(has_text(&h, "no longer connected"));
     // The separate switch, off by default.
-    h.get_by_label(cleancraft_ui_egui::pages::welcome::CLEAN_SWITCH)
+    // The switch (its visible label is a second node with the same name).
+    h.get_all_by_label(cleancraft_ui_egui::pages::welcome::CLEAN_SWITCH)
+        .next()
+        .unwrap()
         .click();
     steps(&mut h);
     assert!(h.state().settings.agents_may_clean);
@@ -473,7 +507,7 @@ fn monitor_mac() -> FakeMac {
 fn monitor_groups_helpers_and_explains_macos_processes() {
     let mac = monitor_mac();
     let mut h = harness(&mac);
-    click(&mut h, "Live Monitor");
+    click_first(&mut h, "Live Monitor");
     steps(&mut h);
     assert!(has(&h, "Brave Browser (3 processes)"));
     assert!(has_text(
@@ -495,10 +529,10 @@ fn click_nth(h: &mut H, label: &str, n: usize) {
 #[test]
 fn macos_rows_never_offer_quit_app_rows_link_to_startup_items() {
     let mac = monitor_mac();
-    let mut h = harness(&mac);
-    click(&mut h, "Live Monitor");
-    // Hover the WindowServer row: no quit link.
-    let r = h.get_by_label("WindowServer").rect();
+    let mut h = tall(&mac);
+    click_first(&mut h, "Live Monitor");
+    // Hover the WindowServer row of the CPU card: no quit link.
+    let r = h.get_all_by_label("WindowServer").next().unwrap().rect();
     h.hover_at(r.center());
     steps(&mut h);
     let links = h.query_all_by_label("Quit in Startup Items...").count();
@@ -525,7 +559,7 @@ fn macos_rows_never_offer_quit_app_rows_link_to_startup_items() {
 fn sampler_runs_at_most_every_two_seconds_and_only_when_visible() {
     let mac = monitor_mac();
     let mut h = harness(&mac);
-    click(&mut h, "Live Monitor");
+    click_first(&mut h, "Live Monitor");
     let calls = |mac: &FakeMac| mac.env.fake_sys().unwrap().calls().len();
     let start = calls(&mac);
     let readings_before = h.state().monitor.samples;
@@ -555,7 +589,7 @@ fn sampler_runs_at_most_every_two_seconds_and_only_when_visible() {
     }
     assert_eq!(calls(&mac), before, "no commands off the page");
     // Minimised on the Monitor page: no readings.
-    click(&mut h, "Live Monitor");
+    click_first(&mut h, "Live Monitor");
     let before = calls(&mac);
     h.input_mut()
         .viewports
@@ -579,10 +613,22 @@ fn sampler_runs_at_most_every_two_seconds_and_only_when_visible() {
 // Repaint budget
 // ---------------------------------------------------------------------------------------
 
-/// Frames a second an idle page asks for, measured like an event loop: after each frame the
-/// next one comes when the page asked for it (immediately, after a delay, or never: then a
-/// 10 s wait stands for "no frame"). Simulated over `secs` seconds after the page settled.
+/// Frames a second an idle page asks for, measured like an event loop at 60 Hz: after each
+/// frame the next one comes when the page asked for it (at the next vsync, after a delay, or
+/// never: then a 10 s wait stands for "no frame"). Simulated over `secs` seconds after the
+/// page settled.
 fn frames_per_second(h: &mut H, secs: f64) -> f64 {
+    use std::sync::{Arc, Mutex};
+    // Every repaint request, with the delay asked for (egui's own clock is the wall clock,
+    // which a slow test frame would use up: the requests themselves are what counts).
+    let asked: Arc<Mutex<Option<std::time::Duration>>> = Arc::default();
+    let a = asked.clone();
+    h.ctx.set_request_repaint_callback(move |info| {
+        if info.viewport_id == egui::ViewportId::ROOT {
+            let mut g = a.lock().unwrap();
+            *g = Some(g.map_or(info.delay, |d| d.min(info.delay)));
+        }
+    });
     let mut t = h.ctx.input(|i| i.time);
     // Settle: entrance animations finish.
     for _ in 0..240 {
@@ -593,26 +639,45 @@ fn frames_per_second(h: &mut H, secs: f64) -> f64 {
     let end = t + secs;
     let mut frames = 0u32;
     while t < end {
+        *asked.lock().unwrap() = None;
         h.input_mut().time = Some(t);
         h.step();
         frames += 1;
-        let delay = h
-            .output()
-            .viewport_output
-            .get(&egui::ViewportId::ROOT)
-            .map(|v| v.repaint_delay)
-            .unwrap_or(std::time::Duration::MAX);
-        let d = delay.as_secs_f64().clamp(1.0 / 60.0, 10.0);
+        let delay = asked.lock().unwrap().unwrap_or(std::time::Duration::MAX);
+        if frames < 4 && std::env::var("BUDGET_DEBUG").is_ok() {
+            eprintln!("frame {frames}: delay {delay:?} causes {:?}", h.ctx.repaint_causes());
+        }
+        // egui asks to start the next frame one frame early (the delay has the predicted
+        // frame time taken off), so the frame it wants lands one frame later.
+        let d = (delay.as_secs_f64() + 1.0 / 60.0).clamp(1.0 / 60.0, 10.0);
         t += d;
     }
     frames as f64 / secs
+}
+
+/// The app with egui predicting 60 Hz frames, like eframe on a 60 Hz display (kittest's
+/// default prediction is 4 frames a second, which turns every short delay into "now").
+fn harness60(mac: &FakeMac) -> H {
+    let app = cleancraft_ui_egui::CleanApp::new(mac.env.clone()).with_sync();
+    let mut h = egui_kittest::Harness::builder()
+        .with_size(egui::vec2(common::W, common::HGT))
+        .with_step_dt(1.0 / 60.0)
+        .build_ui_state(
+            |ui, app: &mut cleancraft_ui_egui::CleanApp| {
+                app.logic(&ui.ctx().clone());
+                app.ui(ui);
+            },
+            app,
+        );
+    steps(&mut h);
+    h
 }
 
 #[test]
 fn idle_pages_stay_within_the_repaint_budget() {
     let mac = th::troubled_mac_now();
     cleancraft_core::testkit_monitor::answer_all(mac.env.fake_sys().unwrap());
-    let mut h = harness(&mac);
+    let mut h = harness60(&mac);
     let mut report = Vec::new();
     // (page, budget in frames a second)
     let pages: Vec<(&str, f64)> = vec![
@@ -620,9 +685,9 @@ fn idle_pages_stay_within_the_repaint_budget() {
         ("settings", 1.0),
         ("health", 1.0),
         ("guide:ai_agents", 1.0),
-        // Live Monitor: one reading every 2 s, so about 0.5 a second, plus the wake-up of a
-        // finished reading.
-        ("monitor", 1.2),
+        // Live Monitor: one reading every 2 s: the tick, then the finished reading wakes the
+        // window (egui draws twice for an immediate request): at most 3 frames a reading.
+        ("monitor", 1.6),
         // Start screens with an ambient hero: capped at 30.
         ("system_junk", 31.0),
     ];
@@ -633,7 +698,9 @@ fn idle_pages_stay_within_the_repaint_budget() {
         report.push(format!("{page}: {fps:.1} frames/s"));
         assert!(
             fps <= budget,
-            "{page}: {fps:.1} frames a second (budget {budget})"
+            "{page}: {fps:.1} frames a second (budget {budget}); {}; causes {:?}",
+            report.join(", "),
+            h.ctx.repaint_causes()
         );
     }
     // Unfocused or minimised: ambient loops stop.

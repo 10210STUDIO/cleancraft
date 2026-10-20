@@ -312,8 +312,23 @@ impl CleanApp {
     /// Start a module's scan unless it is scanning or shows results the person may be
     /// reviewing (those stay; Scan Again is on the page).
     fn start_scan_if_idle(&mut self, f: FeatureId) {
-        // Plan modules only (Quick Sweep and the other pages have their own start button).
-        if f != FeatureId::SmartCare && cleancraft_core::features::get(f).is_some() {
+        // Pages with their own lists load them; plan pages scan (Quick Sweep, Tune-up,
+        // Startup Items, Disk Map and Live Monitor keep their own start buttons).
+        if matches!(f, FeatureId::Uninstaller | FeatureId::Updater) {
+            if self.apps.list.is_none() && !self.apps.is_loading() {
+                pages::apps::start_load(self);
+            }
+            return;
+        }
+        let own_page = matches!(
+            f,
+            FeatureId::SmartCare
+                | FeatureId::LoginItems
+                | FeatureId::Maintenance
+                | FeatureId::SpaceLens
+                | FeatureId::Monitor
+        );
+        if !own_page && cleancraft_core::features::get(f).is_some() {
             let st = self.plan_state(f);
             if st.plan.is_none() && !st.is_busy() {
                 pages::plan_page::start_scan(self, f);
