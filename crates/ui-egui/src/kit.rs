@@ -285,12 +285,20 @@ pub fn dialog_actions(ui: &mut Ui, t: &Tokens, action: &str, kind: Kind) -> (boo
     let last: Option<u64> = ui.data(|d| d.get_temp(key));
     let just_opened = last.is_none_or(|l| l + 1 < frame);
     ui.data_mut(|d| d.insert_temp(key, frame));
+    // The dialog becomes the top modal layer a frame after it opens: keep the request until
+    // then.
+    let pending_key = key.with("focus-pending");
+    let pending = just_opened
+        || ui
+            .data(|d| d.get_temp::<bool>(pending_key))
+            .unwrap_or(false);
     ui.horizontal(|ui| {
         ui.add_space((ui.available_width() - cancel_w - go_w - gap).max(0.0));
         let c = secondary_resp(ui, t, "Cancel");
-        if just_opened && top {
+        if pending && top {
             c.request_focus();
         }
+        ui.data_mut(|d| d.insert_temp(pending_key, pending && !top));
         out.1 |= c.clicked();
         out.0 |= pill(ui, t, action, kind, icon.then_some(Icon::Trash)).clicked();
     });
