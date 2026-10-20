@@ -166,6 +166,31 @@ fn clickables(h: &H) -> Vec<(Role, String, Rect)> {
     out
 }
 
+/// The part of `r` the widget actually paints on screen: the union of its own shapes (those
+/// inside `r`) cut to their clip rects. `None` when everything it paints is clipped away
+/// (a row scrolled out of its list): accessibility rects ignore clipping.
+fn painted_visible(h: &H, r: Rect) -> Option<Rect> {
+    fn walk(s: &Shape, clip: Rect, r: Rect, out: &mut Option<Rect>) {
+        match s {
+            Shape::Vec(v) => v.iter().for_each(|x| walk(x, clip, r, out)),
+            _ => {
+                let b = s.visual_bounding_rect();
+                if b.is_positive() && r.expand(2.0).contains_rect(b) {
+                    let v = b.intersect(clip);
+                    if v.is_positive() {
+                        *out = Some(out.map_or(v, |o| o.union(v)));
+                    }
+                }
+            }
+        }
+    }
+    let mut out = None;
+    for cs in &h.output().shapes {
+        walk(&cs.shape, cs.clip_rect, r, &mut out);
+    }
+    out
+}
+
 fn renderer_ok() -> bool {
     std::panic::catch_unwind(egui_kittest::wgpu::WgpuTestRenderer::new).is_ok()
 }
@@ -241,11 +266,15 @@ fn review_c1_every_control_shows_the_pointing_hand() {
             if modal && !matches!(label.as_str(), "Cancel" | "Move to Trash" | "Close dialog") {
                 continue;
             }
-            if r.center().x > 1280.0 || r.center().y > 820.0 {
+            // Only what is on screen: rows scrolled out of a list keep their rect.
+            let Some(seen) = painted_visible(&h, r) else {
+                continue;
+            };
+            if seen.width() < 4.0 || seen.height() < 4.0 {
                 continue;
             }
             total += 1;
-            h.hover_at(r.center());
+            h.hover_at(seen.center());
             h.step();
             h.step();
             let c = h.output().platform_output.cursor_icon;
@@ -254,6 +283,8 @@ fn review_c1_every_control_shows_the_pointing_hand() {
             }
         }
     }
+    // The screens above hold about 190 controls on screen; far fewer means the filter broke.
+    assert!(total >= 150, "only {total} controls hovered");
     assert!(
         bad.is_empty(),
         "{} of {total} controls do not show the pointing hand:\n{}",
