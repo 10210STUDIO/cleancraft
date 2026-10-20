@@ -447,11 +447,6 @@ pub fn empty_trash_in_finder(env: &Env) -> EmptyOutcome {
         )
     } else if output.contains("-1743") || output.contains("Not authorized") {
         "macOS did not let CleanCraft ask Finder. Allow it in System Settings > Privacy & Security > Automation, then try again.".to_string()
-    } else if output.contains("-1728")
-        || output.contains("Can\u{2019}t get")
-        || output.contains("Can't get")
-    {
-        "Mail's menu has no item named like this account, so nothing was erased. In Mail, choose Mailbox > Erase Deleted Items and pick the account.".to_string()
     } else if output.contains("-128") {
         "Emptying the Trash was cancelled.".to_string()
     } else {
@@ -593,6 +588,11 @@ pub fn erase_in_mail(env: &Env, account: Option<&str>) -> EraseOutcome {
         format!(
             "macOS did not let CleanCraft control Mail. Allow it in System Settings > Privacy & Security > Automation, or in Mail choose {menu} yourself."
         )
+    } else if output.contains("-1728")
+        || output.contains("Can\u{2019}t get")
+        || output.contains("Can't get")
+    {
+        "Mail's menu has no item named like this account, so nothing was erased. In Mail, choose Mailbox > Erase Deleted Items and pick the account.".to_string()
     } else if output.contains("-128") {
         "Erasing was cancelled. Nothing changed.".to_string()
     } else {
