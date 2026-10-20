@@ -334,7 +334,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
         &t,
         Icon::Settings,
         "Settings",
-        "Where removed items go, what scans leave alone, how big and old files are judged, and sounds. Changes are saved as you make them.",
+        "Where removed items go, Full Disk Access, what scans leave alone, how big and old files are judged, code folders, AI assistants, the menu bar and sounds. Changes are saved as you make them.",
     );
     let mut changed = false;
     // The folder dialog answered.
