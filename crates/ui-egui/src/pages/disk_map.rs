@@ -607,6 +607,7 @@ fn idle(app: &mut CleanApp, ui: &mut Ui) {
             covers: &[],
             action: &action,
             note: "Measuring only looks. Nothing moves until you review the list and confirm.",
+            enabled: true,
         },
         |ui| {
             location_picker(app, ui, &vols);
@@ -790,8 +791,62 @@ fn open_folder(app: &mut CleanApp, p: PathBuf) {
     app.disk_map.current = Some(p);
 }
 
+/// A top folder of an external disk: it stays (the disk's allow-list is what is inside its
+/// top folders), but ticking it selects everything inside it that can go (U7-8).
+pub fn contents_only(why: &str) -> bool {
+    why.starts_with("a top folder of this disk")
+}
+
+/// The items inside `p` (a top folder of an external disk) that can be selected.
+fn selectable_inside(app: &CleanApp, p: &Path) -> Vec<PathBuf> {
+    app.disk_map
+        .tree()
+        .and_then(|t| t.find(p))
+        .map(|n| {
+            n.children
+                .iter()
+                .filter(|c| node_lock_reason(&app.env, c).is_none())
+                .map(|c| c.path.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Are all the selectable items inside `p` selected (its checkbox shows ticked)?
+fn inside_all_selected(app: &CleanApp, p: &Path) -> bool {
+    let v = selectable_inside(app, p);
+    !v.is_empty() && v.iter().all(|c| app.disk_map.selected.contains(c))
+}
+
 fn toggle(app: &mut CleanApp, p: &Path, on: bool) {
     app.act();
+    if let Some(why) = space::lock_reason(&app.env, p)
+        && contents_only(&why)
+    {
+        let inside = selectable_inside(app, p);
+        let name = p
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if inside.is_empty() {
+            app.warn(format!("Nothing inside {name} can be selected."));
+            return;
+        }
+        for c in &inside {
+            if on {
+                app.disk_map.selected.insert(c.clone());
+            } else {
+                app.disk_map.selected.remove(c);
+            }
+        }
+        if on {
+            app.tell(format!(
+                "Everything inside {name} is selected ({}). The folder {name} itself stays: it is a top folder of this disk.",
+                cleancraft_core::fsutil::items(inside.len())
+            ));
+        }
+        return;
+    }
     if let Some(why) = lock_reason_deep(&app.env, p) {
         app.warn(format!("{} cannot be selected: {why}.", app.env.display(p)));
         return;
@@ -1163,7 +1218,12 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     for (k, c) in kids[range.clone()].iter().enumerate() {
                         let idx = range.start + k;
-                        let locked = node_lock_reason(&app.env, c);
+                        let mut locked = node_lock_reason(&app.env, c);
+                        // A top folder of an external disk ticks what is inside it.
+                        let inside = locked.as_deref().is_some_and(contents_only);
+                        if inside {
+                            locked = None;
+                        }
                         let w = ui.available_width();
                         let (r, row) = ui.allocate_exact_size(vec2(w, LIST_ROW_H), Sense::hover());
                         let hov = kit::anim(
@@ -1179,7 +1239,11 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                                 Color32::from_white_alpha((9.0 * hov) as u8),
                             );
                         }
-                        let was = app.disk_map.selected.contains(&c.path);
+                        let was = if inside {
+                            inside_all_selected(app, &c.path)
+                        } else {
+                            app.disk_map.selected.contains(&c.path)
+                        };
                         let mut on = was;
                         let label = format!("Select {}", c.name);
                         let cb_rect = egui::Rect::from_center_size(

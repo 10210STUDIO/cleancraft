@@ -577,7 +577,7 @@ fn volume_lock_reason(env: &Env, vol: &Path, p: &Path) -> Option<String> {
     // folder is opened, what is inside it can be removed; a file at the top stays.
     if top {
         return Some(if p.is_dir() {
-            "a top folder of this disk (open it to choose what is inside)".into()
+            "a top folder of this disk: ticking it selects what is inside, the folder stays".into()
         } else {
             "at the top of the disk (only items inside its folders can be removed)".into()
         });

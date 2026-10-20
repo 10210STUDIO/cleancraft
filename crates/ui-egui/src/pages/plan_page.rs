@@ -577,6 +577,7 @@ fn idle(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             covers: super::covers(f),
             action: "Scan",
             note: "Scanning only looks. Nothing is removed until you review and confirm the list.",
+            enabled: true,
         },
         |ui| super::extras::before_scan(app, ui, f),
     );
@@ -803,10 +804,18 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                 // Trash holds, not "0 items selected" (REVIEW-C D1, REVIEW-U U3).
                 let trash_only = f == FeatureId::TrashBins && !any_selectable;
                 let (figure, line, full) = if trash_only {
+                    // What Finder empties: Mail's deleted messages only go with Erase in Mail
+                    // (U7-13).
+                    let finder: u64 = plan
+                        .items
+                        .iter()
+                        .filter(|i| i.category != "mail_trash")
+                        .map(|i| i.size)
+                        .sum();
                     (
-                        human_size(plan.total_size()),
+                        human_size(finder),
                         "in the Trash".to_string(),
-                        format!("{} in the Trash", human_size(plan.total_size())),
+                        format!("{} in the Trash", human_size(finder)),
                     )
                 } else {
                     // Selected items the search or filters hide still move: say so.
@@ -1911,9 +1920,39 @@ pub fn fit_tag(ctx: &egui::Context, text: &str, fid: &egui::FontId, max_w: f32) 
     kit::truncate_end(ctx, &plain, fid, max_w)
 }
 
+/// The reason a confirmation line gives: the item's own, except for a duplicate, which names
+/// the copy that stays ("Copy of ~/Downloads/photo.jpg, which stays") (U7-11).
+pub fn confirm_reason(
+    env: &cleancraft_core::Env,
+    plan: &Plan,
+    it: &cleancraft_core::Item,
+) -> String {
+    if plan.feature == Some(FeatureId::Duplicates)
+        && let Some(g) = &it.group
+        && let Some(keep) = plan
+            .items
+            .iter()
+            .find(|o| o.group.as_ref() == Some(g) && !o.selected)
+    {
+        return format!("Copy of {}, which stays", env.display(&keep.path));
+    }
+    it.reason.clone()
+}
+
 /// The name a row shows. A Trash is named after its disk ("Trash of USB"), not after the
 /// numeric user-id folder macOS keeps it in (`/Volumes/USB/.Trashes/501`).
 pub fn item_name(f: FeatureId, it: &cleancraft_core::Item) -> String {
+    // Developer Clutter: the project first ("alpha / target"), so rows of many projects do
+    // not all read "target" (U7-10).
+    if f == FeatureId::DevClutter
+        && !it.path.to_string_lossy().contains("CoreSimulator")
+        && let (Some(dir), Some(name)) = (
+            it.path.parent().and_then(|d| d.file_name()),
+            it.path.file_name(),
+        )
+    {
+        return format!("{} / {}", dir.to_string_lossy(), name.to_string_lossy());
+    }
     if f == FeatureId::TrashBins && it.category == "mail_trash" {
         // The mailbox ("Deleted Messages", "Trash"); the account is the group header.
         return it
@@ -2048,7 +2087,7 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                             &t,
                             &it.path,
                             &app.env.display(&it.path),
-                            &it.reason,
+                            &confirm_reason(&app.env, &plan, it),
                             &human_size(it.size),
                         );
                     }

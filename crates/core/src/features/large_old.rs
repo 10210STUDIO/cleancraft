@@ -154,13 +154,14 @@ pub const DAYS_3_MONTHS: i64 = 90;
 pub const DAYS_6_MONTHS: i64 = 180;
 pub const DAYS_YEAR: i64 = 365;
 
-/// Age groups: (id, title, fewest days since last opened included, first excluded).
+/// Age groups, oldest first (U7-17): (id, title, fewest days since last opened included,
+/// first excluded).
 pub const AGE_GROUPS: &[(&str, &str, i64, i64)] = &[
     (
-        "age_3_6_months",
-        "Not opened in 3 to 6 months",
-        DAYS_3_MONTHS,
-        DAYS_6_MONTHS,
+        "age_over_year",
+        "Not opened for over a year",
+        DAYS_YEAR,
+        i64::MAX,
     ),
     (
         "age_6_12_months",
@@ -169,10 +170,10 @@ pub const AGE_GROUPS: &[(&str, &str, i64, i64)] = &[
         DAYS_YEAR,
     ),
     (
-        "age_over_year",
-        "Not opened for over a year",
-        DAYS_YEAR,
-        i64::MAX,
+        "age_3_6_months",
+        "Not opened in 3 to 6 months",
+        DAYS_3_MONTHS,
+        DAYS_6_MONTHS,
     ),
     (
         "age_recent",

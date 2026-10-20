@@ -1030,6 +1030,129 @@ pub fn chips(ui: &mut Ui, t: &Tokens, items: &[(Icon, Color32, &str)], max_w: f3
     chips_with_state(ui, t, items, &[], max_w);
 }
 
+/// [`chips`] that are toggles (Quick Sweep's start screen: what the scan includes). An "on"
+/// chip is filled with the section tint and ends in a check mark; an "off" chip is an outline
+/// with an empty circle and dim text, so the state never rests on colour alone. Each chip is
+/// a checkbox for VoiceOver named after its module, takes the keyboard focus (Space or Enter
+/// toggles it) and shows the pointing hand. Returns the index clicked.
+pub fn chip_toggles(
+    ui: &mut Ui,
+    t: &Tokens,
+    items: &[(Icon, Color32, &str)],
+    on: &[bool],
+    max_w: f32,
+) -> Option<usize> {
+    let fid = font(size::CALLOUT, Weight::Medium);
+    let h = 34.0;
+    let gap = space::S;
+    let tile = 22.0;
+    let mark = 22.0;
+    let widths: Vec<f32> = items
+        .iter()
+        .map(|(_, _, n)| galley(ui, n, fid.clone(), t.text).size().x + tile + 30.0 + mark)
+        .collect();
+    let max_w = max_w.min(ui.available_width());
+    let fits = |per: usize| {
+        widths
+            .chunks(per.max(1))
+            .all(|c| c.iter().sum::<f32>() + gap * (c.len() as f32 - 1.0) <= max_w)
+    };
+    let n = widths.len().max(1);
+    let mut n_lines = 1;
+    while n_lines < n && !fits(n.div_ceil(n_lines)) {
+        n_lines += 1;
+    }
+    let per = n.div_ceil(n_lines);
+    let lines: Vec<Vec<usize>> = (0..widths.len())
+        .collect::<Vec<_>>()
+        .chunks(per)
+        .map(|c| c.to_vec())
+        .collect();
+    let total_h = lines.len() as f32 * h + (lines.len() as f32 - 1.0) * gap;
+    let left_aligned = ui.layout().horizontal_align() == egui::Align::Min;
+    let (area, _) = ui.allocate_exact_size(vec2(ui.available_width(), total_h), Sense::hover());
+    let mut clicked = None;
+    for (li, line) in lines.iter().enumerate() {
+        let lw: f32 =
+            line.iter().map(|i| widths[*i]).sum::<f32>() + gap * (line.len() as f32 - 1.0);
+        let mut x = if left_aligned {
+            area.left()
+        } else {
+            area.center().x - lw / 2.0
+        };
+        let y = area.top() + li as f32 * (h + gap);
+        for i in line {
+            let (icon, color, name) = items[*i];
+            let sel = on.get(*i).copied().unwrap_or(true);
+            let r = Rect::from_min_size(pos2(x, y), vec2(widths[*i], h));
+            let resp = ui.interact(r, ui.id().with(("chip-toggle", *i)), Sense::click());
+            resp.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, sel, name));
+            pointer(&resp);
+            if resp.clicked() {
+                clicked = Some(*i);
+            }
+            let hov = resp.hovered();
+            let p = ui.painter();
+            if sel {
+                p.rect_filled(
+                    r,
+                    h / 2.0,
+                    icons::lerp(t.glass, t.sec_a, if hov { 0.26 } else { 0.18 }),
+                );
+                p.rect_stroke(
+                    r,
+                    h / 2.0,
+                    Stroke::new(1.0, t.sec_a.gamma_multiply(0.7)),
+                    egui::StrokeKind::Inside,
+                );
+            } else {
+                if hov {
+                    p.rect_filled(r, h / 2.0, Color32::from_white_alpha(8));
+                }
+                p.rect_stroke(
+                    r,
+                    h / 2.0,
+                    Stroke::new(1.0, t.glass_stroke),
+                    egui::StrokeKind::Inside,
+                );
+            }
+            let tr = Rect::from_center_size(
+                pos2(r.left() + 6.0 + tile / 2.0, r.center().y),
+                Vec2::splat(tile),
+            );
+            let mut tp = p.clone();
+            if !sel {
+                tp.set_opacity(0.45);
+            }
+            icon_tile(&tp, tr, icon, color);
+            p.text(
+                pos2(tr.right() + 8.0, r.center().y),
+                Align2::LEFT_CENTER,
+                name,
+                fid.clone(),
+                if sel { t.text } else { t.text_faint },
+            );
+            let c = pos2(r.right() - 10.0 - mark / 2.0 + 4.0, r.center().y);
+            if sel {
+                p.circle_filled(c, 8.0, t.sec_a);
+                icons::paint(
+                    p,
+                    Rect::from_center_size(c, Vec2::splat(11.0)),
+                    Icon::Check,
+                    Color32::WHITE,
+                );
+            } else {
+                p.circle_stroke(c, 7.5, Stroke::new(1.5, t.text_faint));
+            }
+            if resp.has_focus() {
+                focus_ring(p, t, r, h / 2.0);
+            }
+            x += widths[*i] + gap;
+        }
+    }
+    clicked
+}
+
 /// Where a module is in a multi-module scan (Quick Sweep's progress chips).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ChipState {
@@ -1322,6 +1445,8 @@ pub struct HeroText<'a> {
     pub covers: &'a [&'a str],
     pub action: &'a str,
     pub note: &'a str,
+    /// The action can run (false: shown dimmed and not clickable; the note says why).
+    pub enabled: bool,
 }
 
 /// Content width from which a start screen uses two columns (object left, words right).
@@ -1397,7 +1522,16 @@ pub fn hero(
         ui.add_space(space::XS);
         // A short window gets a smaller round button (it is 156 pt tall with its halo).
         let d = if avail < 620.0 { 88.0 } else { 112.0 };
-        *clicked = round_action(ui, t, text.action, d).clicked();
+        *clicked = ui
+            .scope(|ui| {
+                if !text.enabled {
+                    ui.disable();
+                    ui.multiply_opacity(0.4);
+                }
+                round_action(ui, t, text.action, d).clicked()
+            })
+            .inner
+            && text.enabled;
         ui.add_space(space::S);
         if !text.note.is_empty() {
             ui.scope(|ui| {
@@ -2534,16 +2668,18 @@ pub fn bar_figure(ui: &mut Ui, t: &Tokens, figure: &str, line: &str, full: &str,
 
 /// A dim hint in the room left on a bottom bar (laid out right to left after the buttons),
 /// shortened at its end, the whole text in its tooltip; nothing when under 100 pt are left.
-pub fn bar_hint(ui: &mut Ui, t: &Tokens, hint: &str) {
+pub fn bar_hint(ui: &mut Ui, t: &Tokens, hint: &str) -> Response {
     let fid = font(size::FOOTNOTE, Weight::Regular);
     let room = ui.available_width() - space::S;
     if room < 100.0 {
-        return;
+        return ui.allocate_response(Vec2::ZERO, Sense::hover());
     }
     let shown = truncate_end(ui.ctx(), hint, &fid, room);
     let r = ui.label(RichText::new(&shown).font(fid).color(t.text_faint));
     if shown != hint {
-        r.on_hover_text(hint);
+        r.on_hover_text(hint)
+    } else {
+        r
     }
 }
 

@@ -639,7 +639,7 @@ fn proc_rows(
         };
         list.iter()
             .map(|a| {
-                let ex = proc_names::explain(&a.name);
+                let ex = proc_names::explain_proc(a);
                 proc_names::Group {
                     name: a.name.clone(),
                     processes: 1,
@@ -706,11 +706,13 @@ fn proc_rows(
             })
             .response;
         let tip = match (&g.what, g.macos) {
-            (Some(w), true) => format!("{w} CleanCraft never offers to quit it."),
-            (Some(w), false) => {
-                format!("{w} To quit it, use Startup Items, under apps using a lot.")
-            }
-            (None, _) => "To quit it, use Startup Items, under apps using a lot.".to_string(),
+            (Some(w), true) => format!(
+                "{w} CleanCraft never offers to quit it. Activity Monitor shows more about it."
+            ),
+            (Some(w), false) => format!(
+                "{w} To quit it, use Startup Items, under apps using a lot. Activity Monitor shows more about it."
+            ),
+            (None, _) => "To quit it, use Startup Items, under apps using a lot. Activity Monitor shows more about it.".to_string(),
         };
         let hovered = ui.rect_contains_pointer(resp.rect);
         if hovered != was_hovered {
@@ -718,6 +720,14 @@ fn proc_rows(
             ui.ctx().request_repaint();
         }
         kit::row_tip(&resp, resp.rect, &tip);
+    }
+    if by_cpu && !groups.is_empty() {
+        // The rows and the gauge are on two scales (U7-7): say so once.
+        kit::dim(
+            ui,
+            &t,
+            "Per process: percent of one core, as Activity Monitor shows it. 100% is one core busy, so a row can be higher than the CPU total.",
+        );
     }
     if !s.processes.is_empty() {
         let label = if app.monitor.by_process {
