@@ -503,14 +503,9 @@ fn confirm_purge(app: &mut CleanApp, ui: &mut Ui) {
              macOS asks for an administrator password. Apps may feel slower for a moment.",
         );
         ui.add_space(space::L);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if kit::primary(ui, &t, "Free Up RAM Now") {
-                go = true;
-            }
-            if kit::secondary(ui, &t, "Cancel") {
-                close = true;
-            }
-        });
+        let (g, c) = kit::dialog_actions(ui, &t, "Free Up RAM Now", kit::Kind::Primary);
+        go = g;
+        close = c;
     });
     if dlg.should_close() {
         close = true;

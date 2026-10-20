@@ -180,9 +180,9 @@ fn tasks_that_cannot_run_explain_why_and_cancel_runs_nothing() {
             .iter()
             .all(|c| !c.contains("diskutil"))
     );
-    // Mail closed: Check Again makes it available.
+    // Mail closed: Scan Again makes it available.
     testkit_perf::set_mail_running(&m, false);
-    click(&mut h, "Check Again");
+    click(&mut h, "Scan Again");
     assert!(!has(&h, "Mail is open. Quit Mail first."));
     assert!(has_text(&h, "Envelope Index"));
 }

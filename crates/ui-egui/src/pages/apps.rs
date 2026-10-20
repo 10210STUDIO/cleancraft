@@ -15,6 +15,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+use cleancraft_core::app_quit;
 use cleancraft_core::apps::{self, AppInfo, Store};
 use cleancraft_core::executor::{self, Method, Report};
 use cleancraft_core::extensions::CAT_EXTENSIONS;
@@ -159,12 +160,16 @@ pub struct State {
     pub notes_open: BTreeSet<PathBuf>,
     /// The open app is running (its files are locked until it quits).
     pub running: bool,
+    /// What of it runs: the app, its helpers, agents and services (apps4's app_quit).
+    pub parts: Option<app_quit::RunningState>,
+    /// Quitting needs the administrator password (a system service): asking first.
+    pub confirm_admin: bool,
     /// Quitting the open app from its banner.
     pub quit: Quit,
     /// The Force Quit confirmation is open.
     pub confirm_force: bool,
     /// Background check whether the open app still runs (rows unlock when it quits).
-    still_running: Option<Job<bool>>,
+    still_running: Option<Job<app_quit::RunningState>>,
     checked_running: Option<std::time::Instant>,
     /// What the list reflects of CleanCraft's action log (moves made by any page).
     watch: super::history::JournalWatch,
@@ -191,8 +196,6 @@ pub struct QuitOutcome {
     pub message: String,
 }
 
-/// How long to wait for an app to quit before offering Force Quit.
-const QUIT_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 /// How often the open, running app is checked again.
 const RUNNING_CHECK: std::time::Duration = std::time::Duration::from_millis(1500);
 
@@ -230,6 +233,7 @@ fn start_updates(app: &mut CleanApp) {
         updater::check_all(&env, &list, &|n| status(n))
     });
     app.apps.upd_job = Some(job);
+    crate::sound::play(&app.env, crate::sound::Cue::ScanStart);
 }
 
 /// Open an app's detail with a fresh plan.
@@ -246,8 +250,10 @@ fn close_detail(app: &mut CleanApp) {
     app.apps.selected = None;
     app.apps.detail = None;
     app.apps.running = false;
+    app.apps.parts = None;
     app.apps.quit = Quit::Idle;
     app.apps.confirm_force = false;
+    app.apps.confirm_admin = false;
     app.apps.still_running = None;
 }
 
@@ -262,6 +268,10 @@ fn rebuild_detail(app: &mut CleanApp, keep: Option<&Plan>) {
         return;
     }
     app.apps.running = uninstaller::is_running(&app.env, &path);
+    app.apps.parts = app
+        .apps
+        .running
+        .then(|| app_quit::running_parts(&app.env, &path));
     app.apps.checked_running = Some(std::time::Instant::now());
     match uninstaller::uninstall_plan(&app.env, &app.settings, &path, false) {
         Ok(mut p) => {
@@ -278,67 +288,50 @@ fn rebuild_detail(app: &mut CleanApp, keep: Option<&Plan>) {
 }
 
 /// Ask the open app to quit (or force it), then wait a little for it to be gone.
-fn start_quit(app: &mut CleanApp, path: &Path, force: bool) {
+/// `allow_admin`: the person agreed to the password dialog for system services.
+fn start_quit(app: &mut CleanApp, path: &Path, force: bool, allow_admin: bool) {
     let env = app.env.clone();
     let p = path.to_path_buf();
-    app.apps.quit = Quit::Asking(Job::start(app.sync, move |_| quit_now(&env, &p, force)));
+    app.apps.quit = Quit::Asking(Job::start(app.sync, move |_| {
+        quit_now(&env, &p, force, allow_admin)
+    }));
 }
 
-/// Quit the app at `path` and wait for it (apps4's core flow when it lands; until then the
-/// app's own "quit" through osascript, or `kill`, and a check of what still runs).
-fn quit_now(env: &cleancraft_core::Env, path: &Path, force: bool) -> Result<QuitOutcome, String> {
-    let name = path
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let shown = env.display(path);
-    let procs: Vec<_> = env
-        .sys
-        .running_apps()
-        .into_iter()
-        .filter(|r| {
-            r.path.as_ref().is_some_and(|ap| {
-                let ap = if env.is_fake() {
-                    env.sys_path(&ap.to_string_lossy())
-                } else {
-                    ap.clone()
-                };
-                ap.starts_with(path) || ap.to_string_lossy() == shown
-            })
-        })
-        .collect();
-    for r in &procs {
-        let res = if force {
-            env.sys.run("/bin/kill", &["-KILL", &r.pid.to_string()])
-        } else {
-            let script = format!(
-                "tell application \"{}\" to quit",
-                name.replace('\\', "\\\\").replace('"', "\\\"")
-            );
-            env.sys.run("/usr/bin/osascript", &["-e", &script])
+/// Quit the app at `path` with everything it runs (apps4's core flow), and say how it went.
+fn quit_now(
+    env: &cleancraft_core::Env,
+    path: &Path,
+    force: bool,
+    allow_admin: bool,
+) -> Result<QuitOutcome, String> {
+    // Tests (FakeMac) do not wait: the fake processes stop at once or never.
+    let fast = env.is_fake();
+    let rep = if force {
+        let mut o = app_quit::ForceOptions {
+            allow_admin,
+            ..Default::default()
         };
-        if let Err(e) = res {
-            return Err(format!("Could not ask {name} to quit: {e}"));
+        if fast {
+            o.grace = std::time::Duration::ZERO;
+            o.wait = std::time::Duration::ZERO;
+            o.poll = std::time::Duration::from_millis(1);
         }
-    }
-    let start = std::time::Instant::now();
-    loop {
-        if !uninstaller::is_running(env, path) {
-            return Ok(QuitOutcome {
-                done: true,
-                message: format!("{name} has quit. You can uninstall it now."),
-            });
+        app_quit::force_quit(env, path, o)?
+    } else {
+        let mut o = app_quit::QuitOptions {
+            allow_admin,
+            ..Default::default()
+        };
+        if fast {
+            o.wait = std::time::Duration::ZERO;
+            o.poll = std::time::Duration::from_millis(1);
         }
-        if start.elapsed() >= QUIT_WAIT || env.is_fake() {
-            return Ok(QuitOutcome {
-                done: false,
-                message: format!(
-                    "{name} is still open. It may be waiting for you to save your work: answer it, try again, or force it to quit (unsaved work is lost)."
-                ),
-            });
-        }
-        std::thread::sleep(std::time::Duration::from_millis(250));
-    }
+        app_quit::quit_app(env, path, o)?
+    };
+    Ok(QuitOutcome {
+        done: rep.done(),
+        message: rep.message(),
+    })
 }
 
 /// Forget what moved away (any page, or an agent): apps whose bundle is gone leave the list
@@ -421,6 +414,7 @@ pub fn poll(app: &mut CleanApp) -> bool {
         if let Some(r) = job.poll() {
             st.upd_job = None;
             st.updates = Some(r);
+            crate::sound::play(&app.env, crate::sound::Cue::ScanDone);
         } else if job.is_dead() {
             st.upd_job = None;
             st.error = Some("The update check stopped unexpectedly.".into());
@@ -441,10 +435,20 @@ pub fn poll(app: &mut CleanApp) -> bool {
     if let Some((r, action)) = finished {
         match r {
             Ok(rep) => {
+                let cue = if rep.moved.is_empty() && !rep.skipped.is_empty() {
+                    crate::sound::Cue::Error
+                } else {
+                    crate::sound::Cue::CleanDone
+                };
+                crate::sound::play(&app.env, cue);
                 app.apps.phase = Phase::Done(rep, action);
                 app.apps.pending = None;
                 // What moved leaves the lists and counts now; the slow look below confirms.
                 forget_moved(&mut app.apps);
+                if let Phase::Done(rep, _) = &app.apps.phase {
+                    let m = CleanApp::moved_paths(rep);
+                    app.files_moved(&m);
+                }
             }
             Err(e) => {
                 app.apps.phase = Phase::Browse;
@@ -517,11 +521,12 @@ fn poll_running(app: &mut CleanApp) -> bool {
     }
     if let Some(job) = st.still_running.as_mut() {
         match job.poll() {
-            Some(true) => {
+            Some(state) if state.locked() => {
                 st.still_running = None;
+                st.parts = Some(state);
                 st.checked_running = Some(std::time::Instant::now());
             }
-            Some(false) => {
+            Some(_) => {
                 st.still_running = None;
                 st.quit = Quit::Idle;
                 rebuild_detail(app, None);
@@ -545,7 +550,7 @@ fn poll_running(app: &mut CleanApp) -> bool {
     if due && let Some(path) = st.selected.clone() {
         let env = app.env.clone();
         st.still_running = Some(Job::start(app.sync, move |_| {
-            uninstaller::is_running(&env, &path)
+            app_quit::running_parts(&env, &path)
         }));
     }
     // Keep frames coming so the next check happens.
@@ -626,7 +631,7 @@ fn remover_page(app: &mut CleanApp, ui: &mut Ui) {
                 secs,
                 false,
             );
-        } else if kit::primary(ui, &t, "Look Again") {
+        } else if kit::primary(ui, &t, "Scan Again") {
             app.act();
             app.apps.error = None;
             start_load(app);
@@ -754,7 +759,7 @@ fn browse(app: &mut CleanApp, ui: &mut Ui) {
                 let time = ui.input(|i| i.time);
                 kit::progress_ring(ui.painter(), r.center(), 16.0, &t, time);
                 ui.ctx().request_repaint();
-            } else if kit::secondary(ui, &t, "Look Again") {
+            } else if kit::secondary(ui, &t, "Scan Again") {
                 app.act();
                 start_load(app);
             }
@@ -900,7 +905,6 @@ fn apps_list(app: &mut CleanApp, ui: &mut Ui, h: f32) {
             for a in &rows[range] {
                 let w = ui.available_width();
                 let (r, resp) = ui.allocate_exact_size(vec2(w, APP_ROW_H), Sense::click());
-                let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
                 resp.widget_info(|| {
                     egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &a.name)
                 });
@@ -915,15 +919,6 @@ fn apps_list(app: &mut CleanApp, ui: &mut Ui, h: f32) {
                         r.shrink(2.0),
                         10.0,
                         Color32::from_white_alpha((10.0 * hov + 8.0 * feel.down) as u8),
-                    );
-                }
-                if resp.has_focus() {
-                    // Keyboard focus (Tab): a ring in the section colour; Enter opens.
-                    p.rect_stroke(
-                        r.shrink(2.0),
-                        10.0,
-                        egui::Stroke::new(2.0, t.sec_a),
-                        egui::StrokeKind::Inside,
                     );
                 }
                 let tile = Rect::from_center_size(
@@ -1131,29 +1126,23 @@ fn file_row(
         Sense::hover()
     };
     let (r, row) = ui.allocate_exact_size(vec2(w, FILE_ROW_H), sense);
-    if toggle {
-        row.clone().on_hover_cursor(egui::CursorIcon::PointingHand);
-    }
     let shown = app.env.display(&it.path);
-    let hov = kit::anim(
-        ui.ctx(),
-        row.id.with("hov"),
-        row.hovered() && toggle,
-        crate::theme::motion::HOVER,
-    );
-    let p = ui.painter().clone();
     let card = r.shrink2(vec2(2.0, 2.0));
+    // Pointing hand, eased hover and press, keyboard focus ring (kit).
+    let feel = kit::feel_ring(ui, &t, &row, card, 10.0);
+    let hov = if toggle { feel.hov } else { 0.0 };
+    let p = ui.painter().clone();
     if it.selected && !is_app {
-        p.rect_filled(card, 10.0, t.sec_a.gamma_multiply(0.06 + 0.04 * hov));
-    } else if hov > 0.0 {
-        p.rect_filled(card, 10.0, Color32::from_white_alpha((9.0 * hov) as u8));
-    }
-    if row.has_focus() {
-        p.rect_stroke(
+        p.rect_filled(
             card,
             10.0,
-            egui::Stroke::new(2.0, t.sec_a),
-            egui::StrokeKind::Inside,
+            t.sec_a.gamma_multiply(0.06 + 0.04 * hov + 0.04 * feel.down),
+        );
+    } else if hov > 0.0 {
+        p.rect_filled(
+            card,
+            10.0,
+            Color32::from_white_alpha((9.0 * hov + 6.0 * feel.down) as u8),
         );
     }
     // Checkbox, named after the whole path (VoiceOver, tests); a padlock when locked.
@@ -1206,8 +1195,13 @@ fn file_row(
         );
     }
     let ink = if locked { t.text_dim } else { t.text };
-    // Size, right aligned in a fixed column.
-    let size_text = human_size(it.size);
+    // Size, right aligned in a fixed column. Part of it unreadable: never a bare "0 KB".
+    let partial = uninstaller::size_is_partial(it);
+    let size_text = match (partial, it.size) {
+        (true, 0) => "Unknown".to_string(),
+        (true, n) => format!("at least {}", human_size(n)),
+        (false, n) => human_size(n),
+    };
     let size_font = font(size::BODY, Weight::SemiBold);
     let size_w = kit::galley(ui, &size_text, size_font.clone(), t.text)
         .size()
@@ -1217,15 +1211,22 @@ fn file_row(
         pos2(r.right() - 12.0 - size_w, r.top()),
         pos2(r.right() - 10.0, r.bottom()),
     );
-    kit::text_at(
+    let size_resp = kit::text_at(
         ui,
         size_r,
         &size_text,
         &size_text,
         size_font,
-        ink,
+        if partial { t.text_dim } else { ink },
         Align::Max,
     );
+    if partial {
+        kit::row_tip(
+            &size_resp,
+            r,
+            "Some of it could not be read (macOS keeps it private, or another user owns it), so it may be bigger than shown.",
+        );
+    }
     // Why it is listed. A lock that is not the plan's shared one is the most useful thing
     // to say, so it takes the place of the reason.
     let own_lock = it
@@ -1241,7 +1242,8 @@ fn file_row(
         // The app's name and version are the page's heading already.
         None if is_app => String::new(),
         None if short_reason && !is_app => {
-            let mut s = reason_kind(&it.reason).to_string();
+            let mut s =
+                reason_kind(it.reason.trim_end_matches(uninstaller::SIZE_PARTIAL)).to_string();
             if it.needs_admin {
                 s.push_str(", needs password");
             }
@@ -1302,7 +1304,8 @@ fn file_row(
     );
     // The whole path when either line had to be shortened.
     if name_s != name || folder_s != folder {
-        row.on_hover_text(&shown);
+        // Under the row (or above it at the bottom), never over its own text.
+        kit::row_tip(&row, r, &shown);
     }
     changed
 }
@@ -1387,6 +1390,7 @@ fn detail(app: &mut CleanApp, ui: &mut Ui) {
         .cloned();
     let esc = matches!(app.apps.phase, Phase::Browse)
         && !app.apps.confirm_force
+        && !app.apps.confirm_admin
         && ui.input(|i| i.key_pressed(Key::Escape));
     let back = kit::pill(ui, &t, "Back to Apps", kit::Kind::Ghost, Some(Icon::Back)).clicked();
     if esc || back {
@@ -1545,7 +1549,7 @@ fn detail(app: &mut CleanApp, ui: &mut Ui) {
                     Err(e) => app.apps.error = Some(format!("{e:#}")),
                 }
             }
-            if kit::pill(ui, &t, "Check Again", kit::Kind::Secondary, None)
+            if kit::pill(ui, &t, "Scan Again", kit::Kind::Secondary, None)
                 .on_hover_text("Look at the app's files again")
                 .clicked()
             {
@@ -1606,6 +1610,9 @@ fn detail(app: &mut CleanApp, ui: &mut Ui) {
     if app.apps.confirm_force {
         confirm_force(app, ui, &name);
     }
+    if app.apps.confirm_admin {
+        confirm_admin(app, ui, &name);
+    }
 }
 
 /// A group of the app's files: a dot in the group's colour, its title, size and count, and
@@ -1660,6 +1667,7 @@ fn category_head(
 /// The reason the app cannot be removed now, with what to do about it.
 fn block_banner(app: &mut CleanApp, ui: &mut Ui, b: &Block, name: &str, path: &Path) {
     let t = app.t;
+    let parts = app.apps.parts.clone();
     let (color, icon) = match b {
         Block::Running => (t.warning, Icon::Warning),
         Block::System(_) | Block::Ignored(_) => (t.text_dim, Icon::Lock),
@@ -1727,6 +1735,32 @@ fn block_banner(app: &mut CleanApp, ui: &mut Ui, b: &Block, name: &str, path: &P
                                 )
                                 .wrap(),
                             );
+                            // What runs, when it is more than the app itself (helpers,
+                            // agents, services): "name · role".
+                            if let (Block::Running, Some(st)) = (b, &parts) {
+                                // The headline names the app; list what else runs.
+                                let lines: Vec<String> = st
+                                    .running()
+                                    .filter(|p| p.kind != app_quit::PartKind::App)
+                                    .map(|p| format!("{}  ·  {}", p.name, p.role()))
+                                    .collect();
+                                if !lines.is_empty() {
+                                    ui.add_space(2.0);
+                                    for l in lines.iter().take(4) {
+                                        ui.add(
+                                            egui::Label::new(
+                                                RichText::new(l)
+                                                    .font(font(size::FOOTNOTE, Weight::Medium))
+                                                    .color(t.text_dim),
+                                            )
+                                            .truncate(),
+                                        );
+                                    }
+                                    if lines.len() > 4 {
+                                        kit::dim(ui, &t, &format!("and {} more", lines.len() - 4));
+                                    }
+                                }
+                            }
                         });
                     });
                 });
@@ -1738,8 +1772,13 @@ fn block_banner(app: &mut CleanApp, ui: &mut Ui, b: &Block, name: &str, path: &P
 fn running_text(app: &CleanApp, name: &str) -> (String, String) {
     match &app.apps.quit {
         Quit::Idle => (
-            format!("{name} is open"),
-            format!("Quit {name} to uninstall or reset it. Its files unlock as soon as it closes."),
+            app.apps
+                .parts
+                .as_ref()
+                .map(|s| s.headline())
+                .filter(|h| !h.is_empty())
+                .unwrap_or_else(|| format!("{name} is open")),
+            "Quit it to uninstall or reset it. The files unlock as soon as it closes.".to_string(),
         ),
         Quit::Asking(job) => (
             format!("Waiting for {name} to quit..."),
@@ -1774,7 +1813,12 @@ fn quit_actions(app: &mut CleanApp, ui: &mut Ui, name: &str, path: &Path) {
         };
         if kit::pill(ui, &t, &label, kit::Kind::Primary, None).clicked() {
             app.act();
-            start_quit(app, path, false);
+            if app.apps.parts.as_ref().is_some_and(|s| s.needs_admin()) {
+                // A system service of the app: say so before the password dialog.
+                app.apps.confirm_admin = true;
+            } else {
+                start_quit(app, path, false, false);
+            }
         }
     }
     if offer_force {
@@ -1784,6 +1828,51 @@ fn quit_actions(app: &mut CleanApp, ui: &mut Ui, name: &str, path: &Path) {
             app.act();
             app.apps.confirm_force = true;
         }
+    }
+}
+
+/// A system service of the app runs as root: stopping it asks for the password. The person
+/// chooses: quit everything (password), or quit what does not need it.
+fn confirm_admin(app: &mut CleanApp, ui: &mut Ui, name: &str) {
+    let t = app.t;
+    let Some(path) = app.apps.selected.clone() else {
+        app.apps.confirm_admin = false;
+        return;
+    };
+    let question = app
+        .apps
+        .parts
+        .as_ref()
+        .and_then(|s| s.admin_question())
+        .unwrap_or_default();
+    let (mut all, mut rest, mut close) = (false, false, false);
+    let resp = kit::modal(egui::Id::new("apps-quit-admin"), &t).show(ui.ctx(), |ui| {
+        ui.set_width(520.0);
+        crate::images::dialog_head_app(ui, &t, &path, &format!("Quit {name}?"), &question);
+        ui.add_space(space::L);
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if kit::primary(ui, &t, "Quit and Enter Password") {
+                all = true;
+            }
+            if kit::secondary(ui, &t, "Quit the Rest") {
+                rest = true;
+            }
+            if kit::secondary(ui, &t, "Cancel") {
+                close = true;
+            }
+        });
+    });
+    if resp.should_close() {
+        close = true;
+    }
+    if all || rest || close {
+        app.act();
+        app.apps.confirm_admin = false;
+    }
+    if all {
+        start_quit(app, &path, false, true);
+    } else if rest {
+        start_quit(app, &path, false, false);
     }
 }
 
@@ -1805,14 +1894,9 @@ fn confirm_force(app: &mut CleanApp, ui: &mut Ui, name: &str) {
             "It stops at once, without asking to save. Work you have not saved in it is lost.",
         );
         ui.add_space(space::L);
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if kit::danger(ui, &t, "Force Quit") {
-                go = true;
-            }
-            if kit::secondary(ui, &t, "Cancel") {
-                close = true;
-            }
-        });
+        let (g, c) = kit::dialog_actions(ui, &t, "Force Quit", kit::Kind::Danger);
+        go = g;
+        close = c;
     });
     if resp.should_close() {
         close = true;
@@ -1820,7 +1904,8 @@ fn confirm_force(app: &mut CleanApp, ui: &mut Ui, name: &str) {
     if go {
         app.act();
         app.apps.confirm_force = false;
-        start_quit(app, &path, true);
+        let admin = app.apps.parts.as_ref().is_some_and(|s| s.needs_admin());
+        start_quit(app, &path, true, admin);
     } else if close {
         app.act();
         app.apps.confirm_force = false;
@@ -1907,18 +1992,13 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui, action: Action) {
                 });
         });
         ui.add_space(space::L);
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let label = match app.settings.method {
-                Method::Trash => "Move to Trash",
-                Method::Quarantine | Method::AdminQuarantine => "Move to Quarantine",
-            };
-            if kit::danger(ui, &t, label) {
-                go = true;
-            }
-            if kit::secondary(ui, &t, "Cancel") {
-                close = true;
-            }
-        });
+        let label = match app.settings.method {
+            Method::Trash => "Move to Trash",
+            Method::Quarantine | Method::AdminQuarantine => "Move to Quarantine",
+        };
+        let (g, c) = kit::dialog_actions(ui, &t, label, kit::Kind::Danger);
+        go = g;
+        close = c;
     });
     if resp.should_close() {
         close = true;
@@ -1945,9 +2025,8 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
         Action::RemoveFiles => "",
     };
     let summary = format!(
-        "{what}{} moved. {} skipped.",
-        cleancraft_core::fsutil::items(rep.moved.len()),
-        rep.skipped.len()
+        "{what}{}",
+        kit::moved_summary(rep.moved.len(), rep.skipped.len())
     );
     super::plan_page::done_view(
         app,
@@ -1962,6 +2041,7 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
             {
                 app.act();
                 let (n, errs) = executor::undo_plan(&app.env, &rep.plan_id);
+                app.files_back(&CleanApp::moved_paths(&rep));
                 if errs.is_empty() {
                     app.tell(format!("{} put back.", cleancraft_core::fsutil::items(n)));
                 } else {
@@ -2046,8 +2126,8 @@ fn updates_page(app: &mut CleanApp, ui: &mut Ui) {
                 1 => "1 update available".to_string(),
                 n => format!("{n} updates available"),
             })
-            .font(font(size::NUMBER, Weight::Bold))
-            .color(icons::lerp(t.sec_a, Color32::WHITE, 0.15)),
+            .font(font(size::TITLE2, Weight::Bold))
+            .color(t.text),
         );
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if kit::secondary(ui, &t, "Check Again") {
@@ -2214,7 +2294,12 @@ fn update_row(app: &mut CleanApp, ui: &mut Ui, u: &UpdateInfo) {
                     });
                 });
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let r = kit::pill(ui, &t, "Update", kit::Kind::Primary, None);
+                    let r = kit::pill(ui, &t, "Update", kit::Kind::Primary, None).on_hover_text(
+                        match u.source {
+                            Source::Sparkle => "Open the app so its own updater installs the new version",
+                            _ => "Open the App Store page to install the new version",
+                        },
+                    );
                     r.widget_info(|| {
                         egui::WidgetInfo::labeled(
                             egui::WidgetType::Button,
@@ -2230,7 +2315,9 @@ fn update_row(app: &mut CleanApp, ui: &mut Ui, u: &UpdateInfo) {
                         }
                     }
                     if u.source == Source::Sparkle && u.download_url.is_some() {
-                        let r = kit::secondary_resp(ui, &t, "Download");
+                        let r = kit::secondary_resp(ui, &t, "Download Only").on_hover_text(
+                            "Open the new version's download in your browser; you install it yourself",
+                        );
                         r.widget_info(|| {
                             egui::WidgetInfo::labeled(
                                 egui::WidgetType::Button,

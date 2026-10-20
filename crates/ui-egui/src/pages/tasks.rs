@@ -91,6 +91,7 @@ pub fn poll(app: &mut CleanApp) -> bool {
                 app.warn(msg);
             } else {
                 app.tell(msg);
+                crate::sound::play(&app.env, crate::sound::Cue::CleanDone);
             }
             start_loading(app);
             busy = true;
@@ -181,7 +182,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                 app.act();
                 open_confirm(app);
             }
-            if kit::pill(ui, &t, "Check Again", kit::Kind::Secondary, None)
+            if kit::pill(ui, &t, "Scan Again", kit::Kind::Secondary, None)
                 .on_hover_text("Check again which tasks can run on this Mac")
                 .clicked()
             {
@@ -484,14 +485,15 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
                 }
             });
         ui.add_space(14.0);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if !ok.is_empty() && kit::primary(ui, &t, "Run") {
-                go = true;
-            }
-            if kit::secondary(ui, &t, "Cancel") {
-                close = true;
-            }
-        });
+        if ok.is_empty() {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                close = kit::secondary(ui, &t, "Cancel");
+            });
+        } else {
+            let (g, c) = kit::dialog_actions(ui, &t, "Run", kit::Kind::Primary);
+            go = g;
+            close = c;
+        }
     });
     if dlg.should_close() {
         close = true;

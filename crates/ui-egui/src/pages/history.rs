@@ -14,6 +14,8 @@ pub struct State {
     pub records: Vec<ActionRecord>,
     /// The action log as it was when `records` were read.
     watch: JournalWatch,
+    /// Actions whose long item list is shown whole (by plan id).
+    pub expanded: std::collections::BTreeSet<String>,
 }
 
 impl State {
@@ -92,6 +94,18 @@ pub fn moved_paths(recs: &[ActionRecord]) -> Vec<(std::path::PathBuf, std::path:
         .collect()
 }
 
+/// A path as people read it: the home folder as "~" (like Finder's path bar).
+pub fn short_path(env: &cleancraft_core::Env, p: &std::path::Path) -> String {
+    let shown = env.display(p);
+    let home = env.display(env.home());
+    match shown.strip_prefix(home.as_str()) {
+        Some(rest) if !home.is_empty() && (rest.is_empty() || rest.starts_with('/')) => {
+            format!("~{rest}")
+        }
+        _ => shown,
+    }
+}
+
 /// "Today, 13:26", "Yesterday, 09:02", "Mon 12 Oct, 18:40", or with the year when it is
 /// not this year.
 pub fn when_text(ts: i64, now: chrono::DateTime<chrono::Local>) -> String {
@@ -135,15 +149,6 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
             .font(font(size::TITLE2, Weight::Bold))
             .color(t.text),
         );
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if kit::pill(ui, &t, "Refresh", kit::Kind::Secondary, None)
-                .on_hover_text("Read the action log again")
-                .clicked()
-            {
-                app.act();
-                app.history.reload(&app.env);
-            }
-        });
     });
     ui.add_space(space::S);
     if groups.is_empty() {
@@ -265,6 +270,7 @@ fn group_card(
                         if r.clicked() {
                             app.act();
                             let (n, errs) = executor::undo_plan(&app.env, &first.plan_id);
+                            app.files_back(&[]);
                             if errs.is_empty() {
                                 app.tell(format!(
                                     "{} put back.",
@@ -284,7 +290,14 @@ fn group_card(
                 });
             });
             ui.add_space(6.0);
-            for (k, r) in g.iter().enumerate() {
+            // A long action shows its first items and a way to see the rest.
+            let open = app.history.expanded.contains(&first.plan_id);
+            let shown = if g.len() > COLLAPSE_OVER && !open {
+                COLLAPSE_TO
+            } else {
+                g.len()
+            };
+            for (k, r) in g.iter().take(shown).enumerate() {
                 if k > 0 {
                     let y = ui.cursor().min.y;
                     ui.painter().hline(
@@ -295,8 +308,30 @@ fn group_card(
                 }
                 record_row(app, ui, r, now);
             }
+            if g.len() > COLLAPSE_OVER {
+                ui.horizontal(|ui| {
+                    ui.add_space(36.0);
+                    let label = if open {
+                        "Show Fewer".to_string()
+                    } else {
+                        format!("Show All {} Items", g.len())
+                    };
+                    if kit::ghost(ui, &t, &label, None).clicked() {
+                        app.act();
+                        if open {
+                            app.history.expanded.remove(&first.plan_id);
+                        } else {
+                            app.history.expanded.insert(first.plan_id.clone());
+                        }
+                    }
+                });
+            }
         });
 }
+
+/// An action with more items than this shows only the first [`COLLAPSE_TO`] at first.
+const COLLAPSE_OVER: usize = 8;
+const COLLAPSE_TO: usize = 5;
 
 /// One record: its name and where it was (or the command), and Undo or "Put back".
 fn record_row(
@@ -318,7 +353,10 @@ fn record_row(
                 if b.on_hover_text("Put this back where it was").clicked() {
                     app.act();
                     match executor::undo(&app.env, &r.id) {
-                        Ok(_) => app.tell("Put back."),
+                        Ok(_) => {
+                            app.tell("Put back.");
+                            app.files_back(&[]);
+                        }
                         Err(e) => app.warn(format!("Could not put it back: {e}")),
                     }
                     app.history.reload(&app.env);
@@ -366,9 +404,10 @@ fn record_row(
                                 human_size(r.size),
                                 app.env.display(stored)
                             );
+                            let seen = short_path(&app.env, original);
                             let fid = font(size::FOOTNOTE, Weight::Regular);
                             let w = ui.available_width().max(40.0);
-                            let short = kit::truncate_middle(ui.ctx(), &shown, &fid, w);
+                            let short = kit::truncate_middle(ui.ctx(), &seen, &fid, w);
                             let sw =
                                 kit::galley(ui, &short, fid.clone(), t.text_faint).size().x + 2.0;
                             let (rr, _) =
@@ -383,8 +422,8 @@ fn record_row(
                                 egui::Align::Min,
                             )
                             .on_hover_text(format!(
-                                "Was {shown}\nNow in {}",
-                                app.env.display(stored)
+                                "Was {seen}\nNow in {}",
+                                short_path(&app.env, stored)
                             ));
                         }
                         ActionKind::Command {

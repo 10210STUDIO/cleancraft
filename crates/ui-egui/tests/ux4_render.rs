@@ -115,8 +115,17 @@ fn remover_mac() -> FakeMac {
 }
 
 fn running_mac() -> FakeMac {
+    use cleancraft_core::testkit_quit::FakeMacQuit;
     let mac = remover_mac();
-    mac.run_app(&mac.env.sys_path("/Applications/PhotoStudio_Pro.app"));
+    let app = mac.env.sys_path("/Applications/PhotoStudio_Pro.app");
+    mac.user_id(501);
+    mac.run_program(&app.join("Contents/MacOS/PhotoStudio_Pro"), 4242, 501);
+    let menu = mac.helper_app(
+        &app,
+        "Contents/Library/LoginItems/PhotoStudio Menu.app",
+        "com.longmaker.PhotoStudioPro5.Menu",
+    );
+    mac.run_program(&menu, 4243, 501);
     mac
 }
 

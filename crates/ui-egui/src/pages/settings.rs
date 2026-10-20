@@ -1,6 +1,7 @@
 //! Settings: where removed items go, the ignore list, thresholds, agents, menu bar.
 
 use cleancraft_core::executor::Method;
+use cleancraft_core::fsutil::human_size;
 use egui::{RichText, Sense, Ui, vec2};
 
 use crate::app::CleanApp;
@@ -63,24 +64,99 @@ fn slider_row(
             t.text_dim,
         );
         ui.spacing_mut().slider_width = (ui.available_width() - 140.0).clamp(160.0, 360.0);
+        // Wide ranges (10 MB to 5 GB) move in even steps of scale, not of megabytes.
+        let wide = *range.end() >= range.start().saturating_mul(50).max(1);
         let r = kit::slider(
             ui,
             egui::Slider::new(value, range)
-                .suffix(unit)
+                .show_value(false)
+                .logarithmic(wide)
                 .trailing_fill(true),
         );
+        // A slider senses drags only, so kit::slider's click check misses it.
+        if r.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
         let v = *value as f64;
         let name = name.to_string();
         r.widget_info(|| egui::WidgetInfo::slider(true, v, name.clone()));
+        // The value, beside the slider: shown "50 MB", announced with what it sets.
+        let shown = format!("{value}{unit}");
+        let full = format!("{label}: {value}{unit}");
+        let fid = font(size::CALLOUT, Weight::SemiBold);
+        let w = kit::galley(ui, &shown, fid.clone(), t.text).size().x + 4.0;
+        let (vr, _) = ui.allocate_exact_size(vec2(w.max(64.0), 20.0), Sense::hover());
+        kit::text_at(ui, vr, &shown, &full, fid, t.text, egui::Align::Min);
         r.changed()
     })
     .inner
+}
+
+/// What the quarantine holds now, and a way to see it in Finder. (Emptying it would delete
+/// for good, which CleanCraft never does: Finder's Move to Trash is the way.)
+fn quarantine_line(app: &mut CleanApp, ui: &mut Ui) {
+    let t = app.t;
+    let changed = app.settings_page.watch.changes(&app.env).is_some();
+    if app.settings_page.quarantine.is_none() || changed {
+        app.settings_page.watch.prime(&app.env);
+        let dir = app.env.quarantine_dir();
+        let items = std::fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0);
+        let bytes = cleancraft_core::fsutil::tree_size(&dir).0;
+        app.settings_page.quarantine = Some((if items == 0 { 0 } else { bytes }, items));
+    }
+    let (bytes, items) = app.settings_page.quarantine.unwrap_or((0, 0));
+    ui.add_space(space::XS);
+    ui.horizontal(|ui| {
+        ui.add_space(28.0);
+        let text = if items == 0 {
+            "The quarantine is empty.".to_string()
+        } else {
+            format!(
+                "The quarantine holds {} ({}). Items stay there until you put them back from History or move them to the Trash in Finder.",
+                human_size(bytes),
+                cleancraft_core::fsutil::items(items)
+            )
+        };
+        ui.add(
+            egui::Label::new(
+                RichText::new(text)
+                    .font(font(size::FOOTNOTE, Weight::Regular))
+                    .color(t.text_faint),
+            )
+            .wrap(),
+        );
+    });
+    if items > 0 {
+        ui.horizontal(|ui| {
+            ui.add_space(28.0);
+            if kit::pill(
+                ui,
+                &t,
+                "Show Quarantine in Finder",
+                kit::Kind::Secondary,
+                Some(Icon::Reveal),
+            )
+            .clicked()
+            {
+                app.act();
+                let dir = app.env.quarantine_dir().to_string_lossy().into_owned();
+                match app.env.sys.run("/usr/bin/open", &[&dir]) {
+                    Ok(out) if out.ok() => {}
+                    Ok(out) => app.warn(format!("Could not open Finder: {}", out.stderr.trim())),
+                    Err(e) => app.warn(format!("Could not open Finder: {e}")),
+                }
+            }
+        });
+    }
 }
 
 #[derive(Default)]
 pub struct State {
     /// Text box for adding an ignore-list path.
     pub new_ignore: String,
+    /// What the quarantine holds (bytes, items), read again after each move or undo.
+    quarantine: Option<(u64, usize)>,
+    watch: super::history::JournalWatch,
     /// The macOS folder dialog, while it is open.
     pick: Option<crate::jobs::Job<Result<Option<std::path::PathBuf>, String>>>,
 }
@@ -93,7 +169,7 @@ pub fn choose_folder(
 ) -> Result<Option<std::path::PathBuf>, String> {
     let script = format!(
         "POSIX path of (choose folder with prompt \"{}\")",
-        prompt.replace('\\', "").replace('"', "")
+        prompt.replace(['\\', '"'], "")
     );
     let out = env
         .sys
@@ -167,6 +243,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                     app.settings.method = m;
                     changed = true;
                 }
+                quarantine_line(app, ui);
             });
             ui.add_space(space::M);
             kit::card(&t).show(ui, |ui| {
@@ -196,11 +273,12 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                         // reach; the whole path in the tooltip and for VoiceOver.
                         let fid = font(size::CALLOUT, Weight::Regular);
                         let room = (ui.available_width() - 120.0).max(80.0);
-                        let short = kit::truncate_middle(ui.ctx(), &shown, &fid, room);
+                        let seen = super::history::short_path(&app.env, p);
+                        let short = kit::truncate_middle(ui.ctx(), &seen, &fid, room);
                         let w = kit::galley(ui, &short, fid.clone(), t.text).size().x + 2.0;
                         let (pr, _) = ui.allocate_exact_size(vec2(w, 20.0), Sense::hover());
                         kit::text_at(ui, pr, &short, &shown, fid, t.text, egui::Align::Min)
-                            .on_hover_text(&shown);
+                            .on_hover_text(&seen);
                         let r = kit::ghost(ui, &t, "Remove", Some(Icon::Close));
                         r.widget_info(|| {
                             egui::WidgetInfo::labeled(
@@ -354,8 +432,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                             egui::Slider::new(&mut v, 0.0..=1.0)
                                 .show_value(false)
                                 .trailing_fill(true),
-                        )
-                        .on_hover_cursor(egui::CursorIcon::PointingHand);
+                        );
                         let shown = v as f64;
                         r.widget_info(|| egui::WidgetInfo::slider(true, shown, "Volume"));
                         if r.changed() {

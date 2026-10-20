@@ -478,7 +478,6 @@ fn review_c6_unchecked_checkbox_border_reaches_3_to_1() {
 /// C7 (S2): Live Monitor's "Free Up RAM" and "Free Up Space" can only be clicked on the pill
 /// itself (they claim a 277 pt wide row today).
 #[test]
-#[ignore = "REVIEW-C C7 open: 277 pt hit area for a 112 pt pill"]
 fn review_c7_monitor_buttons_hit_area_matches_the_pill() {
     let m = FakeMac::new();
     testkit_monitor::answer_all(m.env.fake_sys().expect("fake sys"));
@@ -594,7 +593,6 @@ fn review_c10_first_results_frame_is_consistent() {
 
 /// C11 (S2): every slider and value field in Settings has an accessible name.
 #[test]
-#[ignore = "REVIEW-C C11 open: 3 unnamed value fields"]
 fn review_c11_settings_value_fields_are_named() {
     let m = FakeMac::new();
     base(&m);

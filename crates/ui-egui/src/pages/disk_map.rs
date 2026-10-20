@@ -61,6 +61,8 @@ pub struct State {
     pub error: Option<String>,
     pub folder_text: String,
     pub disk: Option<DiskUse>,
+    /// The macOS folder dialog, while it is open.
+    pick: Option<Job<Result<Option<PathBuf>, String>>>,
     /// The action log as the trees reflect it: moves made on other pages update the map.
     watch: super::history::JournalWatch,
 }
@@ -121,6 +123,9 @@ fn start_map(app: &mut CleanApp, root: PathBuf, fresh: bool) {
     let cancel = st.cancel.clone();
     st.root = Some(root.clone());
     st.current = Some(root.clone());
+    // Before measuring: the first play writes the sound into CleanCraft's cache folder
+    // (in Library), which the map would otherwise miss.
+    crate::sound::play(&app.env, crate::sound::Cue::ScanStart);
     let job = Job::start(app.sync, move |status| {
         space::build(&root, &cancel, &|n, _| status(&format!("{n} files")))
     });
@@ -131,6 +136,10 @@ fn start_map(app: &mut CleanApp, root: PathBuf, fresh: bool) {
 pub fn poll(app: &mut CleanApp) -> bool {
     let st = &mut app.disk_map;
     let mut notice: Option<(String, bool)> = None;
+    // Tell the other pages (plan pages, Quick Sweep) what moved or came back.
+    let mut moved: Option<Vec<PathBuf>> = None;
+    let mut done_scan = false;
+    let mut came_back = false;
     let busy = match &mut st.phase {
         Phase::Scanning(job) => {
             if let Some(tree) = job.poll() {
@@ -140,6 +149,7 @@ pub fn poll(app: &mut CleanApp) -> bool {
                 } else if let Some(r) = st.root.clone() {
                     st.trees.insert(r, tree);
                     st.phase = Phase::Map;
+                    done_scan = true;
                 }
                 st.watch.prime(&app.env);
                 false
@@ -175,6 +185,7 @@ pub fn poll(app: &mut CleanApp) -> bool {
                 }
                 match (out.result, out.undo) {
                     (_, Some((n, errs))) => {
+                        came_back = true;
                         notice = Some(if errs.is_empty() {
                             (
                                 format!("{} put back.", cleancraft_core::fsutil::items(n)),
@@ -194,6 +205,7 @@ pub fn poll(app: &mut CleanApp) -> bool {
                         st.phase = Phase::Map;
                     }
                     (Ok(rep), None) => {
+                        moved = Some(CleanApp::moved_paths(&rep));
                         st.selected.clear();
                         st.phase = Phase::Done(rep);
                     }
@@ -213,6 +225,16 @@ pub fn poll(app: &mut CleanApp) -> bool {
         }
         _ => false,
     };
+    if done_scan {
+        play(app, crate::sound::Cue::ScanDone);
+    }
+    if let Some(m) = moved {
+        app.files_moved(&m);
+        play(app, crate::sound::Cue::CleanDone);
+    }
+    if came_back {
+        app.files_back(&[]);
+    }
     if let Some((m, err)) = notice {
         if err {
             app.warn(m);
@@ -221,6 +243,16 @@ pub fn poll(app: &mut CleanApp) -> bool {
         }
     }
     busy
+}
+
+/// Play a sound, then measure CleanCraft's sound cache again: the first play of a cue writes
+/// its file there (in Library), and the map must not miss it.
+fn play(app: &mut CleanApp, cue: crate::sound::Cue) {
+    crate::sound::play(&app.env, cue);
+    let dir = crate::sound::cache_dir(&app.env);
+    for t in app.disk_map.trees.values_mut() {
+        t.refresh(&dir);
+    }
 }
 
 /// Moves and undos made elsewhere (another page, History, an agent) since the map was
@@ -411,13 +443,17 @@ fn storage_bar(app: &mut CleanApp, ui: &mut Ui) {
                         .font(font(size::BODY, Weight::SemiBold))
                         .color(t.text),
                 );
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(
-                        RichText::new(format!("Selected: {}", human_size(sel)))
-                            .font(font(size::CALLOUT, Weight::Medium))
-                            .color(t.warning),
-                    );
-                });
+                // What the selection would free, only when something is selected (the
+                // bottom bar says "0 selected" otherwise).
+                if sel > 0 {
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.label(
+                            RichText::new(format!("Selected: {}", human_size(sel)))
+                                .font(font(size::CALLOUT, Weight::Medium))
+                                .color(t.warning),
+                        );
+                    });
+                }
             });
             if let (Some(u), Some(tot)) = (d.used, d.total)
                 && tot > 0
@@ -458,8 +494,11 @@ fn idle(app: &mut CleanApp, ui: &mut Ui) {
                 storage_bar(app, ui);
             });
             ui.add_space(theme::space::M);
+            // The field takes what the two buttons leave (the column is narrow at 1280).
+            let field_w = (ui.available_width() - 300.0).clamp(140.0, 300.0);
             kit::centered_row(ui, egui::Id::new("disk-map-folder-row"), |ui| {
-                let r = kit::text_field(ui, &t, &mut app.disk_map.folder_text, "~/Projects", 300.0);
+                let r =
+                    kit::text_field(ui, &t, &mut app.disk_map.folder_text, "~/Projects", field_w);
                 r.widget_info(|| {
                     egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Folder to map")
                 });
@@ -489,9 +528,49 @@ fn idle(app: &mut CleanApp, ui: &mut Ui) {
                 if (clicked || enter) && can {
                     folder_go = true;
                 }
+                let picking = app.disk_map.pick.is_some();
+                let ch = ui
+                    .add_enabled_ui(!picking, |ui| {
+                        kit::pill(ui, &t, "Choose Folder...", kit::Kind::Secondary, None)
+                    })
+                    .inner;
+                if ch
+                    .on_hover_text("Pick the folder to map in the macOS file dialog")
+                    .clicked()
+                    && !picking
+                {
+                    app.act();
+                    let env = app.env.clone();
+                    app.disk_map.pick = Some(Job::start(app.sync, move |_| {
+                        super::settings::choose_folder(&env, "Choose a folder to map")
+                    }));
+                }
             });
         },
     );
+    // The folder dialog answered: map that folder.
+    if let Some(job) = app.disk_map.pick.as_mut() {
+        if let Some(r) = job.poll() {
+            app.disk_map.pick = None;
+            match r {
+                Ok(Some(p)) => {
+                    app.disk_map.folder_text = app.env.display(&p);
+                    match space::parse_map_folder(&app.env, &app.disk_map.folder_text) {
+                        Ok(p) => start_map(app, p, false),
+                        Err(e) => app.disk_map.error = Some(e),
+                    }
+                    return;
+                }
+                Ok(None) => {}
+                Err(e) => app.disk_map.error = Some(e),
+            }
+        } else if job.is_dead() {
+            app.disk_map.pick = None;
+        } else {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(200));
+        }
+    }
     if folder_go {
         app.act();
         match space::parse_map_folder(&app.env, &app.disk_map.folder_text) {
@@ -585,7 +664,7 @@ fn map(app: &mut CleanApp, ui: &mut Ui) {
             }
         }
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if kit::secondary(ui, &t, "Map Again") {
+            if kit::secondary(ui, &t, "Scan Again") {
                 app.act();
                 start_map(app, root.clone(), true);
             }
@@ -745,9 +824,7 @@ fn treemap(app: &mut CleanApp, ui: &mut Ui, node: &Node, area: egui::Rect) {
             .as_ref()
             .is_some_and(|(p, _)| app.disk_map.selected.contains(p));
         let id = ui.id().with(("block", &label));
-        let resp = ui
-            .interact(rect, id, Sense::click())
-            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        let resp = ui.interact(rect, id, Sense::click());
         let name = format!("Block {label}");
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
         let p = ui.painter();
@@ -1070,18 +1147,13 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
                 });
         });
         ui.add_space(theme::space::L);
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let label = match app.settings.method {
-                Method::Trash => "Move to Trash",
-                Method::Quarantine | Method::AdminQuarantine => "Move to Quarantine",
-            };
-            if kit::danger(ui, &t, label) {
-                go = true;
-            }
-            if kit::secondary(ui, &t, "Cancel") {
-                close = true;
-            }
-        });
+        let label = match app.settings.method {
+            Method::Trash => "Move to Trash",
+            Method::Quarantine | Method::AdminQuarantine => "Move to Quarantine",
+        };
+        let (g, c) = kit::dialog_actions(ui, &t, label, kit::Kind::Danger);
+        go = g;
+        close = c;
     });
     if go {
         app.act();

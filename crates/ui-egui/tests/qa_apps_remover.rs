@@ -230,7 +230,7 @@ fn running_app_is_refused() {
     let mut h = harness(&m.mac);
     click(m_h(&mut h), "Editor");
     // Said once, in the banner, with the way forward.
-    assert!(has(&h, "Editor is open"));
+    assert!(has_text(&h, "of Editor is running") || has(&h, "Editor is running"));
     assert!(has(&h, "Quit Editor"));
     h.get_by_label("Uninstall").click();
     steps(&mut h);
@@ -251,7 +251,7 @@ fn running_app_is_refused() {
     assert!(m.editor.exists() && m.sure.iter().all(|p| p.exists()));
     assert!(executor::history(&m.mac.env).is_empty());
     // The detail now shows the lock.
-    assert!(has(&h, "Editor is open"));
+    assert!(has(&h, "Quit Editor"));
 }
 
 #[test]
