@@ -286,7 +286,23 @@ pub fn filter_menu(
         .id(egui::Id::new(("list-filter-menu", id)))
         .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
-            ui.set_min_width(240.0);
+            // As wide as the longest entry (label, gap, count), at least 240.
+            let fid = font(size::CALLOUT, Weight::Medium);
+            let w = filters
+                .iter()
+                .map(|f| {
+                    kit::galley(ui, &f.label, fid.clone(), t.text).size().x
+                        + kit::galley(ui, &f.count.to_string(), fid.clone(), t.text)
+                            .size()
+                            .x
+                })
+                .fold(0.0f32, f32::max)
+                + 32.0
+                + 24.0
+                + 12.0;
+            let w = w.max(240.0);
+            ui.set_min_width(w);
+            ui.set_max_width(w);
             ui.spacing_mut().item_spacing.y = 2.0;
             let mut last_group = "";
             for f in filters {
@@ -481,21 +497,25 @@ pub fn status(
                     .font(font(size::CALLOUT, Weight::Medium))
                     .color(if shown == 0 { t.warning } else { t.text_dim }),
             );
-            for f in active(p, filters) {
-                if chip(ui, t, &f.label).clicked() {
-                    toggle(p, &f.key);
+            // A Filter or Sort pop-up opens over this line: its controls wait until it
+            // closes (a click there would land in the pop-up).
+            ui.add_enabled_ui(!egui::Popup::is_any_open(ui.ctx()), |ui| {
+                for f in active(p, filters) {
+                    if chip(ui, t, &f.label).clicked() {
+                        toggle(p, &f.key);
+                        out.prefs = true;
+                    }
+                }
+                let r = kit::ghost(ui, t, "Clear Filters", Some(Icon::Close));
+                if r.clicked() {
+                    clear_filters(p, filters);
+                    if !search_text.is_empty() {
+                        search_text.clear();
+                        out.search = true;
+                    }
                     out.prefs = true;
                 }
-            }
-            let r = kit::ghost(ui, t, "Clear Filters", Some(Icon::Close));
-            if r.clicked() {
-                clear_filters(p, filters);
-                if !search_text.is_empty() {
-                    search_text.clear();
-                    out.search = true;
-                }
-                out.prefs = true;
-            }
+            });
         },
     );
     out
@@ -589,7 +609,7 @@ fn filter_button(ui: &mut Ui, t: &Tokens, label: &str, lit: bool) -> Response {
 /// A filter in the pop-up: check mark, label, count at the right.
 fn filter_entry(ui: &mut Ui, t: &Tokens, f: &Filter, is_on: bool) -> bool {
     let fid = font(size::CALLOUT, Weight::Medium);
-    let w = ui.available_width().max(240.0);
+    let w = ui.available_width();
     let (r, resp) = ui.allocate_exact_size(vec2(w, 28.0), Sense::click());
     let name = f.entry_name();
     resp.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, is_on, &name));
@@ -637,7 +657,7 @@ fn filter_entry(ui: &mut Ui, t: &Tokens, f: &Filter, is_on: bool) -> bool {
 
 fn clear_entry(ui: &mut Ui, t: &Tokens) -> Response {
     let fid = font(size::CALLOUT, Weight::Medium);
-    let w = ui.available_width().max(240.0);
+    let w = ui.available_width();
     let (r, resp) = ui.allocate_exact_size(vec2(w, 28.0), Sense::click());
     resp.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, "Clear Filters"));
     let feel = kit::feel(ui, &resp);

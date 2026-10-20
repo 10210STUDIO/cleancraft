@@ -1514,16 +1514,23 @@ fn apps_bottom_bar(app: &mut CleanApp, ui: &mut Ui) {
     let t = app.t;
     let n = app.apps.picked.len();
     // Ticked apps the search, filters or group do not show still go: say so.
-    let shown: BTreeSet<PathBuf> = visible_apps(&app.apps, &app.settings)
-        .into_iter()
-        .map(|a| a.path)
-        .collect();
-    let hidden = app
-        .apps
-        .picked
-        .iter()
-        .filter(|p| !shown.contains(*p))
-        .count();
+    // (The group column only navigates: a ticked app in another group is not hidden.)
+    let hidden = {
+        let st = &app.apps;
+        let q = kit_list::query(&st.search);
+        let filters = app_filters(st, &app.settings);
+        let now = now();
+        st.list
+            .iter()
+            .flatten()
+            .filter(|a| st.picked.contains(&a.path))
+            .filter(|a| {
+                !listed(st, a)
+                    || !(q.is_empty() || matches_search(a, &q))
+                    || !kit_list::passes(&st.prefs, &filters, |k| app_has(st, a, k, now))
+            })
+            .count()
+    };
     let apps_text = kit_list::selected_text(
         &if n == 1 {
             "1 app selected".to_string()
@@ -2373,18 +2380,29 @@ fn files_bottom_bar(app: &mut CleanApp, ui: &mut Ui) {
         .map(|p| (p.selected_count(), p.selected_size()))
         .unwrap_or((0, 0));
     // Selected files the search, filters or group do not show still move: say so.
-    let shown = visible_files(&app.apps);
-    let hidden = app
-        .apps
-        .extras
-        .as_ref()
-        .map(|p| {
-            p.items
-                .iter()
-                .filter(|i| i.selected && !shown.contains(&i.id))
-                .count()
-        })
-        .unwrap_or(0);
+    // (The group column only navigates: a ticked file of another group is not hidden.)
+    let hidden = {
+        let st = &app.apps;
+        let q = kit_list::query(&st.search);
+        let defs = [
+            Filter::any("Show", "selected", "", 0),
+            Filter::any("Show", "unselected", "", 0),
+            Filter::any("Show", "locked", "", 0),
+        ];
+        st.extras
+            .as_ref()
+            .map(|p| {
+                p.items
+                    .iter()
+                    .filter(|i| i.selected)
+                    .filter(|i| {
+                        !kit_list::matches(&q, &[&i.path.to_string_lossy(), &i.reason])
+                            || !kit_list::passes(&st.files_prefs, &defs, |k| file_has(i, k))
+                    })
+                    .count()
+            })
+            .unwrap_or(0)
+    };
     let note = kit_list::hidden_note(hidden);
     kit::bottom_bar(ui, &t, egui::Id::new("apps-files-bottom"), |ui| {
         kit::bar_figure(

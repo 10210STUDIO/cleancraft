@@ -12,7 +12,7 @@ use cleancraft_core::testkit_monitor;
 use cleancraft_core::testkit_perf;
 use cleancraft_core::{FeatureId, Settings};
 use common::*;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 
 fn settle(h: &mut H) {
     for _ in 0..3 {
@@ -362,4 +362,57 @@ fn live_monitor_top_lists_sort_by_cpu_memory_or_name() {
     assert_eq!(order(&h, &labels), want, "A to Z");
     let p = &Settings::load(&mac.env).lists["monitor.cpu"];
     assert_eq!(p.sort, "name");
+}
+
+#[test]
+fn clear_filters_on_the_line_works_while_the_pop_up_is_open() {
+    let mac = FakeMac::new();
+    record(
+        &mac.env,
+        "a",
+        FeatureId::SystemJunk,
+        0,
+        1_000,
+        "today.cache",
+    );
+    record(
+        &mac.env,
+        "b",
+        FeatureId::LargeOldFiles,
+        3,
+        9_000_000,
+        "week.zip",
+    );
+    let mut h = harness(&mac);
+    h.state_mut().navigate("history");
+    settle(&mut h);
+    click(&mut h, "Filter");
+    click(&mut h, "System Junk (1)");
+    assert!(has(&h, "Showing 1 of 2 actions"));
+    // The line's own Clear Filters waits under the open pop-up (a click there would land
+    // in the pop-up); the pop-up has its own.
+    let line = h.get_all_by_label("Clear Filters").next().unwrap();
+    assert!(line.accesskit_node().is_disabled());
+    h.get_all_by_label("Clear Filters").last().unwrap().click();
+    settle(&mut h);
+    assert!(!has_text(&h, "Showing"), "filters cleared");
+}
+
+#[test]
+fn the_filter_pop_up_is_as_wide_as_its_entries() {
+    let mac = FakeMac::new();
+    record(
+        &mac.env,
+        "a",
+        FeatureId::SystemJunk,
+        0,
+        1_000,
+        "today.cache",
+    );
+    let mut h = harness(&mac);
+    h.state_mut().navigate("history");
+    settle(&mut h);
+    click(&mut h, "Filter");
+    let w = h.get_by_label("Today (1)").rect().width();
+    assert!((240.0..400.0).contains(&w), "entry width {w}");
 }
