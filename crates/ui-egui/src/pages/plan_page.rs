@@ -1751,11 +1751,12 @@ pub fn done_view_with(
             kit::dim(ui, &t, note);
         }
         ui.add_space(space::XL);
+        // The page's own buttons end with its primary one, so Empty Trash goes first.
         kit::centered_row(ui, id.with("buttons"), |ui| {
-            buttons(app, ui);
             if to_trash {
                 super::extras_cleanup::empty_trash(app, ui, "Empty Trash...");
             }
+            buttons(app, ui);
         });
         ui.add_space(space::L);
         let h = ui.available_height() - 80.0;
