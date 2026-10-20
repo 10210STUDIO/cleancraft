@@ -78,3 +78,9 @@ Totals: fixed 36, partly 4 (C23, C35, C38, U22), open 0, one left by request (U2
 - Role lists: `Role::Switch` added beside `Role::CheckBox` where tests collect clickable
   controls (qa_every_control, ux_render, review_design_c), and ux_design3 looks for switches.
 - review_usability u05: label "Move Quarantine to Trash" (the lead's name), plus new checks.
+
+## Final gate (commit 6feb371 plus this report line)
+
+`cargo fmt --all -- --check` clean, `cargo clippy --workspace --all-targets -- -D warnings`
+clean, `cargo test --workspace`: 655 passed, 0 failed, 18 ignored (the usability walkthroughs
+`task_*`, ignored by design). target/ deleted afterwards.
