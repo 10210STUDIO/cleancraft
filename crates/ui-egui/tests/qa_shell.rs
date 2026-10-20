@@ -129,6 +129,11 @@ fn settings_are_saved_and_change_what_happens() {
     steps(&mut h);
     click(&mut h, "Let AI assistants clean after you confirm (MCP)");
     assert!(Settings::load(&mac.env).agents_may_clean);
+    // Above the AI group since round 6 (Full Disk Access and Developer Clutter groups):
+    // scroll it into view first.
+    h.get_by_role_and_label(Role::Slider, "Large file minimum (MB)")
+        .scroll_to_me();
+    steps(&mut h);
     h.get_by_role_and_label(Role::Slider, "Large file minimum (MB)")
         .click();
     steps(&mut h);

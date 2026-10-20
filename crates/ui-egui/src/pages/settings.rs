@@ -284,6 +284,12 @@ pub struct State {
     watch: super::history::JournalWatch,
     /// The macOS folder dialog, while it is open.
     pick: Option<crate::jobs::Job<Result<Option<std::path::PathBuf>, String>>>,
+    /// The folder dialog of the Developer Clutter group (a code folder to add).
+    pick_dev: Option<crate::jobs::Job<Result<Option<std::path::PathBuf>, String>>>,
+    /// Text box for adding a code folder by its path.
+    pub new_dev_root: String,
+    /// A route asked for the Full Disk Access group: scroll it into view once.
+    pub focus_fda: bool,
     /// "Open the app at this page" requests from the menu bar agent and `cleancraft open`.
     inbox: notify::OpenInbox,
     /// When the inbox was last read (egui time, seconds).
@@ -328,7 +334,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
         &t,
         Icon::Settings,
         "Settings",
-        "Where removed items go, what scans leave alone, how big and old files are judged, and sounds. Changes are saved as you make them.",
+        "Where removed items go, Full Disk Access, what scans leave alone, how big and old files are judged, code folders, AI assistants, the menu bar and sounds. Changes are saved as you make them.",
     );
     let mut changed = false;
     // The folder dialog answered.
@@ -345,6 +351,21 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
             }
         } else if job.is_dead() {
             app.settings_page.pick = None;
+        } else {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(200));
+        }
+    }
+    if let Some(job) = app.settings_page.pick_dev.as_mut() {
+        if let Some(r) = job.poll() {
+            app.settings_page.pick_dev = None;
+            match r {
+                Ok(Some(p)) => changed |= add_dev_root(app, p),
+                Ok(None) => {}
+                Err(e) => app.warn(e),
+            }
+        } else if job.is_dead() {
+            app.settings_page.pick_dev = None;
         } else {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(200));
@@ -378,6 +399,8 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                 }
                 quarantine_line(app, ui);
             });
+            ui.add_space(space::M);
+            fda_card(app, ui);
             ui.add_space(space::M);
             kit::card(&t).show(ui, |ui| {
                 ui.set_width(ui.available_width());
@@ -509,6 +532,8 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                 }
             });
             ui.add_space(space::M);
+            changed |= dev_clutter_card(app, ui);
+            ui.add_space(space::M);
             kit::card(&t).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 heading(ui, &t, Icon::Sweep, "AI assistants");
@@ -538,6 +563,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                         .wrap(),
                     );
                 });
+                ai_links(app, ui);
             });
             ui.add_space(space::M);
             changed |= menu_bar_card(app, ui);
@@ -603,6 +629,262 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
         app.act();
         app.save_settings();
     }
+}
+
+/// The links of the AI assistants group: the guide and the "Connect your AI apps" step.
+pub const AGENT_GUIDE_LINK: &str = "How to connect an AI agent";
+pub const CONNECT_AI_BUTTON: &str = "Connect AI Apps...";
+
+fn ai_links(app: &mut CleanApp, ui: &mut Ui) {
+    let t = app.t;
+    ui.add_space(space::XS);
+    let mut go = None;
+    ui.horizontal_wrapped(|ui| {
+        ui.add_space(272.0);
+        if kit::pill(
+            ui,
+            &t,
+            CONNECT_AI_BUTTON,
+            kit::Kind::Secondary,
+            Some(Icon::Sweep),
+        )
+        .on_hover_text(
+            "Add CleanCraft to Claude Desktop or Claude Code, after you see the exact change",
+        )
+        .clicked()
+        {
+            go = Some(cleancraft_core::route::AppRoute::ConnectAi);
+        }
+        if kit::ghost(ui, &t, AGENT_GUIDE_LINK, Some(Icon::Chevron))
+            .on_hover_text("Step by step, with the tools an agent can use")
+            .clicked()
+        {
+            go = Some(cleancraft_core::route::AppRoute::AgentGuide);
+        }
+    });
+    if let Some(r) = go {
+        app.act();
+        app.open_route(&r);
+    }
+}
+
+/// The Full Disk Access group: whether CleanCraft has it, and the way to turn it on
+/// (the "full_disk_access" route of the Trash watch lands here).
+pub const FDA_OPEN: &str = "Open Privacy Settings";
+pub const FDA_CHECK: &str = "Check Again";
+
+fn fda_card(app: &mut CleanApp, ui: &mut Ui) {
+    use cleancraft_core::permissions::{self, Access};
+    let t = app.t;
+    let r = kit::card(&t).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        heading(ui, &t, Icon::Lock, "Full Disk Access");
+        let text = match app.fda {
+            Access::Granted => "On: CleanCraft can read Mail, Safari and the Trash, and the Trash watch can see apps you drag there.",
+            Access::Unknown => "CleanCraft could not tell yet: none of the private places macOS protects exists on this Mac.",
+            Access::Missing => "Off: macOS keeps Mail, Safari and the Trash private. In System Settings, open Privacy & Security, then Full Disk Access, turn on CleanCraft, and come back to Check Again.",
+        };
+        ui.add(
+            egui::Label::new(
+                RichText::new(text)
+                    .font(font(size::CALLOUT, Weight::Regular))
+                    .color(if app.fda == Access::Missing { t.text } else { t.text_dim }),
+            )
+            .wrap(),
+        );
+        ui.add_space(space::XS);
+        ui.horizontal(|ui| {
+            if app.fda != Access::Granted && kit::secondary(ui, &t, FDA_OPEN) {
+                app.act();
+                if let Err(e) = permissions::open_fda_settings(&app.env) {
+                    app.warn(format!("Could not open System Settings: {e}"));
+                }
+            }
+            if kit::ghost(ui, &t, FDA_CHECK, Some(Icon::Undo))
+                .on_hover_text("Read the Full Disk Access setting again")
+                .clicked()
+            {
+                app.act();
+                app.fda = permissions::full_disk_access(&app.env);
+                match app.fda {
+                    Access::Missing => app.warn("Full Disk Access is still off."),
+                    _ => app.tell("Full Disk Access is on."),
+                }
+            }
+        });
+    });
+    if std::mem::take(&mut app.settings_page.focus_fda) {
+        r.response.scroll_to_me(Some(egui::Align::TOP));
+    }
+}
+
+/// The Developer Clutter group: code folders to look in besides the usual ones, and when a
+/// project counts as inactive. Returns true when a setting changed.
+pub const DEV_ADD: &str = "Add Code Folder";
+pub const DEV_CHOOSE: &str = "Choose Code Folder...";
+
+fn dev_clutter_card(app: &mut CleanApp, ui: &mut Ui) -> bool {
+    let t = app.t;
+    let mut changed = false;
+    kit::card(&t).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        heading(ui, &t, Icon::Junk, "Code folders for Developer Clutter");
+        let usual: Vec<String> = cleancraft_core::features::dev_clutter::DEFAULT_ROOTS
+            .iter()
+            .map(|d| format!("~/{d}"))
+            .collect();
+        ui.add(
+            egui::Label::new(
+                RichText::new(format!(
+                    "Projects are looked for in {} and in the code folders below.",
+                    usual.join(", ")
+                ))
+                .font(font(size::CALLOUT, Weight::Regular))
+                .color(t.text_dim),
+            )
+            .wrap(),
+        );
+        ui.add_space(space::XS);
+        let list = app.settings.dev_roots.clone();
+        if list.is_empty() {
+            kit::dim(ui, &t, "No code folders of your own yet.");
+        }
+        for (i, p) in list.iter().enumerate() {
+            ui.horizontal(|ui| {
+                ui.set_min_height(crate::theme::hit::FIELD);
+                let shown = app.env.display(p);
+                let (r, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
+                icons::paint(ui.painter(), r, Icon::Folder, t.text_dim);
+                let fid = font(size::CALLOUT, Weight::Regular);
+                let room = (ui.available_width() - 120.0).max(80.0);
+                let seen = super::history::short_path(&app.env, p);
+                let short = kit::truncate_middle(ui.ctx(), &seen, &fid, room);
+                let w = kit::galley(ui, &short, fid.clone(), t.text).size().x + 2.0;
+                let (pr, _) = ui.allocate_exact_size(vec2(w, 20.0), Sense::hover());
+                kit::text_at(ui, pr, &short, &shown, fid, t.text, egui::Align::Min)
+                    .on_hover_text(&seen);
+                let r = kit::ghost(ui, &t, "Remove", Some(Icon::Close));
+                r.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Button,
+                        true,
+                        format!("Remove code folder {shown}"),
+                    )
+                });
+                if r.clicked() {
+                    app.act();
+                    app.settings.dev_roots.remove(i);
+                    changed = true;
+                }
+            });
+        }
+        ui.horizontal(|ui| {
+            let r = kit::text_field(
+                ui,
+                &t,
+                &mut app.settings_page.new_dev_root,
+                "Path of a code folder",
+                380.0,
+            );
+            r.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Path of a code folder")
+            });
+            let enter = r.lost_focus()
+                && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                && !app.settings_page.new_dev_root.trim().is_empty();
+            if kit::secondary(ui, &t, DEV_ADD) || enter {
+                app.act();
+                let raw = app.settings_page.new_dev_root.trim().to_string();
+                if raw.is_empty() {
+                    app.warn("Type the path of a code folder first, or use Choose Code Folder.");
+                } else {
+                    let p = if raw == "~" {
+                        app.env.home().to_path_buf()
+                    } else if let Some(rest) = raw.strip_prefix("~/") {
+                        app.env.home_path(rest)
+                    } else {
+                        app.env.sys_path(&raw)
+                    };
+                    if add_dev_root(app, p) {
+                        app.settings_page.new_dev_root.clear();
+                        changed = true;
+                    }
+                }
+            }
+            let picking = app.settings_page.pick_dev.is_some();
+            let ch = ui
+                .add_enabled_ui(!picking, |ui| {
+                    kit::pill(ui, &t, DEV_CHOOSE, kit::Kind::Secondary, Some(Icon::Folder))
+                })
+                .inner;
+            if ch.on_hover_text("Pick a folder that holds your projects").clicked() && !picking {
+                app.act();
+                let env = app.env.clone();
+                app.settings_page.pick_dev = Some(crate::jobs::Job::start(app.sync, move |_| {
+                    choose_folder(&env, "Choose a folder that holds your code projects")
+                }));
+            }
+        });
+        let mut days = app.settings.dev_inactive_days.clamp(1, 365) as u32;
+        if slider_row(
+            ui,
+            &t,
+            "Projects count as inactive after (days)",
+            "Projects count as inactive after",
+            &mut days,
+            7..=365,
+            " days",
+        ) {
+            app.settings.dev_inactive_days = days as u64;
+            changed = true;
+        }
+        ui.horizontal(|ui| {
+            ui.add_space(272.0);
+            ui.add(
+                egui::Label::new(
+                    RichText::new("Build folders of an inactive project are selected for you. Active projects are listed but left unticked.")
+                        .font(font(size::FOOTNOTE, Weight::Regular))
+                        .color(t.text_faint),
+                )
+                .wrap(),
+            );
+        });
+    });
+    changed
+}
+
+/// Add a code folder after checking it: a real folder (not a link), not the home folder or
+/// a folder holding it, not on the list yet. Says why when it is refused.
+fn add_dev_root(app: &mut CleanApp, p: std::path::PathBuf) -> bool {
+    let shown = app.env.display(&p);
+    let meta = std::fs::symlink_metadata(&p);
+    if meta.is_err() {
+        app.warn(format!(
+            "Nothing is at {shown}. Check the path, or use Choose Code Folder."
+        ));
+        return false;
+    }
+    if meta.is_ok_and(|m| !m.is_dir()) {
+        app.warn(format!(
+            "{shown} is not a folder (or it is a link). Add the folder that holds your projects."
+        ));
+        return false;
+    }
+    if cleancraft_core::policy::starts_with_ci(app.env.home(), &p) {
+        app.warn(format!(
+            "{shown} holds your whole home folder. Add the folders that hold your projects instead."
+        ));
+        return false;
+    }
+    if app.settings.dev_roots.contains(&p) {
+        app.warn(format!("{shown} is on the list already."));
+        return false;
+    }
+    app.settings.dev_roots.push(p);
+    app.tell(format!(
+        "{shown} is added: Developer Clutter looks there on its next scan."
+    ));
+    true
 }
 
 /// The menu bar switch, also its accessible name.
@@ -805,12 +1087,12 @@ pub fn follow_open_requests(app: &mut CleanApp, ctx: &egui::Context) {
     }
 }
 
-/// Go to the page a route names: "quick_sweep", "scan:quick_sweep" (Quick Sweep; the scan
-/// starts with the routing of app.rs once it has one), "history", "settings", a feature id.
-/// Empty or unknown: the page stays.
+/// Go where a route says, through the app's one router ([`CleanApp::open_route`]):
+/// "scan:quick_sweep" opens Quick Sweep and starts its scan, "uninstall:<app in the Trash>"
+/// opens App Remover on what it left, "threat:<path>" opens Threat Check with that finding
+/// selected, "full_disk_access" the Full Disk Access group. Empty or unknown: the page stays.
 pub fn open_route(app: &mut CleanApp, route: &str) {
-    let page = route.strip_prefix("scan:").unwrap_or(route).trim();
-    if !page.is_empty() {
-        app.navigate(page);
+    if let Some(r) = cleancraft_core::route::AppRoute::parse(route) {
+        app.open_route(&r);
     }
 }

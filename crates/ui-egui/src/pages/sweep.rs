@@ -90,6 +90,14 @@ fn start_scan(app: &mut CleanApp) {
     crate::sound::play(&app.env, crate::sound::Cue::ScanStart);
 }
 
+/// Start the scan when the page shows nothing yet (a route such as "scan:quick_sweep" from a
+/// scheduled scan's notification). Results on screen and a running scan stay as they are.
+pub fn start_scan_if_idle(app: &mut CleanApp) {
+    if matches!(app.sweep.phase, Phase::Idle) {
+        start_scan(app);
+    }
+}
+
 fn start_run(app: &mut CleanApp) {
     let Some(res) = &app.sweep.result else {
         return;

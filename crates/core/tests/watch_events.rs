@@ -410,7 +410,7 @@ fn an_unsigned_launch_agent_gives_an_event_that_opens_threat_check_on_it() {
         "{}",
         ev.body
     );
-    assert_eq!(ev.open, AppRoute::Scan(FeatureId::Malware));
+    assert_eq!(ev.open, AppRoute::ThreatReview(plist.clone()));
     assert_eq!(ev.paths, vec![plist.clone()]);
     // Threat Check finds the same item, and the route selects it for review.
     let settings = Settings::default();
@@ -541,7 +541,7 @@ fn an_installer_writing_many_files_and_several_agents_is_coalesced() {
     assert_eq!(got.len(), 1, "{got:#?}");
     assert_eq!(got[0].kind, WatchKind::NewApp);
     assert_eq!(got[0].title, "New app Gatekeeper rejects: Shady");
-    assert_eq!(got[0].open, AppRoute::Scan(FeatureId::Malware));
+    assert_eq!(got[0].open, AppRoute::ThreatReview(app.clone()));
     assert_eq!(got[0].paths, vec![app.clone()]);
 
     // Three unsigned agents at once: one event naming them.
@@ -650,7 +650,7 @@ fn missing_full_disk_access_is_reported_once_and_nothing_is_offered() {
     let got = wait_events(&evs, 1);
     assert_eq!(got.len(), 1, "{got:#?}");
     assert_eq!(got[0].kind, WatchKind::NeedsFullDiskAccess);
-    assert_eq!(got[0].open, AppRoute::Settings);
+    assert_eq!(got[0].open, AppRoute::FullDiskAccess);
     assert!(got[0].body.contains("Full Disk Access"));
     // The threat watch works without it.
     assert_eq!(h.status().threats, Access::Watching);
