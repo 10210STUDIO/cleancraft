@@ -14,7 +14,8 @@ use cleancraft_core::testkit::FakeMac;
 use cleancraft_core::{Fault, FeatureId, Settings};
 use cleancraft_ui_egui::Page;
 use cleancraft_ui_egui::pages::settings::{
-    DISK_ALERT_SWITCH, MENU_BAR_SWITCH, NOTIFY_NOTE, PAUSE_SWITCH,
+    DISK_ALERT_SWITCH, MENU_BAR_SWITCH, NEW_ITEMS_SWITCH, NOTIFY_NOTE, PAUSE_SWITCH,
+    TRASH_OFFER_SWITCH,
 };
 use common::*;
 use egui::accesskit::Role;
@@ -117,7 +118,14 @@ fn schedule_disk_alert_and_pause_are_saved_and_need_the_menu_bar() {
     let m = mac();
     let mut h = settings_page(&m);
     // Off: the options are there but cannot be used.
-    for l in ["Every day", "Every week", DISK_ALERT_SWITCH, PAUSE_SWITCH] {
+    for l in [
+        "Every day",
+        "Every week",
+        DISK_ALERT_SWITCH,
+        PAUSE_SWITCH,
+        TRASH_OFFER_SWITCH,
+        NEW_ITEMS_SWITCH,
+    ] {
         assert!(disabled(&h, l), "{l} usable while the menu bar is off");
     }
     click(&mut h, "Every day");
@@ -167,6 +175,18 @@ fn schedule_disk_alert_and_pause_are_saved_and_need_the_menu_bar() {
     reach(&mut h, PAUSE_SWITCH);
     assert!(!Settings::load(&m.env).notifications_paused);
     assert!(has(&h, NOTIFY_NOTE));
+
+    // The watchers: off by default, each saved.
+    let s = Settings::load(&m.env);
+    assert!(!s.watch_trash_offer && !s.watch_new_items);
+    reach(&mut h, TRASH_OFFER_SWITCH);
+    assert!(Settings::load(&m.env).watch_trash_offer);
+    reach(&mut h, NEW_ITEMS_SWITCH);
+    assert!(Settings::load(&m.env).watch_new_items);
+    reach(&mut h, TRASH_OFFER_SWITCH);
+    reach(&mut h, NEW_ITEMS_SWITCH);
+    let s = Settings::load(&m.env);
+    assert!(!s.watch_trash_offer && !s.watch_new_items);
 
     // Off again: back to the Off radio is still possible while on.
     reach(&mut h, "Off");

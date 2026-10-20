@@ -71,6 +71,12 @@ pub enum Cmd {
     /// Run the menu bar agent (live CPU and memory, scheduled scans, notifications). Started
     /// at login when Settings > "Show CleanCraft in the menu bar" is on. It never cleans.
     Agent,
+    /// Undo of "Connect AI Apps": `mcp-setup remove <config file> [--drop-empty]`.
+    #[command(name = "mcp-setup")]
+    McpSetup {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// Open the app (bringing it to the front when it runs) on a page: quick_sweep,
     /// scan:quick_sweep, system_junk, history, settings... or a cleancraft:// link.
     Open {
@@ -244,6 +250,12 @@ pub fn run_cmd(env: &Env, cmd: Cmd) -> anyhow::Result<()> {
         }
         Cmd::Startup => crate::cli_perf::startup(env, &mut std::io::stdout())?,
         Cmd::Agent => crate::agent::run(env)?,
+        Cmd::McpSetup { args } => {
+            let code = cleancraft_core::mcp_setup::cli(env, &args);
+            if code != 0 {
+                std::process::exit(code);
+            }
+        }
         Cmd::Open { route, page } => {
             let route = open_route(route.or(page).as_deref())?;
             cleancraft_core::notify::request_open(env, &route).map_err(anyhow::Error::msg)?;
@@ -264,6 +276,7 @@ pub fn run_cmd(env: &Env, cmd: Cmd) -> anyhow::Result<()> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
     use cleancraft_core::testkit::FakeMac;
@@ -313,6 +326,24 @@ mod tests {
             .map(|e| e.to_string())
             .unwrap_or_default();
         assert!(e.starts_with("The menu bar is off."), "{e}");
+    }
+
+    #[test]
+    fn mcp_setup_passes_its_arguments_through() {
+        let cli = Cli::try_parse_from([
+            "cleancraft",
+            "mcp-setup",
+            "remove",
+            "/Users/me/x.json",
+            "--drop-empty",
+        ])
+        .expect("args");
+        match cli.cmd {
+            Cmd::McpSetup { args } => {
+                assert_eq!(args, ["remove", "/Users/me/x.json", "--drop-empty"])
+            }
+            _ => panic!("not mcp-setup"),
+        }
     }
 
     fn chrono_now() -> i64 {

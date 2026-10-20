@@ -46,6 +46,10 @@ pub struct Settings {
     pub disk_low_percent: u8,
     /// The menu bar agent shows no notifications while this is on.
     pub notifications_paused: bool,
+    /// Menu bar agent: offer to remove an app's leftovers when it is dragged to the Trash.
+    pub watch_trash_offer: bool,
+    /// Menu bar agent: check new apps and startup items with Threat Check's rules.
+    pub watch_new_items: bool,
 }
 
 /// Interface sounds start at this loudness (0.0 to 1.0).
@@ -75,6 +79,8 @@ impl Default for Settings {
             scan_weekday: 1,
             disk_low_percent: DEFAULT_DISK_LOW_PERCENT,
             notifications_paused: false,
+            watch_trash_offer: false,
+            watch_new_items: false,
         }
     }
 }

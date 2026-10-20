@@ -15,6 +15,7 @@ use chrono::NaiveDateTime;
 use cleancraft_core::monitor::{self, Sampler, Snapshot};
 use cleancraft_core::schedule::{self, Agent, CheckReport, MenuAction, MenuModel};
 use cleancraft_core::sweep::Sources;
+use cleancraft_core::watch::{WatchEvent, WatchHandle, Watcher};
 use cleancraft_core::{Env, Settings, login_agent, notify};
 
 /// A new reading this often.
@@ -29,17 +30,58 @@ pub struct Worker {
     sampler: Sampler,
     snap: Option<Snapshot>,
     last_check: Option<Instant>,
+    /// watch6's watcher while one of its Settings switches is on, with the switches it was
+    /// started for.
+    watcher: Option<(WatchHandle, (bool, bool))>,
+    /// Events from the watcher thread, shown at the next round.
+    events_tx: Sender<WatchEvent>,
+    events: Receiver<WatchEvent>,
 }
 
 impl Worker {
     pub fn new(env: Env, sources: Sources) -> Worker {
         let agent = Agent::new(&env, sources);
+        let (events_tx, events) = mpsc::channel();
         Worker {
             env,
             agent,
             sampler: Sampler::new(),
             snap: None,
             last_check: None,
+            watcher: None,
+            events_tx,
+            events,
+        }
+    }
+
+    /// Where watcher events go (tests send their own).
+    #[cfg(test)]
+    pub fn event_sender(&self) -> Sender<WatchEvent> {
+        self.events_tx.clone()
+    }
+
+    /// Is a watcher running, and for which switches (trash offer, new items)?
+    pub fn watching(&self) -> Option<(bool, bool)> {
+        self.watcher.as_ref().map(|(_, k)| *k)
+    }
+
+    /// Start, restart or stop the watcher to match the Settings switches.
+    fn follow_watch_settings(&mut self, settings: &Settings) {
+        let want = (settings.watch_trash_offer, settings.watch_new_items);
+        if self.watching() == Some(want) {
+            return;
+        }
+        // Dropping the handle stops its thread.
+        self.watcher = None;
+        let Some(ws) = schedule::watch_settings(settings) else {
+            return;
+        };
+        let tx = self.events_tx.clone();
+        match Watcher::start(self.env.clone(), ws, move |ev| {
+            let _ = tx.send(ev);
+        }) {
+            Ok(h) => self.watcher = Some((h, want)),
+            Err(e) => eprintln!("CleanCraft agent: the watcher could not start: {e}"),
         }
     }
 
@@ -49,14 +91,26 @@ impl Worker {
         let settings = Settings::load(&self.env);
         self.snap = Some(self.sampler.sample(&self.env, monitor::now_secs()));
         let mut rep = CheckReport::default();
+        self.follow_watch_settings(&settings);
+        let evs: Vec<WatchEvent> = self.events.try_iter().collect();
+        for ev in evs {
+            let r = self
+                .agent
+                .notice(&self.env, &settings, schedule::watch_notification(&ev));
+            rep.shown.extend(r.shown);
+            rep.failed.extend(r.failed);
+        }
         if self
             .last_check
             .is_none_or(|t| mono.duration_since(t) >= CHECK_EVERY)
         {
             self.last_check = Some(mono);
-            rep = self
+            let r = self
                 .agent
                 .check(&self.env, &settings, self.snap.as_ref(), local);
+            rep.scanned = r.scanned;
+            rep.shown.extend(r.shown);
+            rep.failed.extend(r.failed);
             log_report(&rep);
         }
         (self.agent.menu(self.snap.as_ref(), &settings), rep)
@@ -136,6 +190,7 @@ fn worker_loop(mut w: Worker, to_ui: &Sender<MenuModel>, from_ui: &Receiver<Menu
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
     use cleancraft_core::schedule::{QUICK_SWEEP, ScanEvery};
@@ -217,6 +272,55 @@ mod tests {
         let (model, rep) = w.round(t0 + CHECK_EVERY, at("2026-10-20 10:31"));
         assert!(rep.scanned.is_some_and(|b| b > 0), "{rep:?}");
         assert_eq!(model.reviews.len(), 1);
+        assert!(cleancraft_core::executor::history(&m.env).is_empty());
+    }
+
+    #[test]
+    fn watcher_switches_start_it_and_its_events_become_notices() {
+        let m = sweep_mac();
+        let fake = m.env.fake_sys().expect("fake");
+        answer_all(fake);
+        fake.answer("osascript", "");
+        let mut w = Worker::new(m.env.clone(), sweep_sources());
+        w.round(Instant::now(), at("2026-10-20 09:00"));
+        assert_eq!(w.watching(), None, "off by default");
+        let s = Settings {
+            watch_trash_offer: true,
+            ..Settings::default()
+        };
+        s.save(&m.env).expect("save");
+        w.round(Instant::now(), at("2026-10-20 09:00"));
+        assert_eq!(w.watching(), Some((true, false)));
+        w.event_sender()
+            .send(WatchEvent {
+                id: "x".into(),
+                kind: cleancraft_core::watch::WatchKind::TrashedApp,
+                title: "-e Editor went to the Trash".into(),
+                body: "Its leftovers take 12 MB.".into(),
+                open: cleancraft_core::route::AppRoute::UninstallApp(
+                    m.env.user_trash().join("Editor.app"),
+                ),
+                time: 0,
+                paths: Vec::new(),
+            })
+            .expect("send");
+        let (model, rep) = w.round(Instant::now(), at("2026-10-20 09:00"));
+        assert_eq!(rep.shown.len(), 1);
+        let line = fake
+            .calls()
+            .into_iter()
+            .find(|c| c.starts_with("/usr/bin/osascript"))
+            .unwrap_or_default();
+        assert!(
+            line.ends_with("end run -- -e Editor went to the Trash Its leftovers take 12 MB."),
+            "{line}"
+        );
+        assert_eq!(model.reviews.len(), 1);
+        assert!(model.reviews[0].route.starts_with("uninstall:"));
+        // Both off: the watcher stops.
+        Settings::default().save(&m.env).expect("save");
+        w.round(Instant::now(), at("2026-10-20 09:00"));
+        assert_eq!(w.watching(), None);
         assert!(cleancraft_core::executor::history(&m.env).is_empty());
     }
 }

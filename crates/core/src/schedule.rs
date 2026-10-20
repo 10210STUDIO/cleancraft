@@ -432,6 +432,8 @@ impl Agent {
                 );
             }
         }
+        // Free-space history for Mac Health (at most one sample an hour).
+        let _ = crate::space_history::record(env);
         let _ = self.state.save(env);
         rep
     }
@@ -505,6 +507,8 @@ pub fn scan_only(env: &Env, settings: &Settings, sources: &Sources) -> u64 {
     for t in &res.tiles {
         if let Some(p) = t.plan() {
             let _ = crate::plans::save(env, p);
+            // Mac Health's "found by the last scans" (health6).
+            let _ = crate::health::note_plan(env, p);
         }
     }
     res.ready_bytes(&settings.sweep_skip)
@@ -513,4 +517,23 @@ pub fn scan_only(env: &Env, settings: &Settings, sources: &Sources) -> u64 {
 /// The local time now.
 pub fn local_now() -> NaiveDateTime {
     chrono::Local::now().naive_local()
+}
+
+/// The watcher settings for the agent's Settings, `None` when both watches are off.
+pub fn watch_settings(s: &Settings) -> Option<crate::watch::WatchSettings> {
+    (s.watch_trash_offer || s.watch_new_items).then(|| crate::watch::WatchSettings {
+        trash_offer: s.watch_trash_offer,
+        threat_watch: s.watch_new_items,
+        ..Default::default()
+    })
+}
+
+/// A watcher event as the agent's notification, opening the page the event names.
+pub fn watch_notification(ev: &crate::watch::WatchEvent) -> Notification {
+    Notification {
+        title: ev.title.clone(),
+        subtitle: None,
+        body: ev.body.clone(),
+        route: Some(ev.open.to_arg()),
+    }
 }

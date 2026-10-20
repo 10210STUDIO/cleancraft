@@ -609,6 +609,8 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
 pub const MENU_BAR_SWITCH: &str = "Show CleanCraft in the menu bar";
 pub const DISK_ALERT_SWITCH: &str = "Warn when the startup disk is almost full";
 pub const PAUSE_SWITCH: &str = "Pause notifications";
+pub const TRASH_OFFER_SWITCH: &str = "Offer to clean up after an app goes to the Trash";
+pub const NEW_ITEMS_SWITCH: &str = "Check new apps and startup items";
 /// Said under the menu bar group: osascript notifications cannot open CleanCraft.
 pub const NOTIFY_NOTE: &str = "Notifications come from macOS Script Editor, so clicking one does not open CleanCraft: what they found waits in the menu bar menu under Review.";
 
@@ -735,6 +737,17 @@ fn menu_bar_card(app: &mut CleanApp, ui: &mut Ui) -> bool {
                 }
                 note(ui, &t, "At most one alert a day.");
             }
+            // watch6's watchers, run by the agent.
+            if switch_row(ui, &t, app.settings.watch_trash_offer, TRASH_OFFER_SWITCH, "App in the Trash") {
+                app.settings.watch_trash_offer = !app.settings.watch_trash_offer;
+                changed = true;
+            }
+            note(ui, &t, "When you drag an app to the Trash, CleanCraft offers to show the files it left behind. Nothing moves until you confirm the list.");
+            if switch_row(ui, &t, app.settings.watch_new_items, NEW_ITEMS_SWITCH, "New items") {
+                app.settings.watch_new_items = !app.settings.watch_new_items;
+                changed = true;
+            }
+            note(ui, &t, "New apps and new startup items are checked with Threat Check's rules; a finding opens Threat Check.");
             if switch_row(ui, &t, app.settings.notifications_paused, PAUSE_SWITCH, "Notifications") {
                 app.settings.notifications_paused = !app.settings.notifications_paused;
                 changed = true;

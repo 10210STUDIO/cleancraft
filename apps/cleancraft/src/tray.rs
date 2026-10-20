@@ -8,6 +8,9 @@
 //! This file cannot be compiled on the Linux build box: it is written against tray-icon
 //! 0.26.1, muda 0.21.2 and winit 0.30.13 as published and must be built on a Mac.
 
+// The menu model helpers are used by the macOS glue and the tests only.
+#![cfg_attr(not(target_os = "macos"), allow(dead_code))]
+
 use std::sync::mpsc::{Receiver, Sender};
 
 use cleancraft_core::schedule::{MenuAction, MenuModel};
@@ -214,6 +217,7 @@ mod mac {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
     use cleancraft_core::schedule::{Review, SWEEP_ROUTE};
