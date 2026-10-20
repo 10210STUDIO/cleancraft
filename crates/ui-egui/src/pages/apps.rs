@@ -3472,6 +3472,18 @@ fn batch_done(app: &mut CleanApp, ui: &mut Ui) {
         .as_ref()
         .map(|b| b.undone.clone())
         .unwrap_or_default();
+    let running: BTreeSet<PathBuf> = app
+        .apps
+        .batch
+        .as_ref()
+        .map(|b| {
+            b.apps
+                .iter()
+                .filter(|a| a.running)
+                .map(|a| a.path.clone())
+                .collect()
+        })
+        .unwrap_or_default();
     let removed = results.iter().filter(|r| r.removed).count();
     let summary = format!(
         "{} {} uninstalled. {}",
@@ -3546,7 +3558,13 @@ fn batch_done(app: &mut CleanApp, ui: &mut Ui) {
                     .max_height(h)
                     .show(ui, |ui| {
                         for r in &results {
-                            if result_row(app, ui, r, undone.contains(&r.path)) {
+                            if result_row(
+                                app,
+                                ui,
+                                r,
+                                undone.contains(&r.path),
+                                running.contains(&r.path),
+                            ) {
                                 undo_one = Some(r.path.clone());
                             }
                         }
@@ -3599,7 +3617,13 @@ fn report_undo(app: &mut CleanApp, n: usize, errs: &[(String, executor::UndoErro
 
 /// One app's result: uninstalled or not, what moved, every file that stayed with the
 /// reason, and Undo for it. Returns true when its Undo was clicked.
-fn result_row(app: &CleanApp, ui: &mut Ui, r: &uninstaller::AppResult, undone: bool) -> bool {
+fn result_row(
+    app: &CleanApp,
+    ui: &mut Ui,
+    r: &uninstaller::AppResult,
+    undone: bool,
+    was_running: bool,
+) -> bool {
     let t = app.t;
     let mut undo = false;
     ui.horizontal(|ui| {
@@ -3617,6 +3641,11 @@ fn result_row(app: &CleanApp, ui: &mut Ui, r: &uninstaller::AppResult, undone: b
                     human_size(r.moved_size)
                 ),
                 t.success,
+            )
+        } else if r.moved.is_empty() && was_running {
+            (
+                "Not removed: it was running. Quit it, then uninstall it.".to_string(),
+                t.warning,
             )
         } else if r.moved.is_empty() {
             ("Not removed".to_string(), t.warning)

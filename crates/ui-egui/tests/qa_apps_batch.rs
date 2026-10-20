@@ -36,8 +36,14 @@ fn mac() -> Mac {
     let jotter = mac.app("Jotter", "org.jot.Jotter", "3.1");
     let safari = mac.app("Safari", "com.apple.Safari", "18.0");
     // Sizes that sort: Viewer, Editor, Jotter.
-    mac.write(&viewer.join("Contents/Resources/r.bin"), &vec![1u8; 3_000_000]);
-    mac.write(&editor.join("Contents/Resources/r.bin"), &vec![1u8; 2_000_000]);
+    mac.write(
+        &viewer.join("Contents/Resources/r.bin"),
+        &vec![1u8; 3_000_000],
+    );
+    mac.write(
+        &editor.join("Contents/Resources/r.bin"),
+        &vec![1u8; 2_000_000],
+    );
     mac.spotlight_finds_nothing();
     mac.home_file("Library/Caches/com.example.Editor/blob", 900_000);
     mac.home_file("Library/Preferences/com.example.Editor.plist", 3_000);
@@ -417,12 +423,18 @@ fn a_running_app_locks_only_its_group_and_quit_all_unlocks() {
     assert!(!f.calls().iter().any(|c| c.starts_with("/bin/kill")));
     // Uninstall the two that can go; Editor stays with every file.
     click(&mut h, "Uninstall 2 Apps");
-    assert!(has_text(&h, "Editor is running and stays until you quit it."));
+    assert!(has_text(
+        &h,
+        "Editor is running and stays until you quit it."
+    ));
     click(&mut h, "Move to Trash");
     assert!(!m.viewer.exists() && !m.jotter.exists());
     assert!(m.editor.exists() && m.sure[0].1.iter().all(|p| p.exists()));
     assert!(has_text(&h, "2 apps uninstalled."));
-    assert!(has(&h, "Not removed"));
+    assert!(has(
+        &h,
+        "Not removed: it was running. Quit it, then uninstall it."
+    ));
 }
 
 #[test]
@@ -529,4 +541,79 @@ fn leave_out_and_group_select_for_files() {
             .iter()
             .any(|i| i.path == gone && i.selected)
     );
+}
+
+/// Renders of the new screens at both window sizes, saved with
+/// `CLEANCRAFT_SNAPSHOTS=1` (into CLEANCRAFT_SNAPSHOT_DIR, default docs/screens/v2/apps6).
+#[test]
+fn renders() {
+    if std::env::var("CLEANCRAFT_SNAPSHOTS").is_err() {
+        return;
+    }
+    if std::panic::catch_unwind(egui_kittest::wgpu::WgpuTestRenderer::new).is_err() {
+        return;
+    }
+    let dir = std::env::var("CLEANCRAFT_SNAPSHOT_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/screens/v2/apps6")
+        });
+    std::fs::create_dir_all(&dir).unwrap();
+    for (w, hh) in [(1060.0, 680.0), (1280.0, 820.0)] {
+        for scene in ["list", "review", "confirm", "done"] {
+            let m = mac();
+            m.mac.user_id(501);
+            m.mac
+                .run_program(&m.editor.join("Contents/MacOS/Editor"), 4242, 501);
+            m.mac
+                .env
+                .fake_sys()
+                .unwrap()
+                .answer("/usr/bin/osascript", "");
+            if scene == "done" {
+                m.mac
+                    .env
+                    .inject_fault(&m.sure[1].1[0], Fault::PermissionDenied);
+            }
+            let mut app = cleancraft_ui_egui::CleanApp::new(m.mac.env.clone()).with_sync();
+            app.fda = cleancraft_core::permissions::Access::Granted;
+            let mut h = egui_kittest::Harness::builder()
+                .with_size(egui::vec2(w, hh))
+                .build_ui_state(
+                    |ui, app: &mut cleancraft_ui_egui::CleanApp| {
+                        let ctx = ui.ctx().clone();
+                        app.logic(&ctx);
+                        let mut root = egui::Ui::new(
+                            ctx.clone(),
+                            egui::Id::new("window"),
+                            egui::UiBuilder::new()
+                                .layer_id(egui::LayerId::background())
+                                .max_rect(ctx.viewport_rect()),
+                        );
+                        app.ui(&mut root);
+                    },
+                    app,
+                );
+            settle(&mut h);
+            go(&mut h);
+            for n in ["Editor", "Viewer", "Jotter"] {
+                tick(&mut h, n);
+            }
+            if scene != "list" {
+                click(&mut h, "Review and Uninstall");
+            }
+            if scene == "confirm" || scene == "done" {
+                click(&mut h, "Uninstall 2 Apps");
+            }
+            if scene == "done" {
+                click(&mut h, "Move to Trash");
+            }
+            for _ in 0..20 {
+                h.step();
+            }
+            let img = h.render().expect("render");
+            img.save(dir.join(format!("batch-{scene}-{w}x{hh}.png")))
+                .unwrap();
+        }
+    }
 }
