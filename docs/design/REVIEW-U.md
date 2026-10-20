@@ -186,4 +186,12 @@ Top 5: U1/U2 (running app or helper: dead end), U17 (stale Quick Sweep), U4 (no 
 
 ## Verification
 
-Pending: owners post commit ids on the board; each item is re-run on their branch and recorded here.
+Method: the owner's branch checked out, this branch's `review_usability.rs` copied in, `cargo test -p cleancraft-ui-egui --test review_usability -- --ignored` run (proofs and walkthroughs together).
+
+| Item | Branch and commit | Result |
+|---|---|---|
+| U16 pointer over buttons | agent4/design4 3645e69 | Fixed: `u16_pointing_hand_over_buttons` passes |
+| U17 Quick Sweep tiles after a module cleanup | agent4/design4 3645e69 | Fixed: `u17_quick_sweep_tiles_follow_a_module_cleanup` passes |
+| Walkthroughs task_01..17 | agent4/design4 3645e69 | All 17 still pass (no regression in the flows) |
+| U1..U15, U18, U19 | agent4/design4 3645e69 | Still failing (not claimed yet) |
+| U1, U2 | agent4/apps4, agent4/ux4 | Pending: no commit on the branches yet (apps4 posted the core API at 10:32) |
