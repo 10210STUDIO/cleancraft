@@ -6,3 +6,6 @@ __pycache__/
 /_sync/
 /_to_delete/
 /wt-*/
+.DS_Store
+/dist/
+*.dmg
