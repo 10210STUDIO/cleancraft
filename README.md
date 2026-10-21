@@ -20,7 +20,7 @@ Every list has search, filters and sorting. The full feature contract, with the 
 ## Safety
 
 - Every cleanup shows a preview first: the exact files, sizes and the reason. Nothing moves until you confirm that list.
-- Removing means moving to the Trash or a restorable quarantine, never a permanent delete. Every action is logged in History with Undo.
+- Removing means moving to the Trash or a restorable quarantine; CleanCraft itself never deletes anything for good. Emptying the Trash and erasing Mail's deleted messages are done by Finder and Mail, only after you confirm the exact list. Every action is logged in History with Undo where undo is possible.
 - Each feature has a fixed list of allowed locations. System files, iCloud and Photos libraries, the contents of Documents and Desktop, and files open in running apps are never touched.
 - Background parts (menu bar agent, schedules, watchers) only scan and notify. They never clean.
 - Tests run only on a fake home folder in a temporary directory.
