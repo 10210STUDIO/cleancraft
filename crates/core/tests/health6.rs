@@ -55,7 +55,8 @@ fn low_space_levels_follow_the_thresholds() {
     let cards = health::recommendations(&facts(&mac));
     let c = card(&cards, "free_low").expect("low space card");
     assert_eq!(c.level, Level::Urgent);
-    assert_eq!(c.route, AppRoute::Feature(FeatureId::SpaceLens));
+    // fix7 U7-1: Disk Map opens measuring.
+    assert_eq!(c.route, AppRoute::Scan(FeatureId::SpaceLens));
     assert_eq!(cards[0].rule, "free_low", "urgent first");
     let (state, why) = health::summary(&cards);
     assert_eq!(state, State::NeedsAttention);
@@ -80,7 +81,7 @@ fn fast_drop_needs_ten_gb_over_two_days() {
         "{}",
         c.headline
     );
-    assert_eq!(c.route, AppRoute::Feature(FeatureId::SpaceLens));
+    assert_eq!(c.route, AppRoute::Scan(FeatureId::SpaceLens));
     // 9 GB is under the line; samples over one day are too short for a trend.
     th::history(&mac.env, NOW, &[(6.0, 314 * GB), (0.0, 305 * GB)], 500 * GB);
     assert!(card(&health::recommendations(&facts(&mac)), "free_drop").is_none());
@@ -96,7 +97,9 @@ fn threats_found_are_urgent_and_open_threat_check() {
     let c = card(&cards, "threats").unwrap();
     assert_eq!(c.level, Level::Urgent);
     assert_eq!(c.headline, "Threat Check found 2 items yesterday");
-    assert_eq!(c.route, AppRoute::Feature(FeatureId::Malware));
+    // fix7 U7-3: the scan starts (no path was noted here, so nothing to preselect).
+    assert_eq!(c.route, AppRoute::Scan(FeatureId::Malware));
+    assert!(c.landing.is_some());
     assert!(card(&cards, "threat_scan").is_none());
 }
 
@@ -137,7 +140,7 @@ fn junk_found_at_the_last_scan() {
     let cards = health::recommendations(&facts(&mac));
     let c = card(&cards, "junk").unwrap();
     assert_eq!(c.headline, "1.50 GB of junk found 3 days ago");
-    assert_eq!(c.route, AppRoute::Feature(FeatureId::SystemJunk));
+    assert_eq!(c.route, AppRoute::Scan(FeatureId::SystemJunk));
     // 999 MB: under the 1 GB line.
     th::note(&mac.env, FeatureId::SystemJunk, 2, 999_000_000, 812, NOW);
     assert!(card(&health::recommendations(&facts(&mac)), "junk").is_none());
@@ -241,7 +244,7 @@ fn big_trash_is_a_tip() {
     let c = card(&health::recommendations(&f), "trash")
         .cloned()
         .unwrap();
-    assert_eq!(c.route, AppRoute::Feature(FeatureId::TrashBins));
+    assert_eq!(c.route, AppRoute::Scan(FeatureId::TrashBins));
     assert_eq!(c.level, Level::Tip);
     f.trash = Some(5 * GB - 1);
     assert!(card(&health::recommendations(&f), "trash").is_none());
@@ -278,6 +281,7 @@ fn every_card_has_a_documented_rule_and_one_action() {
             bytes: 0,
             items: 1,
             plan_id: String::new(),
+            paths: Vec::new(),
         }),
         updates: None,
         unused_apps: Some(3),
@@ -375,7 +379,9 @@ fn disk_map_summaries_keep_two_per_folder() {
     mac.home_file("Movies/big2.mov", 1_000_000);
     let tree3 = space::build(mac.env.home(), &stop, &|_, _| {});
     assert!(health::note_disk_map(&mac.env, &tree3, 30).unwrap());
-    assert_eq!(health::map_summaries(&mac.env).len(), 2);
+    // fix7 U7-1: the two newest, plus the first of each day (kept for the 7/30/90-day
+    // comparisons).
+    assert_eq!(health::map_summaries(&mac.env).len(), 3);
     let g = health::what_grew(&mac.env).unwrap();
     assert_eq!((g.from, g.to), (20, 30));
     // 1 MB is under the 500 MB line: nothing is named.

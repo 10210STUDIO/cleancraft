@@ -211,7 +211,7 @@ fn a_scheduled_scan_only_looks_then_notifies() {
         osascripts(&m.env),
         vec![line(
             "CleanCraft",
-            &format!("{text}. Open the menu bar item to review it."),
+            &format!("{text}. {}", notify::MENU_HINT),
             None
         )]
     );
@@ -332,7 +332,10 @@ fn disk_low_alert_at_most_once_a_day_and_the_badge() {
         osascripts(&m.env),
         vec![line(
             "Your startup disk is almost full",
-            "40.0 GB free. Quick Sweep can show what to clean.",
+            &format!(
+                "40.0 GB free. Quick Sweep can show what to clean. {}",
+                notify::MENU_HINT
+            ),
             None
         )]
     );
@@ -411,7 +414,10 @@ fn watcher_notices_are_shown_and_open_their_page_from_the_menu() {
         osascripts(&m.env),
         vec![line(
             "\"Editor\" went to the Trash",
-            "Remove them with App Remover. Nothing moves without your OK.",
+            &format!(
+                "Remove them with App Remover. Nothing moves without your OK. {}",
+                notify::MENU_HINT
+            ),
             Some("Its leftovers take 120 MB")
         )]
     );

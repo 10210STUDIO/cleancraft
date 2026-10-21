@@ -179,7 +179,7 @@ impl SweepResult {
     }
 }
 
-/// Scan every module (look only). A module that fails gets a Failed tile; the others go on.
+/// Scan every module not in [`Settings::sweep_skip`] (look only). A module that fails gets a Failed tile; the others go on.
 /// Stops between modules when `cancel` is set.
 pub fn scan(
     env: &Env,
@@ -189,7 +189,13 @@ pub fn scan(
     progress: &(dyn Fn(&str) + Sync),
 ) -> SweepResult {
     let mut tiles = Vec::new();
-    for id in sources.ids() {
+    // Modules left out on Quick Sweep's start screen (or unticked on a result tile) are not
+    // scanned at all.
+    for id in sources
+        .ids()
+        .into_iter()
+        .filter(|id| !settings.sweep_skip.contains(id))
+    {
         if cancel.load(Ordering::Relaxed) {
             return SweepResult { tiles };
         }

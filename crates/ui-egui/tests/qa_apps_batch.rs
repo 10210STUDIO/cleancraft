@@ -132,7 +132,10 @@ fn scan_select_three_review_confirm_all_gone_then_undo() {
     assert!(
         has(
             &h,
-            &format!("3 apps selected, {} with their leftovers", human_size(size))
+            &format!(
+                "3 apps selected: {} to move, leftovers included",
+                human_size(size)
+            )
         ),
         "bar: 3 apps selected, {}",
         human_size(size)
@@ -205,12 +208,13 @@ fn scan_select_three_review_confirm_all_gone_then_undo() {
     }
     assert!(has_text(&h, "5 items put back."));
     settle(&mut h);
-    let all = [&m.editor, &m.viewer, &m.jotter, &m.safari]
+    // lists7: apps that are part of macOS (Safari) are hidden from the groups by default.
+    let all = [&m.editor, &m.viewer, &m.jotter]
         .iter()
         .map(|p| tree_size(p).0)
         .sum::<u64>();
     assert!(
-        has_text(&h, &format!("All Apps  4  ·  {}", human_size(all))),
+        has_text(&h, &format!("All Apps  3  ·  {}", human_size(all))),
         "counts recalculated after Undo"
     );
 }
@@ -244,6 +248,9 @@ fn apps_of_macos_cannot_be_selected() {
     let m = mac();
     let mut h = harness(&m.mac);
     go(&mut h);
+    // Apps of macOS are hidden until asked for (lists7); shown, they stay locked.
+    assert!(!has(&h, "Select Safari"));
+    click(&mut h, "Show apps that are part of macOS");
     let cb = h.get_by_label("Select Safari");
     assert!(cb.accesskit_node().is_disabled(), "padlock, not a checkbox");
     cb.click();
@@ -313,7 +320,7 @@ fn keyboard_and_pointer_selection() {
     settle(&mut h);
     assert!(picked(&h).is_empty());
     // Cmd-click toggles; Shift-click ticks the range from it (sorted by size: Viewer,
-    // Editor, Jotter, Safari).
+    // Editor, Jotter).
     let viewer = h.get_by_label("Viewer").rect();
     let jotter = h.get_by_label("Jotter").rect();
     click_at(&mut h, viewer.center(), egui::Modifiers::COMMAND);
@@ -335,7 +342,8 @@ fn keyboard_and_pointer_selection() {
         egui::CursorIcon::PointingHand
     );
     // Sort by size: biggest first, sizes of the whole bundle.
-    let rows: Vec<String> = ["Viewer", "Editor", "Jotter", "Safari"]
+    // (Safari, part of macOS, is hidden from the list by default.)
+    let rows: Vec<String> = ["Viewer", "Editor", "Jotter"]
         .iter()
         .map(|n| n.to_string())
         .collect();

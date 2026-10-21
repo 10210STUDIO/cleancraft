@@ -7,6 +7,7 @@ use egui::{RichText, Sense, Ui, vec2};
 use crate::app::CleanApp;
 use crate::icons::Icon;
 use crate::kit;
+use crate::kit_list::{self, Filter, SortKey};
 use crate::theme::{Weight, font, size, space};
 
 #[derive(Default)]
@@ -16,6 +17,118 @@ pub struct State {
     watch: JournalWatch,
     /// Actions whose long item list is shown whole (by plan id).
     pub expanded: std::collections::BTreeSet<String>,
+    /// The search over actions (module, file names, commands).
+    pub search: String,
+}
+
+/// History's list name in the settings (filters and sort).
+pub const LIST: &str = "history";
+/// History's sort orders.
+pub const SORTS: [SortKey; 2] = [
+    SortKey {
+        key: "date",
+        label: "Sort by date",
+        first: "Newest first",
+        second: "Oldest first",
+        descending: true,
+    },
+    kit_list::BY_SIZE,
+];
+
+/// The module filter key of an action ("mod:system_junk", "mod:other").
+fn module_key(g: &[ActionRecord]) -> String {
+    format!(
+        "mod:{}",
+        g[0].feature.map(|f| f.as_str()).unwrap_or("other")
+    )
+}
+
+fn group_has(g: &[ActionRecord], key: &str, now: i64) -> bool {
+    let age = now - g[0].time;
+    let today = chrono::DateTime::from_timestamp(g[0].time, 0).is_some_and(|d| {
+        d.with_timezone(&chrono::Local).date_naive() == chrono::Local::now().date_naive()
+    });
+    match key {
+        "today" => today,
+        "week" => age <= 7 * 86_400,
+        "month" => age <= 30 * 86_400,
+        k => k == module_key(g),
+    }
+}
+
+/// History's filters: by module (those that acted) and by date.
+fn history_filters(groups: &[Vec<ActionRecord>], now: i64) -> Vec<Filter> {
+    let n = |k: &str| groups.iter().filter(|g| group_has(g, k, now)).count();
+    let mut v = Vec::new();
+    let mut mods: Vec<(String, String)> = groups
+        .iter()
+        .map(|g| {
+            (
+                g[0].feature
+                    .map(|f| f.title().to_string())
+                    .unwrap_or_else(|| "CleanCraft".into()),
+                module_key(g),
+            )
+        })
+        .collect();
+    mods.sort();
+    mods.dedup();
+    for (title, key) in mods {
+        let c = n(&key);
+        v.push(Filter::any("Module", key, title, c));
+    }
+    v.push(Filter::any("Date", "today", "Today", n("today")));
+    v.push(Filter::any("Date", "week", "Last 7 days", n("week")));
+    v.push(Filter::any("Date", "month", "Last 30 days", n("month")));
+    v
+}
+
+/// The words an action is found by: its module, its files and its command or change.
+fn group_text(env: &cleancraft_core::Env, g: &[ActionRecord]) -> String {
+    let mut s = g[0]
+        .feature
+        .map(|f| f.title().to_string())
+        .unwrap_or_default();
+    for r in g {
+        s.push('\n');
+        match &r.kind {
+            ActionKind::Moved { original, .. } => s.push_str(&env.display(original)),
+            ActionKind::Command { command, .. } => s.push_str(command),
+            ActionKind::Toggled { what, .. } => s.push_str(what),
+        }
+    }
+    s
+}
+
+/// The actions shown: searched, filtered, sorted.
+fn shown_groups(
+    env: &cleancraft_core::Env,
+    groups: Vec<Vec<ActionRecord>>,
+    prefs: &cleancraft_core::settings::ListPrefs,
+    search: &str,
+    now: i64,
+) -> Vec<Vec<ActionRecord>> {
+    let q = kit_list::query(search);
+    let filters = history_filters(&groups, now);
+    let mut v: Vec<Vec<ActionRecord>> = groups
+        .into_iter()
+        .filter(|g| {
+            kit_list::matches(&q, &[&group_text(env, g)])
+                && kit_list::passes(prefs, &filters, |k| group_has(g, k, now))
+        })
+        .collect();
+    let (key, rev) = kit_list::sort_of(prefs, &SORTS);
+    let size = |g: &Vec<ActionRecord>| g.iter().map(|r| r.size).sum::<u64>();
+    // The log is oldest first: groups come newest first from `group_records` on reversed
+    // records; a stable sort keeps that order among equals.
+    v.sort_by(|a, b| {
+        let o = match key.key {
+            "size" => size(b).cmp(&size(a)),
+            _ => b[0].time.cmp(&a[0].time),
+        };
+        if rev { o.reverse() } else { o }
+    });
+    v
 }
 
 impl State {
@@ -162,6 +275,59 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
         );
     });
     ui.add_space(space::S);
+    // Search, Filter (module, date), Sort (newest or oldest first, size).
+    let stamp = chrono::Utc::now().timestamp();
+    let filters = history_filters(&groups, stamp);
+    let mut prefs = kit_list::prefs(&app.settings, LIST);
+    let mut search = std::mem::take(&mut app.history.search);
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = space::S;
+        let (_, ch) = kit_list::search(
+            ui,
+            &t,
+            &mut search,
+            "Search history",
+            "Search history",
+            240.0,
+        );
+        if ch {
+            app.act();
+        }
+        changed |= kit_list::menus(ui, &t, LIST, &filters, &SORTS, &mut prefs);
+    });
+    let total = groups.len();
+    let shown_n = shown_groups(&app.env, groups.clone(), &prefs, &search, stamp).len();
+    let st = kit_list::status(
+        ui,
+        &t,
+        shown_n,
+        total,
+        ("action", "actions"),
+        &filters,
+        &mut prefs,
+        &mut search,
+    );
+    changed |= st.prefs;
+    app.history.search = search;
+    if changed || st.search {
+        app.act();
+    }
+    if changed && kit_list::store(&mut app.settings, LIST, prefs.clone()) {
+        app.save_settings();
+    }
+    let groups = shown_groups(&app.env, groups, &prefs, &app.history.search, stamp);
+    ui.add_space(space::S);
+    if groups.is_empty() {
+        kit::empty_state(
+            ui,
+            &t,
+            Icon::Search,
+            "No action matches",
+            "Clear Filters shows every action again.",
+        );
+        return;
+    }
     let now = chrono::Local::now();
     let fade_out = egui::ScrollArea::vertical()
         .auto_shrink([false, false])

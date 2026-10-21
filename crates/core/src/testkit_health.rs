@@ -99,6 +99,7 @@ pub fn note(env: &Env, f: FeatureId, days: i64, bytes: u64, items: usize, now: i
             bytes,
             items,
             plan_id: format!("{}-test-{days}", f.as_str()),
+            paths: Vec::new(),
         },
     );
     let _ = std::fs::create_dir_all(env.data_dir());

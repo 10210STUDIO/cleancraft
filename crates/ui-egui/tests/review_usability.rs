@@ -287,6 +287,11 @@ fn task_01_free_space_quickly_with_quick_sweep() {
     let mac = sweep();
     let mut h = harness(&mac);
     h.state_mut().sweep.sources = Some(testkit_monitor::sweep_sources());
+    // The start screen lays out its chips for these sources first (fix7: the chips are
+    // toggles now, so their lines can change).
+    for _ in 0..4 {
+        h.step();
+    }
     let mut t = Task::new("free space quickly (Quick Sweep)");
     t.click(&mut h, "Scan");
     t.see(&h, "ready to clean");
@@ -1134,11 +1139,17 @@ fn u17_quick_sweep_tiles_follow_a_module_cleanup() {
     let mac = sweep();
     let mut h = harness(&mac);
     h.state_mut().sweep.sources = Some(testkit_monitor::sweep_sources());
+    // The start screen lays out its chips for these sources first (fix7: the chips are
+    // toggles now, so their lines can change).
+    for _ in 0..4 {
+        h.step();
+    }
     h.get_by_label("Scan").click();
     settle(&mut h);
     assert!(has(&h, "13.3 MB"), "System Junk tile before");
     // Review on the System Junk tile, clean there, come back.
-    h.get_all_by_label("Review").next().expect("Review").click();
+    let l = common::tile_label(&h, "Review", 0);
+    h.get_all_by_label(&l).next().expect("Review").click();
     settle(&mut h);
     clean_junk(&mut h);
     h.get_by_label("Done").click();

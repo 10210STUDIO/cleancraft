@@ -357,6 +357,11 @@ fn quick_sweep_and_module_pages_stay_in_step() {
     base(&mac);
     let mut h = harness(&mac);
     h.state_mut().sweep.sources = Some(testkit_monitor::sweep_sources());
+    // The start screen lays out its chips for these sources first (fix7: the chips are
+    // toggles now, so their lines can change).
+    for _ in 0..4 {
+        h.step();
+    }
     go(&mut h, "smart_care");
     click(&mut h, "Scan");
     assert!(matches!(h.state_mut().sweep.phase, sweep::Phase::Results));
@@ -397,6 +402,11 @@ fn quick_sweep_and_module_pages_stay_in_step() {
     base(&mac);
     let mut h = harness(&mac);
     h.state_mut().sweep.sources = Some(testkit_monitor::sweep_sources());
+    // The start screen lays out its chips for these sources first (fix7: the chips are
+    // toggles now, so their lines can change).
+    for _ in 0..4 {
+        h.step();
+    }
     go(&mut h, "system_junk");
     click(&mut h, "Scan");
     go(&mut h, "smart_care");

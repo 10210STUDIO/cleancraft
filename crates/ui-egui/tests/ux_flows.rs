@@ -143,6 +143,11 @@ fn quick_sweep_flow_fits_the_smallest_window() {
     let mac = testkit_monitor::sweep_mac();
     let mut h = harness(&mac);
     h.state_mut().sweep.sources = Some(testkit_monitor::sweep_sources());
+    // The start screen lays out its chips for these sources first (fix7: the chips are
+    // toggles now, so their lines can change).
+    for _ in 0..4 {
+        h.step();
+    }
     click(&mut h, "Scan");
     assert!(has_text(&h, "ready to clean"));
     click(&mut h, "Review and Clean");

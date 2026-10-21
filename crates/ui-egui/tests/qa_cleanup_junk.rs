@@ -207,9 +207,21 @@ fn review_controls_search_sort_select_reveal_ignore() {
     assert!(dev(&h).iter().all(|s| !*s));
     let p = plan(&h);
     let recalc: u64 = p.selected().map(|i| tree_size(&i.path).0).sum();
+    // Selected items the search hides are still counted, and said so (lists7).
+    let hidden = p
+        .selected()
+        .filter(|i| {
+            !(i.path.to_string_lossy().contains("com.example") || i.reason.contains("com.example"))
+        })
+        .count();
+    assert!(hidden > 0);
     assert!(has(
         &h,
-        &format!("{} selected, {}", p.selected_count(), human_size(recalc))
+        &format!(
+            "{} selected ({hidden} hidden by filters), {}",
+            p.selected_count(),
+            human_size(recalc)
+        )
     ));
     // Reveal asks Finder through the system layer.
     set_search(&mut h, "com.example.Browser");

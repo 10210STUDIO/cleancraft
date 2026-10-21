@@ -186,7 +186,7 @@ fn quarantine_line(app: &mut CleanApp, ui: &mut Ui) {
 pub const MOVE_QUARANTINE: &str = "Move Quarantine to Trash...";
 
 /// The AI assistants switch, also its accessible name.
-pub const AGENTS_SWITCH: &str = "Let AI assistants clean after you confirm (MCP)";
+pub const AGENTS_SWITCH: &str = "Let AI assistants clean after you confirm";
 
 /// The confirmation, then the move, with Undo in the notice and in History. The dialog lists
 /// every item that moves, with its size, as it was when the dialog opened; exactly those move
@@ -323,6 +323,8 @@ pub struct State {
     pub new_dev_root: String,
     /// A route asked for the Full Disk Access group: scroll it into view once.
     pub focus_fda: bool,
+    /// Developer Clutter asked for the code folders group: scroll it into view once.
+    pub focus_dev: bool,
     /// "Open the app at this page" requests from the menu bar agent and `cleancraft open`.
     inbox: notify::OpenInbox,
     /// When the inbox was last read (egui time, seconds).
@@ -389,21 +391,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                 .request_repaint_after(std::time::Duration::from_millis(200));
         }
     }
-    if let Some(job) = app.settings_page.pick_dev.as_mut() {
-        if let Some(r) = job.poll() {
-            app.settings_page.pick_dev = None;
-            match r {
-                Ok(Some(p)) => changed |= add_dev_root(app, p),
-                Ok(None) => {}
-                Err(e) => app.warn(e),
-            }
-        } else if job.is_dead() {
-            app.settings_page.pick_dev = None;
-        } else {
-            ui.ctx()
-                .request_repaint_after(std::time::Duration::from_millis(200));
-        }
-    }
+    changed |= poll_dev_pick(app, ui.ctx());
     let out = egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
@@ -665,7 +653,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
 }
 
 /// The links of the AI assistants group: the guide and the "Connect your AI apps" step.
-pub const AGENT_GUIDE_LINK: &str = "How to connect an AI agent";
+pub const AGENT_GUIDE_LINK: &str = "How to connect an AI assistant";
 pub const CONNECT_AI_BUTTON: &str = "Connect AI Apps...";
 
 fn ai_links(app: &mut CleanApp, ui: &mut Ui) {
@@ -759,7 +747,8 @@ pub const DEV_CHOOSE: &str = "Choose Code Folder...";
 fn dev_clutter_card(app: &mut CleanApp, ui: &mut Ui) -> bool {
     let t = app.t;
     let mut changed = false;
-    kit::card(&t).show(ui, |ui| {
+    let focus = std::mem::take(&mut app.settings_page.focus_dev);
+    let card = kit::card(&t).show(ui, |ui| {
         ui.set_width(ui.available_width());
         heading(ui, &t, Icon::Junk, "Code folders for Developer Clutter");
         let usual: Vec<String> = cleancraft_core::features::dev_clutter::DEFAULT_ROOTS
@@ -807,6 +796,7 @@ fn dev_clutter_card(app: &mut CleanApp, ui: &mut Ui) -> bool {
                 if r.clicked() {
                     app.act();
                     app.settings.dev_roots.remove(i);
+                    dev_roots_changed(app);
                     changed = true;
                 }
             });
@@ -852,10 +842,7 @@ fn dev_clutter_card(app: &mut CleanApp, ui: &mut Ui) -> bool {
                 .inner;
             if ch.on_hover_text("Pick a folder that holds your projects").clicked() && !picking {
                 app.act();
-                let env = app.env.clone();
-                app.settings_page.pick_dev = Some(crate::jobs::Job::start(app.sync, move |_| {
-                    choose_folder(&env, "Choose a folder that holds your code projects")
-                }));
+                pick_dev_root(app);
             }
         });
         let mut days = app.settings.dev_inactive_days.clamp(1, 365) as u32;
@@ -883,7 +870,63 @@ fn dev_clutter_card(app: &mut CleanApp, ui: &mut Ui) -> bool {
             );
         });
     });
+    if focus {
+        card.response.scroll_to_me(Some(egui::Align::TOP));
+    }
     changed
+}
+
+/// Open macOS's folder dialog to add a code folder (Settings and Developer Clutter's empty
+/// result). The answer is read by [`poll_dev_pick`].
+pub fn picking_dev(app: &CleanApp) -> bool {
+    app.settings_page.pick_dev.is_some()
+}
+
+/// Open the folder dialog (see [`poll_dev_pick`]).
+pub fn pick_dev_root(app: &mut CleanApp) {
+    if app.settings_page.pick_dev.is_some() {
+        return;
+    }
+    let env = app.env.clone();
+    app.settings_page.pick_dev = Some(crate::jobs::Job::start(app.sync, move |_| {
+        choose_folder(&env, "Choose a folder that holds your code projects")
+    }));
+}
+
+/// The folder dialog's answer, added when one was chosen (the settings are saved). Returns
+/// true when a code folder was added.
+pub fn poll_dev_pick(app: &mut CleanApp, ctx: &egui::Context) -> bool {
+    let Some(job) = app.settings_page.pick_dev.as_mut() else {
+        return false;
+    };
+    if let Some(r) = job.poll() {
+        app.settings_page.pick_dev = None;
+        match r {
+            Ok(Some(p)) => {
+                if add_dev_root(app, p) {
+                    app.save_settings();
+                    return true;
+                }
+            }
+            Ok(None) => {}
+            Err(e) => app.warn(e),
+        }
+    } else if job.is_dead() {
+        app.settings_page.pick_dev = None;
+    } else {
+        ctx.request_repaint_after(std::time::Duration::from_millis(200));
+    }
+    false
+}
+
+/// The code folders changed: Developer Clutter's list is out of date and scans again when it
+/// is shown (U7-6).
+fn dev_roots_changed(app: &mut CleanApp) {
+    if let Some(st) = app.plans.get_mut(&cleancraft_core::FeatureId::DevClutter)
+        && st.plan.is_some()
+    {
+        st.stale = true;
+    }
 }
 
 /// Add a code folder after checking it: a real folder (not a link), not the home folder or
@@ -914,8 +957,9 @@ fn add_dev_root(app: &mut CleanApp, p: std::path::PathBuf) -> bool {
         return false;
     }
     app.settings.dev_roots.push(p);
+    dev_roots_changed(app);
     app.tell(format!(
-        "{shown} is added: Developer Clutter looks there on its next scan."
+        "{shown} is added: Developer Clutter looks there the next time you open it."
     ));
     true
 }
@@ -926,8 +970,12 @@ pub const DISK_ALERT_SWITCH: &str = "Warn when the startup disk is almost full";
 pub const PAUSE_SWITCH: &str = "Pause notifications";
 pub const TRASH_OFFER_SWITCH: &str = "Offer to clean up after an app goes to the Trash";
 pub const NEW_ITEMS_SWITCH: &str = "Check new apps and startup items";
-/// Said under the menu bar group: osascript notifications cannot open CleanCraft.
-pub const NOTIFY_NOTE: &str = "Notifications come from macOS Script Editor, so clicking one does not open CleanCraft: what they found waits in the menu bar menu under Review.";
+/// Said under the menu bar group: where a notification leads (U7-2).
+pub const NOTIFY_NOTE: &str = "Clicking a notification opens CleanCraft on the page it is about. What it found also waits in the menu bar menu under Review.";
+/// Said under the Trash offer switch.
+pub const TRASH_FDA_NOTE: &str = "Needs Full Disk Access (macOS keeps the Trash private).";
+/// The button beside it while Full Disk Access is off.
+pub const TRASH_FDA_BUTTON: &str = "Open Full Disk Access Settings";
 
 /// The program the login item starts: the installed app's agent (a fixed path on the fake
 /// Mac of the tests).
@@ -1032,9 +1080,10 @@ fn menu_bar_card(app: &mut CleanApp, ui: &mut Ui) -> bool {
                     "{next}. A scheduled scan only looks: nothing moves until you review it in Quick Sweep and confirm."
                 ));
             }
-            // Disk alert.
+            // Disk alert. While the menu bar is off the switches below show Off (nothing would
+            // run); the saved choices stay and show again when it comes on (U7-15).
             let alert = app.settings.disk_low_percent > 0;
-            if switch_row(ui, &t, alert, DISK_ALERT_SWITCH, "Disk alert") {
+            if switch_row(ui, &t, on && alert, DISK_ALERT_SWITCH, "Disk alert") {
                 app.settings.disk_low_percent = if alert {
                     0
                 } else {
@@ -1042,7 +1091,7 @@ fn menu_bar_card(app: &mut CleanApp, ui: &mut Ui) -> bool {
                 };
                 changed = true;
             }
-            if alert {
+            if on && alert {
                 let mut p = u32::from(app.settings.disk_low_percent.clamp(1, 50));
                 if slider_row_with(ui, &t, "Disk alert threshold (percent free)", "When free space is under", &mut p, 2..=30, &|v| {
                     format!("{v}%")
@@ -1053,17 +1102,37 @@ fn menu_bar_card(app: &mut CleanApp, ui: &mut Ui) -> bool {
                 note(ui, &t, "At most one alert a day.");
             }
             // watch6's watchers, run by the agent.
-            if switch_row(ui, &t, app.settings.watch_trash_offer, TRASH_OFFER_SWITCH, "App in the Trash") {
+            if switch_row(ui, &t, on && app.settings.watch_trash_offer, TRASH_OFFER_SWITCH, "App in the Trash") {
                 app.settings.watch_trash_offer = !app.settings.watch_trash_offer;
                 changed = true;
             }
             note(ui, &t, "When you drag an app to the Trash, CleanCraft offers to show the files it left behind. Nothing moves until you confirm the list.");
-            if switch_row(ui, &t, app.settings.watch_new_items, NEW_ITEMS_SWITCH, "New items") {
+            // The Trash is private without Full Disk Access (U7-2).
+            ui.horizontal_wrapped(|ui| {
+                ui.add_space(272.0);
+                let missing = app.fda == cleancraft_core::permissions::Access::Missing;
+                ui.label(
+                    RichText::new(if missing {
+                        TRASH_FDA_NOTE.to_string()
+                    } else {
+                        format!("{TRASH_FDA_NOTE} It is on.")
+                    })
+                    .font(font(size::FOOTNOTE, Weight::Regular))
+                    .color(if missing { t.warning } else { t.text_faint }),
+                );
+                if missing && kit::ghost(ui, &t, TRASH_FDA_BUTTON, None).clicked() {
+                    app.act();
+                    if let Err(e) = cleancraft_core::permissions::open_fda_settings(&app.env) {
+                        app.warn(format!("Could not open System Settings: {e}"));
+                    }
+                }
+            });
+            if switch_row(ui, &t, on && app.settings.watch_new_items, NEW_ITEMS_SWITCH, "New items") {
                 app.settings.watch_new_items = !app.settings.watch_new_items;
                 changed = true;
             }
             note(ui, &t, "New apps and new startup items are checked with Threat Check's rules; a finding opens Threat Check.");
-            if switch_row(ui, &t, app.settings.notifications_paused, PAUSE_SWITCH, "Notifications") {
+            if switch_row(ui, &t, on && app.settings.notifications_paused, PAUSE_SWITCH, "Pause") {
                 app.settings.notifications_paused = !app.settings.notifications_paused;
                 changed = true;
             }

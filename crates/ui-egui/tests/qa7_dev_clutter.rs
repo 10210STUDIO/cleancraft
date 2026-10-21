@@ -173,7 +173,8 @@ fn qa7_dv5_python_environment_listed_unticked_moves_only_when_ticked() {
     // Tick it by hand: it moves, with the right size, and Undo brings it back.
     click(&mut h, "Scan Again");
     click(&mut h, "Select None");
-    click(&mut h, ".venv");
+    // fix7 U7-10: rows lead with the project.
+    click(&mut h, "tool / .venv");
     let sz = tree_size(&venv).0;
     assert!(has(&h, &format!("1 selected, {}", human_size(sz))));
     click(&mut h, "Review and Clean");
@@ -288,10 +289,10 @@ fn qa7_dv8_code_folder_in_documents_is_locked_with_the_way_forward() {
     // Shown with the reason and the way forward.
     assert!(has_text(&h, &format!("(cannot be selected: {why})")));
     // Clicking it and Select All never tick it.
-    let n = h.query_all_by_label("target").count();
-    assert_eq!(n, 2);
-    for k in 0..n {
-        click_nth(&mut h, "target", k);
+    // fix7 U7-10: rows lead with the project ("app / target").
+    for l in ["app / target", "engine / target"] {
+        assert_eq!(h.query_all_by_label(l).count(), 1, "{l}");
+        click(&mut h, l);
     }
     let pl = plan(&h);
     assert!(!pl.items.iter().find(|i| i.path == locked).unwrap().selected);

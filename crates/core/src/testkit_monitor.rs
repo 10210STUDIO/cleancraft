@@ -39,7 +39,7 @@ Load Avg: 1.85, 2.10, 2.30
 CPU usage: 7.69% user, 10.25% sys, 82.6% idle
 ";
 
-// SAMPLE: `ps -axco pid=,%cpu=,rss=,comm=`.
+// SAMPLE: `ps -axo pid=,%cpu=,rss=,comm=`.
 pub const PS: &str = "    1   0.3  14000 launchd
   512  12.5 812000 Safari
   640  48.0 300000 Google Chrome Helper

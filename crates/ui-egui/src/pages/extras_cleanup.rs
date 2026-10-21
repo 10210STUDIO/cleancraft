@@ -33,6 +33,8 @@ pub const RESET_CONFIRM: &str = "Reset Selected";
 pub const ERASE_BUTTON: &str = "Erase in Mail...";
 pub const ERASE_CONFIRM: &str = "Erase in Mail";
 pub const ACCESS_BUTTON: &str = "Open Accessibility Settings";
+/// Runs the confirmed Erase in Mail once more.
+pub const TRY_AGAIN: &str = "Try Again";
 pub const OPEN_MAIL_BUTTON: &str = "Open Mail";
 pub const FDA_BUTTON: &str = "Open Full Disk Access";
 /// Seconds after Erase in Mail before the list is measured again (Mail's own confirmation).
@@ -125,6 +127,10 @@ struct State {
     erase: Option<EraseAsk>,
     /// Erase in Mail could not use Mail's menu: show the settings and Open Mail.
     erase_help: bool,
+    /// The erase the person confirmed last, for Try Again after granting Accessibility.
+    last_erase: Option<EraseAsk>,
+    /// Open Accessibility Settings was used: Try Again takes its place.
+    access_opened: bool,
     /// When (egui time) to measure the Trash again after Erase in Mail.
     recheck_at: Option<f64>,
 }
@@ -321,13 +327,35 @@ fn mailboxes_of(
 /// Trash Bins toolbar: the help buttons after Erase in Mail could not use Mail's menu.
 fn trash_toolbar(app: &mut CleanApp, ui: &mut Ui) {
     let t = app.t;
-    let st = load(ui);
+    let mut st = load(ui);
     if st.erase_help {
-        if kit::secondary(ui, &t, ACCESS_BUTTON) {
+        // The erase the person confirmed a moment ago, once more (U7-14).
+        let retry = st.access_opened.then(|| st.last_erase.clone()).flatten();
+        if let Some(ask) = retry
+            && kit::secondary(ui, &t, TRY_AGAIN)
+        {
             app.act();
+            let out = trash::erase_in_mail(&app.env, ask.account.as_deref());
+            st.erase_help = out.needs_accessibility || out.needs_automation;
+            if out.ok {
+                st.last_erase = None;
+                st.recheck_at = Some(ui.input(|i| i.time) + RECHECK_SECS);
+                app.tell(out.message);
+            } else {
+                app.warn(out.message);
+            }
+            store(ui, st);
+            plan_page::start_scan(app, FeatureId::TrashBins);
+            app.sweep.refresh_tile(FeatureId::TrashBins);
+            return;
+        }
+        if !(st.access_opened && st.last_erase.is_some()) && kit::secondary(ui, &t, ACCESS_BUTTON) {
+            app.act();
+            st.access_opened = true;
+            store(ui, st.clone());
             match app.env.sys.open_url(trash::ACCESSIBILITY_URL) {
                 Ok(()) => app.tell(
-                    "System Settings is open at Accessibility. Turn CleanCraft on, then use Erase in Mail again.",
+                    "System Settings is open at Accessibility. Turn CleanCraft on, then Try Again.",
                 ),
                 Err(e) => app.warn(format!("Could not open System Settings: {e}")),
             }
@@ -412,6 +440,7 @@ pub fn trash_frame(app: &mut CleanApp, ui: &mut Ui) {
         } else if go {
             app.act();
             st.erase = None;
+            st.last_erase = Some(ask.clone());
             let out = trash::erase_in_mail(&app.env, ask.account.as_deref());
             st.erase_help = out.needs_accessibility || out.needs_automation;
             if out.ok {

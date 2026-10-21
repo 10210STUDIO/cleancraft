@@ -221,6 +221,11 @@ fn scenes() -> Vec<Scene> {
             mac: testkit_monitor::sweep_mac,
             go: |h| {
                 h.state_mut().sweep.sources = Some(testkit_monitor::sweep_sources());
+                // The start screen lays out its chips for these sources first (fix7: the chips are
+                // toggles now, so their lines can change).
+                for _ in 0..4 {
+                    h.step();
+                }
             },
         },
         Scene {
@@ -229,6 +234,11 @@ fn scenes() -> Vec<Scene> {
             go: |h| {
                 // The same modules as the idle and results scenes (REVIEW-C C15).
                 h.state_mut().sweep.sources = Some(testkit_monitor::sweep_sources());
+                // The start screen lays out its chips for these sources first (fix7: the chips are
+                // toggles now, so their lines can change).
+                for _ in 0..4 {
+                    h.step();
+                }
                 h.state_mut().sweep.phase = sweep::Phase::Scanning(Job::waiting("System Junk"));
                 settle(h);
             },
@@ -238,6 +248,11 @@ fn scenes() -> Vec<Scene> {
             mac: testkit_monitor::sweep_mac,
             go: |h| {
                 h.state_mut().sweep.sources = Some(testkit_monitor::sweep_sources());
+                // The start screen lays out its chips for these sources first (fix7: the chips are
+                // toggles now, so their lines can change).
+                for _ in 0..4 {
+                    h.step();
+                }
                 click(h, "Scan");
             },
         },
@@ -246,6 +261,11 @@ fn scenes() -> Vec<Scene> {
             mac: testkit_monitor::sweep_mac,
             go: |h| {
                 h.state_mut().sweep.sources = Some(testkit_monitor::sweep_sources());
+                // The start screen lays out its chips for these sources first (fix7: the chips are
+                // toggles now, so their lines can change).
+                for _ in 0..4 {
+                    h.step();
+                }
                 click(h, "Scan");
                 click(h, "Review and Clean");
             },
@@ -255,6 +275,11 @@ fn scenes() -> Vec<Scene> {
             mac: testkit_monitor::sweep_mac,
             go: |h| {
                 h.state_mut().sweep.sources = Some(testkit_monitor::sweep_sources());
+                // The start screen lays out its chips for these sources first (fix7: the chips are
+                // toggles now, so their lines can change).
+                for _ in 0..4 {
+                    h.step();
+                }
                 click(h, "Scan");
                 click(h, "Review and Clean");
                 click(h, "Move to Trash");

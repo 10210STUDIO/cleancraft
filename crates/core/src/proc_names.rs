@@ -160,6 +160,68 @@ pub fn explain(name: &str) -> Option<Explained> {
     })
 }
 
+/// What a process of the list is: [`explain`] for a known name; otherwise, from its path, the
+/// app whose bundle holds it ("Helper of Docker."), CleanCraft itself, a reverse-DNS name
+/// ("com.docker.backend": "Background process, by its name from Docker."), or "Background
+/// process." for any other path. `None` only for an unknown bare name (no path to go by).
+pub fn explain_proc(p: &AppUse) -> Option<Explained> {
+    if let Some(e) = explain(&p.name) {
+        return Some(e);
+    }
+    let plain = |what: String, app: Option<String>| {
+        Some(Explained {
+            what,
+            macos: false,
+            app,
+        })
+    };
+    if p.name.eq_ignore_ascii_case("cleancraft") {
+        return plain("CleanCraft (this app).".into(), None);
+    }
+    if let Some(path) = &p.path {
+        if let Some(app) = app_of_path(path) {
+            if app == p.name {
+                return plain(format!("The {app} app."), None);
+            }
+            return plain(format!("Helper of {app}."), Some(app));
+        }
+        if path.starts_with("/System/") || path.starts_with("/usr/") || path.starts_with("/sbin/") {
+            return Some(Explained {
+                what: "Part of macOS: a background process.".into(),
+                macos: true,
+                app: None,
+            });
+        }
+        return plain("Background process.".into(), None);
+    }
+    let parts: Vec<&str> = p.name.split('.').collect();
+    if parts.len() >= 3
+        && ["com", "org", "net", "io", "app", "dev"].contains(&parts[0])
+        && !parts[1].is_empty()
+        && parts[1] != "apple"
+    {
+        let mut v = parts[1].chars();
+        let vendor = v
+            .next()
+            .map(|c| c.to_uppercase().collect::<String>() + v.as_str())
+            .unwrap_or_default();
+        return plain(
+            format!("Background process, by its name from {vendor}."),
+            None,
+        );
+    }
+    None
+}
+
+/// The app whose bundle holds an executable: "/Applications/Docker.app/Contents/MacOS/x"
+/// gives "Docker" (the outermost app bundle).
+pub fn app_of_path(path: &str) -> Option<String> {
+    let i = path.find(".app/")?;
+    let start = path[..i].rfind('/').map(|s| s + 1).unwrap_or(0);
+    let name = &path[start..i];
+    (!name.is_empty()).then(|| name.to_string())
+}
+
 /// Whether `name` is part of macOS by CleanCraft's list.
 pub fn is_macos(name: &str) -> bool {
     explain(name).is_some_and(|e| e.macos)
@@ -184,7 +246,7 @@ pub struct Group {
 pub fn group(procs: &[AppUse]) -> Vec<Group> {
     let mut by: BTreeMap<String, Group> = BTreeMap::new();
     for p in procs {
-        let ex = explain(&p.name);
+        let ex = explain_proc(p);
         let key = ex
             .as_ref()
             .and_then(|e| e.app.clone())
@@ -244,7 +306,47 @@ mod tests {
             name: name.into(),
             cpu,
             memory: mem,
+            path: None,
         }
+    }
+
+    #[test]
+    fn ps_paths_give_names_and_apps() {
+        let v = crate::monitor::parse_ps_usage(
+            "  1 2.0 100 /Applications/Docker.app/Contents/MacOS/com.docker.backend\n  2 1.0 10 Brave Browser Helper (Renderer)\n  3 0.0 1 (kernel_task)\n",
+        )
+        .unwrap();
+        assert_eq!(v[0].name, "com.docker.backend");
+        assert_eq!(explain_proc(&v[0]).unwrap().what, "Helper of Docker.");
+        assert_eq!(v[1].name, "Brave Browser Helper (Renderer)");
+        assert_eq!(v[1].path, None);
+        assert_eq!(v[2].name, "kernel_task");
+    }
+
+    #[test]
+    fn unknown_processes_get_words() {
+        let mut d = p("com.docker.backend", 38.0, 1);
+        assert_eq!(
+            explain_proc(&d).unwrap().what,
+            "Background process, by its name from Docker."
+        );
+        d.path = Some("/Applications/Docker.app/Contents/MacOS/com.docker.backend".into());
+        let e = explain_proc(&d).unwrap();
+        assert_eq!(
+            (e.what.as_str(), e.app.as_deref()),
+            ("Helper of Docker.", Some("Docker"))
+        );
+        assert_eq!(
+            explain_proc(&p("CleanCraft", 1.0, 1)).unwrap().what,
+            "CleanCraft (this app)."
+        );
+        assert_eq!(explain_proc(&p("thing", 1.0, 1)), None);
+        let mut other = p("thing", 1.0, 1);
+        other.path = Some("/opt/tool/bin/thing".into());
+        assert_eq!(explain_proc(&other).unwrap().what, "Background process.");
+        let mut sys = p("cfprefsd", 1.0, 1);
+        sys.path = Some("/usr/sbin/cfprefsd".into());
+        assert!(explain_proc(&sys).unwrap().macos);
     }
 
     #[test]

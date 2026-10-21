@@ -227,7 +227,7 @@ fn poll_phase(app: &mut CleanApp) -> bool {
     }
 }
 
-const SUBTITLE: &str = "One scan across junk, mail downloads, the Trash, threats and your apps.";
+const SUBTITLE: &str = "One scan across junk, mail and duplicate downloads, the Trash, threats, developer clutter and your apps.";
 
 pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     // Files came back since the results were made: they are out of date.
@@ -256,7 +256,12 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             let secs = j.elapsed_secs();
             // Which module the scan is in: its title is the status when it starts (a module
             // then reports its own places, which leave the index where it is).
-            let ids = sources(app).ids();
+            let skip = app.settings.sweep_skip.clone();
+            let ids: Vec<FeatureId> = sources(app)
+                .ids()
+                .into_iter()
+                .filter(|id| !skip.contains(id))
+                .collect();
             if let Some(i) = ids.iter().position(|id| sweep::tile_title(*id) == s)
                 && i > app.sweep.scan_at
             {
@@ -327,6 +332,8 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
 
 fn idle(app: &mut CleanApp, ui: &mut Ui) {
     let t = app.t;
+    let mut health_clicked = false;
+    let mut toggled: Option<FeatureId> = None;
     let ids = sources(app).ids();
     let looks: Vec<(Icon, Color32, &str)> = ids
         .iter()
@@ -335,6 +342,23 @@ fn idle(app: &mut CleanApp, ui: &mut Ui) {
             (i, c, sweep::tile_title(*id))
         })
         .collect();
+    // The chips choose what the scan includes (Settings::sweep_skip, the same choice as the
+    // Include box on each result tile).
+    let on: Vec<bool> = ids
+        .iter()
+        .map(|id| !app.settings.sweep_skip.contains(id))
+        .collect();
+    let picked = on.iter().filter(|o| **o).count();
+    let action = if picked == ids.len() {
+        "Scan".to_string()
+    } else {
+        format!("Scan {picked} of {}", ids.len())
+    };
+    let note = if picked == 0 {
+        "Choose at least one module above to scan."
+    } else {
+        "Scanning only looks. You see every file before anything moves. Click a module to leave it out."
+    };
     if kit::hero(
         ui,
         &t,
@@ -343,16 +367,53 @@ fn idle(app: &mut CleanApp, ui: &mut Ui) {
             title: "One scan for your whole Mac",
             desc: SUBTITLE,
             covers: &[],
-            action: "Scan",
-            note: "Scanning only looks. You see every file before anything moves.",
+            action: &action,
+            note,
+            enabled: picked > 0,
         },
         |ui| {
-            kit::chips(ui, &t, &looks, 760.0);
+            if let Some(i) = kit::chip_toggles(ui, &t, &looks, &on, 760.0) {
+                toggled = ids.get(i).copied();
+            }
             ui.add_space(space::S);
+            // Mac Health from the first page (U7-4): its state when it was read, as a link.
+            let line = health_line(app);
+            if kit::link(ui, &t, &line).clicked() {
+                health_clicked = true;
+            }
+            ui.add_space(space::XS);
         },
     ) {
         app.act();
         start_scan(app);
+    }
+    if let Some(id) = toggled {
+        app.act();
+        if app.settings.sweep_skip.contains(&id) {
+            app.settings.sweep_skip.retain(|x| *x != id);
+        } else {
+            app.settings.sweep_skip.push(id);
+        }
+        app.save_settings();
+    }
+    if health_clicked {
+        app.act();
+        app.open_route(&cleancraft_core::route::AppRoute::Health);
+    }
+}
+
+/// "Mac Health: Needs attention (6)", "Mac Health: Good", or before it was read "Mac Health:
+/// see how your Mac is doing".
+pub fn health_line(app: &CleanApp) -> String {
+    if app.health.facts.is_none() {
+        return "Mac Health: see how your Mac is doing".into();
+    }
+    let (state, why) = cleancraft_core::health::summary(&app.health.cards);
+    match state {
+        cleancraft_core::health::State::Good => "Mac Health: Good".into(),
+        cleancraft_core::health::State::NeedsAttention => {
+            format!("Mac Health: Needs attention ({})", why.len())
+        }
     }
 }
 
@@ -665,12 +726,28 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile, w: f32, tile_h: 
                 }
                 return;
             }
-            if kit::secondary(ui, &t, "Review") {
+            // Named per tile for VoiceOver ("Review Duplicate Downloads") (U7-12).
+            let title = sweep::tile_title(tile.id);
+            let r = kit::secondary_resp(ui, &t, "Review");
+            r.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Review {title}"))
+            });
+            if r.clicked() {
                 review = true;
             }
-            if tile.runnable() {
+            // Include only where there is something to clean.
+            if tile.runnable() && !empty {
                 ui.add_space(4.0);
-                kit::check_text(ui, &t, &mut include, "Include");
+                let r = kit::check_text(ui, &t, &mut include, "Include");
+                let on = include;
+                r.widget_info(|| {
+                    egui::WidgetInfo::selected(
+                        egui::WidgetType::Checkbox,
+                        true,
+                        on,
+                        format!("Include {title}"),
+                    )
+                });
             }
             if trash_full {
                 ui.add_space(4.0);
@@ -748,7 +825,11 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
                 cleancraft_core::fsutil::items(count),
                 human_size(size)
             ),
-            "These exact files will be moved. Threats go to the CleanCraft quarantine. You can put everything back from History.",
+            if plans.iter().any(|p| p.feature == Some(FeatureId::Malware)) {
+                "These exact files will be moved. Threats go to the CleanCraft quarantine. You can put everything back from History."
+            } else {
+                "These exact files will be moved. You can put everything back from History."
+            },
         );
         ui.add_space(space::M);
         let admin: usize = plans
@@ -766,7 +847,9 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
                 .iter()
                 .map(|p| 32.0 + p.selected_count() as f32 * crate::theme::hit::CONFIRM_LINE)
                 .sum();
-            let list_h = est.min(max_list);
+            // A little room for the module rows' own height (taller than the badge), so a
+            // short list never scrolls (U7-11).
+            let list_h = (est + 16.0).min(max_list);
             let out = egui::ScrollArea::vertical()
                 .min_scrolled_height(list_h)
                 .max_height(list_h)
@@ -797,7 +880,7 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
                                 &t,
                                 &it.path,
                                 &app.env.display(&it.path),
-                                &it.reason,
+                                &plan_page::confirm_reason(&app.env, p, it),
                                 &human_size(it.size),
                             );
                         }
@@ -824,6 +907,15 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
         app.act();
         app.sweep.phase = Phase::Results;
     }
+}
+
+/// The files of a run that did not move and can be tried again (not the ones that are gone).
+fn retryable(rep: &executor::Report) -> Vec<std::path::PathBuf> {
+    rep.skipped
+        .iter()
+        .filter(|(_, w)| !matches!(w, executor::SkipReason::Missing))
+        .map(|(p, _)| p.clone())
+        .collect()
 }
 
 /// Did the runs move anything to the Trash, to the quarantine?
@@ -856,6 +948,7 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
         .collect();
     let started = kit::first_seen(ui, ("sweep-done", key));
     let mut undo: Option<(FeatureId, String)> = None;
+    let mut retry: Option<Vec<std::path::PathBuf>> = None;
     // One centred composition like every module's Done screen: the object, the headline,
     // the buttons, then a card per module, all centred in the page (scrolls when long).
     egui::ScrollArea::vertical()
@@ -984,8 +1077,10 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
                                         }
                                     });
                                     if let Ok(rep) = &r.result {
+                                        // Each file that stayed: why, and the next step, as
+                                        // on every module's Done screen.
                                         for (p, why) in &rep.skipped {
-                                            ui.horizontal(|ui| {
+                                            ui.horizontal_wrapped(|ui| {
                                                 ui.add_space(44.0);
                                                 ui.label(
                                                     RichText::new(app.env.display(p))
@@ -994,6 +1089,34 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
                                                 ui.label(
                                                     RichText::new(why.to_string()).color(t.warning),
                                                 );
+                                                if let Some(h) = plan_page::skip_hint(why) {
+                                                    ui.label(
+                                                        RichText::new(h)
+                                                            .font(font(
+                                                                size::FOOTNOTE,
+                                                                Weight::Regular,
+                                                            ))
+                                                            .color(t.text_dim),
+                                                    );
+                                                }
+                                            });
+                                        }
+                                        let again = retryable(rep);
+                                        if !again.is_empty() && !app.sweep.undone.contains(&r.id) {
+                                            ui.horizontal(|ui| {
+                                                ui.add_space(44.0);
+                                                let b = kit::secondary_resp(ui, &t, "Try Again");
+                                                let title = sweep::tile_title(r.id);
+                                                b.widget_info(|| {
+                                                    egui::WidgetInfo::labeled(
+                                                        egui::WidgetType::Button,
+                                                        true,
+                                                        format!("Try Again {title}"),
+                                                    )
+                                                });
+                                                if b.clicked() {
+                                                    retry = Some(again.clone());
+                                                }
                                             });
                                         }
                                     }
@@ -1004,6 +1127,28 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
                 }
             });
         });
+    if let Some(again) = retry {
+        // Only what did not move, with the same confirmation listing it.
+        app.act();
+        if let Some(res) = app.sweep.result.as_mut() {
+            for tile in &mut res.tiles {
+                if let TileData::Plan(plan) = &mut tile.data {
+                    for i in 0..plan.items.len() {
+                        let on = again.contains(&plan.items[i].path);
+                        plan.set_selected(i, on);
+                    }
+                }
+            }
+            if !res.to_run(&app.settings.sweep_skip).is_empty() {
+                app.sweep.phase = Phase::Confirm;
+            } else {
+                app.warn(
+                    "Those files are no longer in Quick Sweep's list. Scan Again to look for them.",
+                );
+            }
+        }
+        return;
+    }
     if let Some((id, plan_id)) = undo {
         app.act();
         let (n, errs) = executor::undo_plan(&app.env, &plan_id);

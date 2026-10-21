@@ -218,6 +218,11 @@ fn quick_sweep_scan_lists_each_module_with_its_state() {
     base(&m);
     let mut h = harness(&m, 1060.0, 680.0);
     h.state_mut().sweep.sources = Some(testkit_monitor::sweep_sources());
+    // The start screen lays out its chips for these sources first (fix7: the chips are
+    // toggles now, so their lines can change).
+    for _ in 0..4 {
+        h.step();
+    }
     let ids = testkit_monitor::sweep_sources().ids();
     assert!(ids.len() >= 3);
     // The scan has reached the second module.

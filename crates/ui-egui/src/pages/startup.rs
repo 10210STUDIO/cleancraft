@@ -15,7 +15,9 @@ use egui::{RichText, Ui};
 use crate::app::CleanApp;
 use crate::jobs::Job;
 use crate::kit;
+use crate::kit_list::{self, Filter, SortKey};
 use crate::theme::{Weight, font, size, space};
+use cleancraft_core::settings::ListPrefs;
 
 /// Everything the page shows, read in one go.
 #[derive(Clone, Debug)]
@@ -69,6 +71,136 @@ pub struct State {
     pub confirm_remove: Option<Plan>,
     /// The action log as the snapshot reflects it (an uninstall moves agents too).
     watch: super::history::JournalWatch,
+    /// The search over every startup item.
+    pub search: String,
+}
+
+/// The list's name in the settings (filters and sort).
+pub const LIST: &str = "startup";
+/// Sort orders of every section's items.
+pub const SORTS: [SortKey; 2] = [
+    kit_list::BY_NAME,
+    SortKey {
+        key: "signer",
+        label: "Sort by signer",
+        first: "A to Z",
+        second: "Z to A",
+        descending: false,
+    },
+];
+
+/// What the search and filters let through, for the sections.
+struct View {
+    q: String,
+    prefs: ListPrefs,
+    filters: Vec<Filter>,
+}
+
+impl View {
+    fn active(&self) -> bool {
+        !self.q.is_empty() || kit_list::filtering(&self.prefs, &self.filters)
+    }
+
+    fn launch(&self, env: &Env, it: &LaunchItem) -> bool {
+        kit_list::matches(
+            &self.q,
+            &[
+                &it.label,
+                it.program.as_deref().unwrap_or(""),
+                &owner_name(env, it).unwrap_or_default(),
+                &it.signer.label(),
+            ],
+        ) && kit_list::passes(&self.prefs, &self.filters, |k| launch_has(it, k))
+    }
+
+    fn login(&self, it: &LoginItem, on: bool) -> bool {
+        kit_list::matches(&self.q, &[&it.name, it.path.as_deref().unwrap_or("")])
+            && kit_list::passes(&self.prefs, &self.filters, |k| login_has(on, k))
+    }
+
+    /// Does the Kind filter leave this kind of item in? (Sections of a kind the filters
+    /// take out are not shown.)
+    fn kind(&self, key: &str) -> bool {
+        let kinds = ["login", "agents", "daemons"];
+        let on: Vec<&str> = kinds
+            .into_iter()
+            .filter(|k| kit_list::on(&self.prefs, k))
+            .collect();
+        on.is_empty() || on.contains(&key)
+    }
+}
+
+fn launch_has(it: &LaunchItem, key: &str) -> bool {
+    match key {
+        "agents" => matches!(it.domain, Domain::UserAgent | Domain::GlobalAgent),
+        "daemons" => it.domain == Domain::Daemon,
+        "on" => it.enabled,
+        "off" => !it.enabled,
+        "unsigned" => it.signer.is_weak(),
+        _ => false,
+    }
+}
+
+fn login_has(on: bool, key: &str) -> bool {
+    match key {
+        "login" => true,
+        "on" => on,
+        "off" => !on,
+        _ => false,
+    }
+}
+
+/// The app an agent belongs to, when its program is inside one ("Dropbox").
+fn owner_name(env: &Env, it: &LaunchItem) -> Option<String> {
+    let a = it
+        .program
+        .as_deref()
+        .and_then(|p| cleancraft_core::sys::app_bundle_of(std::path::Path::new(p)))
+        .map(|a| cleancraft_core::apps::resolve(env, &a.to_string_lossy()))?;
+    std::path::Path::new(&a)
+        .file_stem()
+        .map(|n| n.to_string_lossy().into_owned())
+}
+
+fn filters_for(data: &Snapshot) -> Vec<Filter> {
+    let login_on = data.login.as_ref().map(|l| l.len()).unwrap_or(0);
+    let login_off = data.removed_login.len();
+    let n = |k: &str| data.launch.iter().filter(|i| launch_has(i, k)).count();
+    vec![
+        Filter::any("Kind", "login", "Login items", login_on + login_off),
+        Filter::any("Kind", "agents", "Agents", n("agents")),
+        Filter::any("Kind", "daemons", "Daemons", n("daemons")),
+        Filter::any("State", "on", "On", n("on") + login_on),
+        Filter::any("State", "off", "Off", n("off") + login_off),
+        Filter::only(
+            "Show only",
+            "unsigned",
+            "Not signed by a known developer",
+            n("unsigned"),
+        ),
+    ]
+}
+
+/// Sort a section's agents by the chosen order.
+fn sort_launch(env: &Env, prefs: &ListPrefs, items: &mut [&LaunchItem]) {
+    let (key, rev) = kit_list::sort_of(prefs, &SORTS);
+    let name = |it: &LaunchItem| {
+        owner_name(env, it)
+            .unwrap_or_else(|| it.label.clone())
+            .to_lowercase()
+    };
+    items.sort_by(|a, b| {
+        let o = match key.key {
+            "signer" => a
+                .signer
+                .label()
+                .to_lowercase()
+                .cmp(&b.signer.label().to_lowercase())
+                .then_with(|| name(a).cmp(&name(b))),
+            _ => name(a).cmp(&name(b)),
+        };
+        if rev { o.reverse() } else { o }
+    });
 }
 
 fn reload(app: &mut CleanApp) {
@@ -314,16 +446,96 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     for n in &data.notes {
         kit::dim(ui, &t, n);
     }
+    // Search, Filter, Sort over every startup item.
+    ui.add_space(space::S);
+    let filters = filters_for(&data);
+    let mut prefs = kit_list::prefs(&app.settings, LIST);
+    let mut changed = false;
+    let mut search = std::mem::take(&mut app.startup.search);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = space::S;
+        let (_, ch) = kit_list::search(
+            ui,
+            &t,
+            &mut search,
+            "Search startup items",
+            "Search startup items",
+            240.0,
+        );
+        if ch {
+            app.act();
+        }
+        changed |= kit_list::menus(ui, &t, LIST, &filters, &SORTS, &mut prefs);
+    });
+    let view = View {
+        q: kit_list::query(&search),
+        prefs: prefs.clone(),
+        filters: filters.clone(),
+    };
+    let total = data.launch.len()
+        + data.login.as_ref().map(|l| l.len()).unwrap_or(0)
+        + data.removed_login.len();
+    let shown = data
+        .launch
+        .iter()
+        .filter(|i| view.launch(&app.env, i))
+        .count()
+        + data
+            .login
+            .as_ref()
+            .map(|l| l.iter().filter(|i| view.login(i, true)).count())
+            .unwrap_or(0)
+        + data
+            .removed_login
+            .iter()
+            .filter(|(_, i)| view.login(i, false))
+            .count();
+    let st = kit_list::status(
+        ui,
+        &t,
+        shown,
+        total,
+        ("item", "items"),
+        &filters,
+        &mut prefs,
+        &mut search,
+    );
+    changed |= st.prefs;
+    app.startup.search = search;
+    if changed || st.search {
+        app.act();
+    }
+    if changed && kit_list::store(&mut app.settings, LIST, prefs.clone()) {
+        app.save_settings();
+    }
+    let view = View {
+        q: kit_list::query(&app.startup.search),
+        prefs,
+        filters,
+    };
     let fade_out = egui::ScrollArea::vertical()
         .id_salt("startup")
         .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.add_enabled_ui(app.startup.busy.is_none(), |ui| {
-                login_section(app, ui, &data);
-                for d in Domain::ALL {
-                    launch_section(app, ui, &data, d);
+                if view.kind("login") {
+                    login_section(app, ui, &data, &view);
                 }
-                heavy_section(app, ui, &data);
+                let kinds = [
+                    (Domain::UserAgent, "agents"),
+                    (Domain::GlobalAgent, "agents"),
+                    (Domain::Daemon, "daemons"),
+                ];
+                for (d, kind) in kinds {
+                    if view.kind(kind) {
+                        launch_section(app, ui, &data, d, &view);
+                    }
+                }
+                // The busiest apps are not startup items: shown when nothing narrows the
+                // list.
+                if !view.active() {
+                    heavy_section(app, ui, &data);
+                }
                 ui.add_space(space::M);
             });
         });
@@ -347,8 +559,28 @@ fn section(ui: &mut Ui, t: &crate::theme::Tokens, title: &str, desc: &str) {
     ui.add_space(6.0);
 }
 
-fn login_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot) {
+fn login_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot, view: &View) {
     let t = app.t;
+    let mut on_items: Vec<&LoginItem> = data
+        .login
+        .as_ref()
+        .map(|l| l.iter().filter(|i| view.login(i, true)).collect())
+        .unwrap_or_default();
+    let mut off_items: Vec<&(String, LoginItem)> = data
+        .removed_login
+        .iter()
+        .filter(|(_, i)| view.login(i, false))
+        .collect();
+    let (_, rev) = kit_list::sort_of(&view.prefs, &SORTS);
+    let by_name = |a: &str, b: &str| {
+        let o = a.to_lowercase().cmp(&b.to_lowercase());
+        if rev { o.reverse() } else { o }
+    };
+    on_items.sort_by(|a, b| by_name(&a.name, &b.name));
+    off_items.sort_by(|a, b| by_name(&a.1.name, &b.1.name));
+    if view.active() && on_items.is_empty() && off_items.is_empty() && data.login.is_ok() {
+        return;
+    }
     section(
         ui,
         &t,
@@ -364,8 +596,8 @@ fn login_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot) {
             Ok(list) if list.is_empty() && data.removed_login.is_empty() => {
                 kit::dim(ui, &t, "No app opens when you log in.");
             }
-            Ok(list) => {
-                for it in list {
+            Ok(_) => {
+                for it in on_items {
                     let icon = it
                         .path
                         .as_deref()
@@ -408,7 +640,7 @@ fn login_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot) {
                         );
                     });
                 }
-                for (id, it) in &data.removed_login {
+                for (id, it) in off_items {
                     ui.horizontal(|ui| {
                         ui.set_height(44.0);
                         split_row(
@@ -447,9 +679,18 @@ fn login_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot) {
     });
 }
 
-fn launch_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot, d: Domain) {
+fn launch_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot, d: Domain, view: &View) {
     let t = app.t;
-    let items: Vec<&LaunchItem> = data.launch.iter().filter(|i| i.domain == d).collect();
+    let mut items: Vec<&LaunchItem> = data
+        .launch
+        .iter()
+        .filter(|i| i.domain == d && view.launch(&app.env, i))
+        .collect();
+    // A section the search or filters empty is left out.
+    if items.is_empty() && view.active() {
+        return;
+    }
+    sort_launch(&app.env, &view.prefs, &mut items);
     let desc = match d {
         Domain::UserAgent => {
             "Background helpers that your apps installed for you. They start when you log in."

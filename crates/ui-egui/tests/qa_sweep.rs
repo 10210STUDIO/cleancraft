@@ -25,6 +25,11 @@ fn open(m: &FakeMac, stand_ins: bool) -> H {
     let mut h = harness(m);
     if stand_ins {
         h.state_mut().sweep.sources = Some(sweep_sources());
+        // The start screen lays out its chips for these sources first (fix7: the chips are
+        // toggles now, so their lines can change).
+        for _ in 0..4 {
+            h.step();
+        }
     }
     assert_eq!(h.state().page, Page::Feature(FeatureId::SmartCare));
     h
@@ -86,8 +91,8 @@ fn tiles_show_each_module_plan() {
     // Header: what Run would move (Trash excluded).
     assert!(has(&h, &human_size(j + ml)));
     // One Review per tile, one Include per runnable tile (System Junk, Mail).
-    assert_eq!(h.query_all_by_label("Review").count(), 5);
-    assert_eq!(h.query_all_by_label("Include").count(), 2);
+    assert_eq!(count_tile(&h, "Review"), 5);
+    assert_eq!(count_tile(&h, "Include"), 2);
 }
 
 #[test]
@@ -152,7 +157,8 @@ fn include_toggle_skips_a_module_and_is_saved() {
     let mut h = scanned(&m);
     let junk = plan_of(&h, FeatureId::SystemJunk);
     let mail = plan_of(&h, FeatureId::MailAttachments);
-    click_nth(&mut h, "Include", 0);
+    let l = tile_label(&h, "Include", 0);
+    click(&mut h, &l);
     assert_eq!(h.state().settings.sweep_skip, vec![FeatureId::SystemJunk]);
     assert_eq!(
         Settings::load(&m.env).sweep_skip,
@@ -170,11 +176,13 @@ fn include_toggle_skips_a_module_and_is_saved() {
     for i in mail.selected() {
         assert!(!i.path.exists());
     }
-    // Turn it back on.
+    // Turn it back on: fix7, the start screen's chip is the same choice, and a module left
+    // out is not scanned (so it has no tile to tick).
     click(&mut h, "Done");
-    click(&mut h, "Scan");
-    click_nth(&mut h, "Include", 0);
+    assert!(has(&h, "Scan 4 of 5"));
+    click(&mut h, "System Junk");
     assert!(h.state().settings.sweep_skip.is_empty());
+    click(&mut h, "Scan");
 }
 
 #[test]
@@ -182,7 +190,8 @@ fn review_opens_the_module_with_its_plan() {
     let m = sweep_mac();
     let mut h = scanned(&m);
     let junk = plan_of(&h, FeatureId::SystemJunk);
-    click_nth(&mut h, "Review", 0);
+    let l = tile_label(&h, "Review", 0);
+    click(&mut h, &l);
     assert_eq!(h.state().page, Page::Feature(FeatureId::SystemJunk));
     let st = &h.state().plans[&FeatureId::SystemJunk];
     assert!(matches!(st.phase, plan_page::Phase::Results));
@@ -190,7 +199,8 @@ fn review_opens_the_module_with_its_plan() {
     assert!(has(&h, "Review and Clean"));
     // The count tile opens its page.
     click(&mut h, "Quick Sweep");
-    click_nth(&mut h, "Review", 4);
+    let l = tile_label(&h, "Review", 4);
+    click(&mut h, &l);
     assert_eq!(h.state().page, Page::Feature(FeatureId::Updater));
 }
 
@@ -234,7 +244,7 @@ fn registered_modules_only() {
         .map(|t| t.id)
         .collect();
     assert_eq!(ids, Sources::registered().ids());
-    assert_eq!(h.query_all_by_label("Review").count(), ids.len());
+    assert_eq!(count_tile(&h, "Review"), ids.len());
     // System Junk is always there; its number matches its plan on disk.
     let junk = plan_of(&h, FeatureId::SystemJunk);
     assert!(has(&h, &human_size(selected_on_disk(&junk))));

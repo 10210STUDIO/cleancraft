@@ -386,6 +386,8 @@ impl Agent {
             self.state.armed.and_then(from_secs),
         ) {
             let found = scan_only(env, settings, &self.sources);
+            // A light home measure for Mac Health's "What grew" (at most once a day).
+            let _ = crate::health::record_baseline(env, chrono::Utc::now().timestamp());
             self.state.last_scan = Some(secs(now));
             self.state.last_found = Some(found);
             rep.scanned = Some(found);
@@ -401,7 +403,8 @@ impl Agent {
                     Notification {
                         title: "CleanCraft".into(),
                         subtitle: None,
-                        body: format!("{text}. Open the menu bar item to review it."),
+                        // notify adds "Open the CleanCraft menu bar item to review."
+                        body: format!("{text}."),
                         route: Some(SWEEP_ROUTE.into()),
                     },
                     &mut rep,

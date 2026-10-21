@@ -34,7 +34,13 @@ pub enum AppRoute {
     ThreatReview(PathBuf),
     /// Where to turn on Full Disk Access (Settings, its Full Disk Access group).
     FullDiskAccess,
+    /// macOS System Settings > Battery (outside the app; the page stays).
+    BatterySettings,
 }
+
+/// The System Settings pane [`AppRoute::BatterySettings`] opens.
+pub const BATTERY_SETTINGS_URL: &str =
+    "x-apple.systempreferences:com.apple.Battery-Settings.extension";
 
 impl AppRoute {
     /// The string form: "system_junk", "scan:system_junk", "health", "history", "settings",
@@ -53,6 +59,7 @@ impl AppRoute {
             AppRoute::UninstallApp(p) => format!("uninstall:{}", p.display()),
             AppRoute::ThreatReview(p) => format!("threat:{}", p.display()),
             AppRoute::FullDiskAccess => "full_disk_access".into(),
+            AppRoute::BatterySettings => "battery_settings".into(),
         }
     }
 
@@ -83,6 +90,7 @@ impl AppRoute {
             "unused_apps" => Some(AppRoute::UnusedApps),
             "connect_ai" | "welcome" => Some(AppRoute::ConnectAi),
             "full_disk_access" | "fda" => Some(AppRoute::FullDiskAccess),
+            "battery_settings" => Some(AppRoute::BatterySettings),
             other => FeatureId::parse(other).map(AppRoute::Feature),
         }
     }
@@ -104,6 +112,7 @@ mod tests {
             AppRoute::UninstallApp(PathBuf::from("/Applications/Editor.app")),
             AppRoute::ThreatReview(PathBuf::from("/Library/LaunchAgents/com.x.helper.plist")),
             AppRoute::FullDiskAccess,
+            AppRoute::BatterySettings,
         ];
         for f in FeatureId::ALL {
             all.push(AppRoute::Feature(f));

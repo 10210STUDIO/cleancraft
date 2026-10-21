@@ -211,7 +211,8 @@ fn quick_sweep_keeps_mail_unselected_and_shows_what_was_found() {
         .iter()
         .position(|i| *i == FeatureId::MailAttachments)
         .unwrap();
-    click_nth(&mut h, "Review", mail_i);
+    let l = tile_label(&h, "Review", mail_i);
+    click(&mut h, &l);
     assert_eq!(h.state().page, Page::Feature(FeatureId::MailAttachments));
     assert_eq!(
         page_plan(&h, FeatureId::MailAttachments).selected_count(),

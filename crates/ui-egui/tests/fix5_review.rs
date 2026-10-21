@@ -149,6 +149,11 @@ fn sweep_mac() -> FakeMac {
 
 fn sweep_scan(h: &mut H) {
     h.state_mut().sweep.sources = Some(testkit_monitor::sweep_sources());
+    // The start screen lays out its chips for these sources first (fix7: the chips are
+    // toggles now, so their lines can change).
+    for _ in 0..4 {
+        h.step();
+    }
     click(h, "Scan");
 }
 
@@ -205,7 +210,8 @@ fn n2_sweep_trash_tile_follows_moves_into_the_trash() {
     assert!(!has_text(&h, "Emptied from its own page"));
     assert!(buttons(&h).iter().any(|b| b == "Empty Trash..."));
     // Clean System Junk from its page, come back.
-    h.get_all_by_label("Review").next().expect("Review").click();
+    let l = common::tile_label(&h, "Review", 0);
+    h.get_all_by_label(&l).next().expect("Review").click();
     settle(&mut h);
     clean_here(&mut h);
     click(&mut h, "Done");
@@ -243,7 +249,7 @@ fn n1_cleaned_tile_says_so_and_offers_a_scan() {
     let mac = sweep_mac();
     let mut h = harness(&mac);
     sweep_scan(&mut h);
-    let includes = count(&h, "Include");
+    let includes = common::count_tile(&h, "Include");
     let mail: Vec<_> = h
         .state()
         .sweep
@@ -259,7 +265,7 @@ fn n1_cleaned_tile_says_so_and_offers_a_scan() {
     assert!(has_text(&h, "Cleaned just now."));
     assert!(!has_text(&h, "0 of 0"));
     assert_eq!(
-        count(&h, "Include"),
+        common::count_tile(&h, "Include"),
         includes - 1,
         "no Include on a cleaned tile"
     );
@@ -534,6 +540,11 @@ fn c15_quick_sweep_lists_the_same_modules_in_every_phase() {
     let mut h = harness(&mac);
     let src = testkit_monitor::sweep_sources();
     h.state_mut().sweep.sources = Some(src.clone());
+    // The start screen lays out its chips for these sources first (fix7: the chips are
+    // toggles now, so their lines can change).
+    for _ in 0..4 {
+        h.step();
+    }
     settle(&mut h);
     let titles: Vec<&str> = src.ids().iter().map(|i| i.title()).collect();
     let shown = |h: &H| -> Vec<String> {
@@ -660,7 +671,11 @@ fn c19_c20_app_remover_bar_and_headline() {
     let mac = remover_mac();
     let mut h = harness(&mac);
     go(&mut h, "uninstaller");
-    assert!(has_text(&h, "in 2 apps"), "App Remover list headline");
+    // Safari is part of macOS: hidden from the list by default and said so (lists7).
+    assert!(
+        has_text(&h, "in 1 app (apps only), 1 from macOS hidden"),
+        "App Remover list headline"
+    );
     click(&mut h, "Editor");
     let n = h.state().apps.detail.as_ref().unwrap().selected_count();
     // Shown "4 items selected" after the 24 pt figure; announced with the size.
@@ -782,7 +797,7 @@ fn u26_settings_assistants_switch_and_quarantine_line() {
     base(&m);
     let mut h = harness(&m);
     go(&mut h, "settings");
-    let n = h.get_by_label("Let AI assistants clean after you confirm (MCP)");
+    let n = h.get_by_label("Let AI assistants clean after you confirm");
     assert_eq!(n.accesskit_node().role(), Role::Switch);
     assert!(has(&h, "CleanCraft quarantine"));
     assert!(has_text(

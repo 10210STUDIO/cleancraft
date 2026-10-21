@@ -435,7 +435,7 @@ fn lock_reasons_outside_the_allow_list() {
     // Only what is inside the top user folders: the folders and top files stay.
     std::fs::create_dir_all(vol.join("Movies")).unwrap();
     m.sys_file("/Volumes/My Backup/top.bin", 1000);
-    assert!(r(vol.join("Movies")).is_some_and(|w| w.contains("top folder")));
+    assert!(r(vol.join("Movies")).is_some_and(|w| w.starts_with("a top folder of this disk")));
     assert!(r(vol.join("top.bin")).is_some());
     assert_eq!(r(vol.join("Movies/clip.mov")), None);
     assert_eq!(
