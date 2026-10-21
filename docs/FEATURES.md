@@ -1,6 +1,6 @@
 # CleanCraft features (the contract)
 
-Every row is one user-facing capability. CleanCraft aims for feature parity with the reference app (the reference vendor) as described in its public documentation (research notes with sources: [research/the reference app-public.md](research/the reference app-public.md)). Names, texts, layout and icons are CleanCraft's own.
+Every row is one user-facing capability. CleanCraft aims for feature parity with the leading commercial Mac cleaners, as described in their public documentation. Names, texts, layout and icons are CleanCraft's own.
 
 **Status** values:
 - **WORKS**: an end-to-end test drives the UI by clicks and typing on a fake home folder, checks the files that actually moved and the numbers shown against a recalculation, and covers the error paths that apply.
@@ -273,7 +273,7 @@ A second tool of the Live Monitor section. Facts and recommendations only; every
 
 ## Out of scope for v1
 
-| Feature in the reference app | Why |
+| Feature found in other cleaners | Why |
 |---|---|
 | Cloud Cleanup (iCloud, Google Drive, OneDrive, Dropbox) | Deletes propagate to the cloud; needs OAuth apps per provider; touches iCloud, which the safety rules forbid |
 | Email cleanup (newsletters, unsubscribe) | Needs mail account access; not requested |

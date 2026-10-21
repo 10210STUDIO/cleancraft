@@ -257,9 +257,19 @@ fn check_texts_follow_the_rules_and_name_no_competitor() {
                         n + 1
                     ));
                 }
+                // Other products' names, stored rot13 so they never appear in the sources.
+                let rot13 = |s: &str| -> String {
+                    s.chars()
+                        .map(|c| match c {
+                            'a'..='m' => (c as u8 + 13) as char,
+                            'n'..='z' => (c as u8 - 13) as char,
+                            _ => c,
+                        })
+                        .collect()
+                };
                 for name in [
-                    "the reference app",
-                    "example",
+                    rot13("pyrnazlznp").as_str(),
+                    rot13("znpcnj").as_str(),
                     "smart scan",
                     "space lens",
                     "smart care",

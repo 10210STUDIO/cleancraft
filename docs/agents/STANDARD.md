@@ -1,10 +1,10 @@
 # CleanCraft team brief (read fully before working)
 
-CleanCraft is a macOS cleaning and maintenance app with feature parity with the reference app, built as an original product: own name, design, texts and icons. Rust 2024, egui 0.36, workspace like the owner's ShellyCraft project.
+CleanCraft is a macOS cleaning and maintenance app aiming at feature parity with the leading commercial Mac cleaners, built as an original product: own name, design, texts and icons. Rust 2024, egui 0.36, workspace like the owner's ShellyCraft project.
 
 ## Hard rules
 
-1. **Never copy the reference app.** No code, binaries, images, sounds, UI layout or wording. Use only `docs/research/the reference app-public.md` (public docs) and general macOS knowledge. Our feature names are in `FeatureId::title()`; write our own texts.
+1. **Never copy another app.** No code, binaries, images, sounds, UI layout or wording. Use only public documentation and general macOS knowledge. Our feature names are in `FeatureId::title()`; write our own texts.
 2. **Safety model, never bypass it.**
    - Scans only look. They return a `Plan` (exact items, sizes, reasons). Nothing is removed outside `executor::execute`, which needs the plan digest the user confirmed.
    - Removing = moving to the Trash or the CleanCraft quarantine with one `rename`, logged in the journal with an undo. Never `remove_file`, `remove_dir_all`, `rm`, or any permanent delete in app code. (`grep -rn "remove_file\|remove_dir" crates apps` must stay empty outside tests and tempdir cleanup.)
