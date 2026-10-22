@@ -53,6 +53,9 @@ pub trait FakeMacApps {
     fn run_app(&self, app: &Path);
     /// Answer Spotlight's search for other copies of apps: nothing found.
     fn spotlight_finds_nothing(&self);
+    /// Give a bundle embedded somewhere (an extension, a framework, a settings pane) the
+    /// bundle id `id`: writes an Info.plist at `bundle/rel_plist`.
+    fn embed_bundle(&self, bundle: &Path, rel_plist: &str, id: &str);
 }
 
 impl FakeMacApps for FakeMac {
@@ -139,6 +142,14 @@ impl FakeMacApps for FakeMac {
         if let Some(f) = self.env.fake_sys() {
             f.answer("/usr/bin/mdfind", "");
         }
+    }
+
+    fn embed_bundle(&self, bundle: &Path, rel_plist: &str, id: &str) {
+        let mut d = plist::Dictionary::new();
+        d.insert("CFBundleIdentifier".into(), id.into());
+        let p = bundle.join(rel_plist);
+        let _ = std::fs::create_dir_all(p.parent().unwrap_or(bundle));
+        let _ = plist::Value::Dictionary(d).to_file_xml(&p);
     }
 }
 

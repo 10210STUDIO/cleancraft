@@ -66,6 +66,9 @@ const VENDOR_DIRS: &[&str] = &[
     "/Library/Application Support",
 ];
 
+/// The label of a suite's helper app in its main app's uninstall plan ([`AppInfo::part_of`]).
+pub const SUITE_LABEL: &str = "App of the same suite";
+
 /// How sure a leftover belongs to the app.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Confidence {
@@ -164,6 +167,15 @@ pub fn push_leftovers(
         }
         let (size, unreadable) = leftover_size(env, &path);
         let (cat, mut why, sel) = match conf {
+            Confidence::High if label == SUITE_LABEL => (
+                CAT_HIGH,
+                format!(
+                    "{label}: {}, installed with {}",
+                    path.file_stem().unwrap_or_default().to_string_lossy(),
+                    app.name
+                ),
+                true,
+            ),
             Confidence::High if twin.is_some() => (
                 CAT_SHARED,
                 format!(
@@ -355,6 +367,13 @@ pub fn find_leftovers(
     // never from the shown developer name ("JetBrains s.r.o.").
     let vendor = apps::vendor_segment(&app.bundle_id);
     let mut out = Vec::new();
+    // The suite's helper apps (and its maker's uninstaller) go with the suite's app.
+    for h in all
+        .iter()
+        .filter(|a| !a.apple && a.part_of.as_deref() == Some(app.path.as_path()))
+    {
+        out.push((h.path.clone(), SUITE_LABEL, Confidence::High));
+    }
     for (dir, label) in LEFTOVER_DIRS {
         let root = resolve(env, dir);
         let name_ok = !dir.ends_with("Containers");
@@ -455,6 +474,15 @@ pub fn batch_plan(
     let mut seen: Vec<&Path> = Vec::new();
     for path in app_paths {
         if seen.contains(&path.as_path()) {
+            continue;
+        }
+        // A suite's helper goes with its suite's app when both are chosen.
+        if all
+            .iter()
+            .find(|a| &a.path == path)
+            .and_then(|a| a.part_of.as_ref())
+            .is_some_and(|m| app_paths.contains(m))
+        {
             continue;
         }
         seen.push(path);
@@ -780,6 +808,8 @@ fn trashed_apps(env: &Env) -> Vec<AppInfo> {
                 vendor: String::new(),
                 apple: false,
                 feed_url: None,
+                part_of: None,
+                vendor_uninstaller: None,
                 path: p,
             })
         })

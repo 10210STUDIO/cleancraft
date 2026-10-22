@@ -234,6 +234,11 @@ pub struct State {
     pub confirm_all: Option<Vec<PathBuf>>,
     /// The review of the ticked apps, then their results.
     pub batch: Option<Batch>,
+    /// Uninstall was asked for an app whose maker ships its own uninstaller: the question
+    /// which one to use is open.
+    pub vendor_ask: bool,
+    /// The maker's uninstaller was opened: what to do next.
+    pub vendor_note: Option<String>,
 }
 
 /// The review of several apps: one plan, grouped by app.
@@ -404,6 +409,8 @@ pub fn open_app(app: &mut CleanApp, path: &Path) {
     app.apps.error = None;
     app.apps.quit = Quit::Idle;
     app.apps.confirm_force = false;
+    app.apps.vendor_ask = false;
+    app.apps.vendor_note = None;
     rebuild_detail(app, None);
 }
 
@@ -417,6 +424,22 @@ fn close_detail(app: &mut CleanApp) {
     app.apps.confirm_force = false;
     app.apps.confirm_admin = false;
     app.apps.still_running = None;
+    app.apps.vendor_ask = false;
+    app.apps.vendor_note = None;
+}
+
+/// Open the uninstaller the app's maker ships next to it, and say what to do after.
+fn open_vendor_uninstaller(app: &mut CleanApp, uninstaller: &Path) {
+    let shown = app.env.display(uninstaller);
+    let uname = app_name(uninstaller);
+    match app.env.sys.spawn("/usr/bin/open", &[&shown]) {
+        Ok(()) => {
+            app.apps.vendor_note = Some(format!(
+                "{uname} is open. When it finishes, click Scan Again to see what it left behind."
+            ))
+        }
+        Err(e) => app.warn(format!("Could not open {uname}: {e}")),
+    }
 }
 
 /// Recompute the selected app's plan, keeping the user's checkboxes from `keep` (unless
@@ -2078,6 +2101,15 @@ fn apps_list(app: &mut CleanApp, ui: &mut Ui, h: f32) {
                     kit::place(ui, tr, |ui| {
                         kit::tag(ui, "Part of macOS", t.warning);
                     });
+                } else if let Some(main) = &a.part_of {
+                    // A suite's helper: tied to the suite's app (it goes with it).
+                    let tr = Rect::from_min_size(
+                        pos2(x0 + name_w + 10.0, r.top() + 10.0),
+                        vec2((text_w - name_w - 10.0).max(60.0), 20.0),
+                    );
+                    kit::place(ui, tr, |ui| {
+                        kit::tag(ui, &format!("Part of {}", app_name(main)), t.text_dim);
+                    });
                 }
                 let info_font = font(size::FOOTNOTE, Weight::Regular);
                 let info_s = kit::truncate_middle(ui.ctx(), &info, &info_font, text_w);
@@ -2533,6 +2565,7 @@ fn detail(app: &mut CleanApp, ui: &mut Ui) {
     let esc = matches!(app.apps.phase, Phase::Browse)
         && !app.apps.confirm_force
         && !app.apps.confirm_admin
+        && !app.apps.vendor_ask
         && ui.input(|i| i.key_pressed(Key::Escape));
     let back = kit::pill(ui, &t, "Back to Apps", kit::Kind::Ghost, Some(Icon::Back)).clicked();
     if esc || back {
@@ -2606,6 +2639,33 @@ fn detail(app: &mut CleanApp, ui: &mut Ui) {
         ui.add_space(space::S);
     }
     let trashed = cleancraft_core::watch::in_trash(&app.env, &path);
+    // The maker's own uninstaller is the recommended way (it also removes licensing services
+    // and background helpers it installed).
+    let vendor = info
+        .as_ref()
+        .filter(|_| !trashed && !matches!(block, Some(Block::System(_))))
+        .and_then(|a| {
+            Some((
+                a.vendor_uninstaller.clone()?,
+                apps::vendor_uninstaller_label(a)?,
+            ))
+        });
+    if let Some((u, label)) = &vendor {
+        let text = format!(
+            "{name} comes with its own uninstaller, {}. It also removes the licensing services \
+             and background helpers {name} installed, so it is the recommended way to remove it.",
+            app_name(u)
+        );
+        if kit::banner(ui, &t, Icon::Remover, t.sec_a, &text, label) {
+            app.act();
+            open_vendor_uninstaller(app, u);
+        }
+        if let Some(n) = app.apps.vendor_note.clone() {
+            ui.add_space(space::XS);
+            kit::strip(ui, Icon::Check, t.text_dim, &n);
+        }
+        ui.add_space(space::S);
+    }
     // The lock every row carries (the banner says it once).
     let shared_lock = plan
         .items
@@ -2673,8 +2733,12 @@ fn detail(app: &mut CleanApp, ui: &mut Ui) {
                 let un = un.on_disabled_hover_text(&why_not);
                 if un.clicked() && can_uninstall {
                     app.act();
-                    app.apps.pending = app.apps.detail.clone();
-                    app.apps.phase = Phase::Confirm(Action::Uninstall);
+                    if vendor.is_some() {
+                        app.apps.vendor_ask = true;
+                    } else {
+                        app.apps.pending = app.apps.detail.clone();
+                        app.apps.phase = Phase::Confirm(Action::Uninstall);
+                    }
                 }
                 let can_reset = block.is_none() && files_sel > 0;
                 let rs = ui.add_enabled_ui(can_reset, |ui| {
@@ -2704,6 +2768,13 @@ fn detail(app: &mut CleanApp, ui: &mut Ui) {
                     .clicked()
                 {
                     app.act();
+                    app.apps.vendor_note = None;
+                    if !path.exists() {
+                        // Removed meanwhile (its maker's uninstaller): the list is read again.
+                        close_detail(app);
+                        start_load(app);
+                        return;
+                    }
                     rebuild_detail(app, Some(&plan));
                 }
                 if !app.settings.is_ignored(&path) && !matches!(block, Some(Block::System(_))) {
@@ -2766,6 +2837,57 @@ fn detail(app: &mut CleanApp, ui: &mut Ui) {
     }
     if app.apps.confirm_admin {
         confirm_admin(app, ui, &name);
+    }
+    if app.apps.vendor_ask
+        && let Some((u, label)) = vendor
+    {
+        vendor_dialog(app, ui, &name, &path, &u, &label);
+    }
+}
+
+/// Uninstall was asked for an app whose maker ships its own uninstaller: recommend it, and
+/// still offer CleanCraft's own uninstall.
+fn vendor_dialog(app: &mut CleanApp, ui: &mut Ui, name: &str, path: &Path, u: &Path, label: &str) {
+    let t = app.t;
+    let uname = app_name(u);
+    let (mut open, mut ours, mut close) = (false, false, false);
+    let resp = kit::modal(egui::Id::new("apps-vendor-uninstaller"), &t).show(ui.ctx(), |ui| {
+        ui.set_width(520.0);
+        crate::images::dialog_head_app(
+            ui,
+            &t,
+            path,
+            &format!("Use {uname} instead?"),
+            &format!(
+                "{name} comes with its own uninstaller. It also removes the licensing services, \
+                 background helpers and system services {name} installed. CleanCraft moves the \
+                 app and the files it finds in your Library, so those parts can stay behind."
+            ),
+        );
+        ui.add_space(space::L);
+        ui.horizontal(|ui| {
+            ours = kit::secondary(ui, &t, "Uninstall with CleanCraft");
+        });
+        ui.add_space(space::S);
+        let (g, c) = kit::dialog_actions(ui, &t, label, kit::Kind::Primary);
+        open = g;
+        close = c;
+    });
+    if resp.should_close() {
+        close = true;
+    }
+    if open {
+        app.act();
+        app.apps.vendor_ask = false;
+        open_vendor_uninstaller(app, u);
+    } else if ours {
+        app.act();
+        app.apps.vendor_ask = false;
+        app.apps.pending = app.apps.detail.clone();
+        app.apps.phase = Phase::Confirm(Action::Uninstall);
+    } else if close {
+        app.act();
+        app.apps.vendor_ask = false;
     }
 }
 
