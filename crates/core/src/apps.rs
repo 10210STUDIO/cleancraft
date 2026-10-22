@@ -1,6 +1,13 @@
-//! The apps on this Mac: every `.app` in `/Applications`, `~/Applications` (and one level of
-//! subfolders such as `/Applications/Utilities` or `/Applications/Setapp`) and the macOS apps in
-//! `/System/Applications`.
+//! The apps on this Mac: every `.app` in `/Applications`, `~/Applications` (and the folders
+//! inside them up to [`APP_DEPTH`] levels, such as `/Applications/Utilities`,
+//! `/Applications/Setapp` or a suite folder like `/Applications/Autodesk/AutoCAD 2026`) and the
+//! macOS apps in `/System/Applications`.
+//!
+//! Suites: in a folder of its own (not an app folder itself), the app named like the folder is
+//! the suite's app and the other apps there are its helpers ([`AppInfo::part_of`]). An
+//! uninstaller the maker ships next to an app ("Remove AutoCAD 2026.app",
+//! "Uninstall Foo.app", "Foo Uninstaller.app") is offered for it
+//! ([`AppInfo::vendor_uninstaller`]).
 //!
 //! For each app: name, bundle id, version, size (the shared [`tree_size`] formula), when it was
 //! last opened (Spotlight, `mdls -name kMDItemLastUsedDate -raw`), where it came from (App Store
@@ -71,6 +78,15 @@ pub struct AppInfo {
     pub apple: bool,
     /// Sparkle appcast address (`SUFeedURL`), when the app has one.
     pub feed_url: Option<String>,
+    /// The suite's own app when this app is one of its helpers (an app next to it in the
+    /// suite folder, its maker's uninstaller included). See [`link_suites`].
+    #[serde(default)]
+    pub part_of: Option<PathBuf>,
+    /// The uninstaller the maker ships next to this app ("Remove AutoCAD 2026.app"). It also
+    /// removes licensing services and background helpers the maker installed, so it is the
+    /// recommended way to remove the app.
+    #[serde(default)]
+    pub vendor_uninstaller: Option<PathBuf>,
 }
 
 impl AppInfo {
@@ -497,25 +513,314 @@ fn is_app(p: &Path) -> bool {
         && std::fs::symlink_metadata(p).is_ok_and(|m| m.is_dir())
 }
 
-/// Every app bundle path: the app folders and one level of subfolders. Symbolic links are
-/// not followed. Each entry says whether it lives in a macOS system folder.
+/// How deep apps are looked for below an app folder: `/Applications/X.app` is level 1,
+/// `/Applications/Utilities/X.app` level 2, `/Applications/Autodesk/AutoCAD 2026/X.app`
+/// level 3.
+pub const APP_DEPTH: usize = 3;
+
+/// Folders never searched for apps: bundles of other kinds (their insides are not apps of
+/// their own) and hidden folders.
+fn not_searched(p: &Path) -> bool {
+    let name = p
+        .file_name()
+        .map(|n| n.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    name.starts_with('.')
+        || [
+            ".app",
+            ".framework",
+            ".bundle",
+            ".plugin",
+            ".appex",
+            ".xpc",
+            ".kext",
+            ".prefpane",
+            ".pkg",
+            ".mpkg",
+        ]
+        .iter()
+        .any(|e| name.ends_with(e))
+}
+
+/// Every app bundle path: the app folders and their subfolders up to [`APP_DEPTH`] levels.
+/// An app bundle is never searched inside, and symbolic links are never followed (a link
+/// inside the app folders points at an app already found by its real path, and a link out of
+/// them leads to apps CleanCraft must not remove). Each entry says whether it lives in a
+/// macOS system folder.
 pub fn app_paths(env: &Env) -> Vec<(PathBuf, bool)> {
     let mut out = Vec::new();
     for (dir, system) in APP_DIRS {
         let root = resolve(env, dir);
-        for c in children(&root) {
-            if is_app(&c) {
-                out.push((c, *system));
-            } else if std::fs::symlink_metadata(&c).is_ok_and(|m| m.is_dir()) {
-                for cc in children(&c) {
-                    if is_app(&cc) {
-                        out.push((cc, *system));
-                    }
+        let mut stack = vec![(root, 0usize)];
+        while let Some((d, level)) = stack.pop() {
+            let mut kids = children(&d);
+            kids.sort();
+            for c in kids.into_iter().rev() {
+                if is_app(&c) {
+                    out.push((c, *system));
+                } else if level + 1 < APP_DEPTH
+                    && !not_searched(&c)
+                    && std::fs::symlink_metadata(&c).is_ok_and(|m| m.is_dir())
+                {
+                    stack.push((c, level + 1));
                 }
             }
         }
     }
     out
+}
+
+/// A maker's uninstaller app, by its name: "Remove AutoCAD 2026", "Uninstall Foo",
+/// "Foo Uninstaller", "Uninstaller". Returns the name of the app it removes ("" when it does
+/// not say).
+pub fn uninstaller_target(name: &str) -> Option<String> {
+    let low = name.trim().to_lowercase();
+    for pre in ["remove ", "uninstall "] {
+        if let Some(rest) = low.strip_prefix(pre) {
+            return Some(rest.trim().to_string());
+        }
+    }
+    if let Some(rest) = low.strip_suffix("uninstaller") {
+        return Some(rest.trim().to_string());
+    }
+    None
+}
+
+/// Folders whose apps are unrelated to each other even when one is named like the folder.
+const NOT_SUITES: &[&str] = &["utilities", "setapp"];
+
+/// Tie suite apps together ([`AppInfo::part_of`]) and give apps their maker's uninstaller
+/// ([`AppInfo::vendor_uninstaller`]), from the apps' places on disk only:
+/// - in a folder of its own (not an app folder, not `Utilities` or `Setapp`), the app named
+///   like the folder (else the one an uninstaller there names) is the suite's app, and every
+///   other app in that folder is its helper;
+/// - an uninstaller names its app ("Remove AutoCAD 2026" removes "AutoCAD 2026"); in a suite
+///   folder an uninstaller that names no app there is offered for the folder's own apps.
+///
+/// Apps that are part of macOS are never tied to an uninstaller.
+pub fn link_suites(env: &Env, apps: &mut [AppInfo]) {
+    let roots: Vec<PathBuf> = APP_DIRS.iter().map(|(d, _)| resolve(env, d)).collect();
+    let mut dirs: Vec<PathBuf> = apps
+        .iter()
+        .filter_map(|a| a.path.parent().map(Path::to_path_buf))
+        .collect();
+    dirs.sort();
+    dirs.dedup();
+    for dir in dirs {
+        let idx: Vec<usize> = (0..apps.len())
+            .filter(|&i| apps[i].path.parent() == Some(dir.as_path()) && !apps[i].apple)
+            .collect();
+        let folder = dir
+            .file_name()
+            .map(|n| n.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        let suite_dir = !roots.contains(&dir)
+            && !NOT_SUITES.contains(&folder.as_str())
+            && !in_system(env, &dir);
+        let names: Vec<(String, String)> = apps
+            .iter()
+            .map(|a| (a.name.to_lowercase(), a.bundle_name.to_lowercase()))
+            .collect();
+        let named = |i: usize, n: &str| !n.is_empty() && (names[i].0 == n || names[i].1 == n);
+        let uninstallers: Vec<(usize, String)> = idx
+            .iter()
+            .filter_map(|&i| uninstaller_target(&apps[i].name).map(|t| (i, t)))
+            .collect();
+        let is_un = |i: usize| uninstallers.iter().any(|(u, _)| *u == i);
+        let mut main = None;
+        if suite_dir {
+            main = idx
+                .iter()
+                .copied()
+                .find(|&i| !is_un(i) && named(i, &folder))
+                .or_else(|| {
+                    idx.iter().copied().find(|&i| {
+                        !is_un(i) && uninstallers.iter().any(|(_, t)| named(i, t.as_str()))
+                    })
+                });
+        }
+        if let Some(m) = main {
+            let mp = apps[m].path.clone();
+            for &i in &idx {
+                if i != m {
+                    apps[i].part_of = Some(mp.clone());
+                }
+            }
+        }
+        for (u, target) in &uninstallers {
+            let up = apps[*u].path.clone();
+            let mut hits: Vec<usize> = idx
+                .iter()
+                .copied()
+                .filter(|&i| !is_un(i) && named(i, target))
+                .collect();
+            if hits.is_empty() && suite_dir {
+                hits = idx
+                    .iter()
+                    .copied()
+                    .filter(|&i| !is_un(i) && apps[i].part_of.is_none())
+                    .collect();
+            }
+            for i in hits {
+                if apps[i].vendor_uninstaller.is_none() {
+                    apps[i].vendor_uninstaller = Some(up.clone());
+                }
+            }
+        }
+    }
+}
+
+/// The button that opens an app's own uninstaller: "Open Autodesk Uninstaller", or
+/// "Open Remove AutoCAD 2026" when the maker's name is not known.
+pub fn vendor_uninstaller_label(app: &AppInfo) -> Option<String> {
+    let u = app.vendor_uninstaller.as_ref()?;
+    let maker = vendor_of(&app.bundle_id);
+    Some(if maker == UNKNOWN_DEVELOPER {
+        format!(
+            "Open {}",
+            u.file_stem().unwrap_or_default().to_string_lossy()
+        )
+    } else {
+        format!("Open {maker} Uninstaller")
+    })
+}
+
+/// Kinds of bundles an app carries inside: helper apps, app extensions, XPC services,
+/// frameworks, plug-ins, Quick Look and Spotlight plug-ins, login items, system extensions.
+const BUNDLE_EXTS: &[&str] = &[
+    "app",
+    "appex",
+    "xpc",
+    "framework",
+    "bundle",
+    "plugin",
+    "qlgenerator",
+    "mdimporter",
+    "saver",
+    "prefpane",
+    "systemextension",
+    "kext",
+    "fs",
+];
+
+/// Folders inside a bundle that hold other bundles.
+const BUNDLE_HOLDERS: &[&str] = &[
+    "Contents",
+    "PlugIns",
+    "Plugins",
+    "Library",
+    "Frameworks",
+    "XPCServices",
+    "LoginItems",
+    "Helpers",
+    "Applications",
+    "Extensions",
+    "SystemExtensions",
+    "QuickLook",
+    "Spotlight",
+    "Versions",
+    "MacOS",
+    "SharedSupport",
+];
+
+/// The bundle id of any bundle (an app, an extension, a framework: frameworks keep their
+/// Info.plist in `Resources`).
+pub fn any_bundle_id(b: &Path) -> Option<String> {
+    for rel in ["Contents/Info.plist", "Resources/Info.plist", "Info.plist"] {
+        if let Ok(v) = plist::Value::from_file(b.join(rel))
+            && let Some(id) = v
+                .as_dictionary()
+                .and_then(|d| d.get("CFBundleIdentifier"))
+                .and_then(|v| v.as_string())
+        {
+            let id = id.trim();
+            if !id.is_empty() {
+                return Some(id.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Every bundle id inside `app` (helper apps, `*.appex` extensions, XPC services,
+/// frameworks, Quick Look generators, login items and the like), read from disk. Only the
+/// folders that hold bundles are walked, never through a symbolic link, at most 8 levels.
+pub fn embedded_ids(app: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut stack = vec![(app.join("Contents"), 0usize, false)];
+    while let Some((dir, depth, in_library)) = stack.pop() {
+        if depth > 8 {
+            continue;
+        }
+        for c in children(&dir) {
+            if !std::fs::symlink_metadata(&c).is_ok_and(|m| m.is_dir()) {
+                continue;
+            }
+            let name = c
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let ext = c
+                .extension()
+                .map(|e| e.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+            if BUNDLE_EXTS.contains(&ext.as_str()) {
+                if let Some(id) = any_bundle_id(&c) {
+                    out.push(id);
+                }
+                stack.push((c, depth + 1, false));
+            } else if in_library
+                || BUNDLE_HOLDERS.contains(&name.as_str())
+                || dir.file_name().is_some_and(|n| n == "Versions")
+            {
+                stack.push((c, depth + 1, name == "Library"));
+            }
+        }
+    }
+    out
+}
+
+/// Folders outside the apps where installed bundles live (settings panes, file systems,
+/// shared frameworks, Quick Look and Spotlight plug-ins, internet plug-ins, screen savers).
+/// Their ids count as installed, like apps.
+pub const BUNDLE_DIRS: &[&str] = &[
+    "/Library/PreferencePanes",
+    "~/Library/PreferencePanes",
+    "/Library/Filesystems",
+    "/Library/Frameworks",
+    "~/Library/Frameworks",
+    "/Library/QuickLook",
+    "~/Library/QuickLook",
+    "/Library/Spotlight",
+    "~/Library/Spotlight",
+    "/Library/Internet Plug-Ins",
+    "~/Library/Internet Plug-Ins",
+    "/Library/Screen Savers",
+    "~/Library/Screen Savers",
+    "/Library/Extensions",
+    "/Library/Audio/Plug-Ins/HAL",
+];
+
+/// Every bundle id on this Mac that counts as installed, lower case: each app's own id, every
+/// bundle embedded in it ([`embedded_ids`]), and the bundles in [`BUNDLE_DIRS`].
+pub fn installed_ids(env: &Env, apps: &[AppInfo]) -> std::collections::BTreeSet<String> {
+    let mut ids = std::collections::BTreeSet::new();
+    for a in apps {
+        ids.insert(a.bundle_id.to_lowercase());
+        for id in embedded_ids(&a.path) {
+            ids.insert(id.to_lowercase());
+        }
+    }
+    for d in BUNDLE_DIRS {
+        for c in children(&resolve(env, d)) {
+            if std::fs::symlink_metadata(&c).is_ok_and(|m| m.is_dir())
+                && let Some(id) = any_bundle_id(&c)
+            {
+                ids.insert(id.to_lowercase());
+            }
+        }
+    }
+    ids
 }
 
 /// The app list. `deep` adds size, last-opened date and the code signature (slower: `mdls`
@@ -571,6 +876,8 @@ pub fn inventory(env: &Env, deep: bool, progress: &dyn Fn(&str)) -> Vec<AppInfo>
             store,
             apple,
             feed_url: b.feed_url.clone(),
+            part_of: None,
+            vendor_uninstaller: None,
         });
         bundles.push(b);
     }
@@ -592,6 +899,7 @@ pub fn inventory(env: &Env, deep: bool, progress: &dyn Fn(&str)) -> Vec<AppInfo>
         }
         a.vendor = developer_name(b, s, a.apple);
     }
+    link_suites(env, &mut out);
     out.sort_by_key(|a| a.name.to_lowercase());
     out
 }

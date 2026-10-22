@@ -393,6 +393,8 @@ fn trashed_app_info(env: &Env, app: &Path) -> Option<AppInfo> {
         vendor: apps::plist_developer(&b),
         apple: apps::macos_app(app) || apps::in_system(env, app),
         feed_url: b.feed_url.clone(),
+        part_of: None,
+        vendor_uninstaller: None,
     })
 }
 
