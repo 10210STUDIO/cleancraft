@@ -420,6 +420,7 @@ fn an_unsigned_launch_agent_gives_an_event_that_opens_threat_check_on_it() {
         settings: &settings,
         cancel: &cancel,
         progress: &|_| {},
+        meter: &cleancraft_core::progress::Progress::new(),
     };
     let mut plan = Malware.scan(&ctx).unwrap();
     let i = preselect_threat(&mut plan, &ev.paths[0]).expect("Threat Check lists it");

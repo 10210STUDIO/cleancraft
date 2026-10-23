@@ -400,6 +400,7 @@ impl Feature for SystemJunk {
                 break;
             }
             (ctx.progress)(label);
+            ctx.meter.set(i as u64, STEPS.len() as u64);
             match i {
                 0 => s.dev_caches(),
                 1 => s.old_updates(),

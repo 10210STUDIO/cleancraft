@@ -307,6 +307,7 @@ impl Feature for MailDownloads {
         let mut plan = Plan::new(FeatureId::MailAttachments);
         let running = mail_running(env);
 
+        ctx.meter.set(0, 2);
         (ctx.progress)("Mail Downloads");
         let opened = env.home_path(MAIL_DOWNLOADS);
         if opened.exists() && !can_read(env, &opened) {
@@ -337,6 +338,7 @@ impl Feature for MailDownloads {
             plan.notes.push("Scan stopped before the end.".into());
             return Ok(plan);
         }
+        ctx.meter.set(1, 2);
         (ctx.progress)("Mail");
         let mail = env.home_path(MAIL_DIR);
         if mail.exists() && !can_read(env, &mail) {

@@ -10,6 +10,7 @@ use egui::{
 };
 
 use crate::icons::{self, Icon};
+use crate::jobs::Progress;
 use crate::theme::{
     self, Section, Tokens, Weight, font, hit, icon as isz, motion, radius, size, space,
 };
@@ -1719,38 +1720,158 @@ pub fn round_action(ui: &mut Ui, t: &Tokens, label: &str, d: f32) -> Response {
     resp
 }
 
-/// Seconds as m:ss.
-pub fn clock(secs: u64) -> String {
-    format!("{}:{:02}", secs / 60, secs % 60)
+/// The step line of a cleanup: "Moving 12 of 40 items" (`n` items already handled).
+pub fn moving_text(n: usize, total: usize) -> String {
+    let at = (n + 1).min(total);
+    if total == 1 {
+        "Moving 1 item".to_string()
+    } else {
+        format!("Moving {at} of {total} items")
+    }
 }
 
-/// The scanning screen: a large ring with a sweeping arc, the module icon and the elapsed
-/// time inside, a headline, the place being looked at (shortened in the middle) and, when the
-/// work can stop, a Stop button. Returns true when Stop is clicked.
+/// The progress bar's words for screen readers and tests: "Progress 42%", or "Progress,
+/// working" while the total is not known yet.
+pub fn progress_label(meter: &Progress) -> String {
+    match meter.percent() {
+        Some(p) => format!("Progress {p}%"),
+        None => "Progress, working".to_string(),
+    }
+}
+
+/// A rounded progress bar in the section's colours. With a known share it fills with an
+/// eased glide toward the reported value (it never runs ahead of it); while the total is
+/// unknown a soft band moves across the track instead of a number.
+pub fn progress_bar(ui: &mut Ui, t: &Tokens, meter: &Progress, width: f32) -> Response {
+    let h = 10.0;
+    let (r, resp) = ui.allocate_exact_size(vec2(width, h), Sense::hover());
+    let label = progress_label(meter);
+    resp.widget_info(|| WidgetInfo::labeled(WidgetType::ProgressIndicator, true, label.clone()));
+    let p = ui.painter_at(r.expand(8.0));
+    let round = h / 2.0;
+    // Track: a dark well with a hairline.
+    p.rect_filled(r, round, Color32::from_black_alpha(60));
+    p.rect_stroke(
+        r,
+        round,
+        Stroke::new(1.0, Color32::from_white_alpha(18)),
+        egui::StrokeKind::Inside,
+    );
+    let time = ui.input(|i| i.time);
+    match meter.fraction() {
+        Some(target) => {
+            let shown = crate::motion::animate(
+                ui.ctx(),
+                resp.id.with("fill"),
+                target,
+                crate::motion::Motion::new(0.45, crate::motion::Easing::CubicOut),
+            )
+            .clamp(0.0, 1.0);
+            if shown > 0.0 {
+                let mut fr = r;
+                fr.set_width((r.width() * shown).max(h));
+                icons::glow(
+                    &p,
+                    pos2(fr.right() - round, fr.center().y),
+                    h * 1.6,
+                    t.sec_a.gamma_multiply(0.35),
+                    0.6,
+                );
+                icons::gradient_tile(&p, fr, round, t.sec_b, t.sec_a);
+                // A gentle sheen sliding over the filled part while the work goes on.
+                if !meter.is_finished() {
+                    let ph = motion::looped(time, 2.4);
+                    let x = fr.left() + (fr.width() + 40.0) * ph - 20.0;
+                    let band = Rect::from_min_max(
+                        pos2((x - 14.0).max(fr.left()), fr.top() + 1.0),
+                        pos2((x + 14.0).min(fr.right()), fr.bottom() - 1.0),
+                    );
+                    if band.width() > 1.0 {
+                        p.rect_filled(band, round, Color32::from_white_alpha(28));
+                    }
+                }
+                p.line_segment(
+                    [
+                        pos2(fr.left() + round, fr.top() + 1.5),
+                        pos2((fr.right() - round).max(fr.left() + round), fr.top() + 1.5),
+                    ],
+                    Stroke::new(1.0, Color32::from_white_alpha(50)),
+                );
+            }
+        }
+        None => {
+            // Total not known yet: a band sweeping across, eased at both ends.
+            let ph = motion::ease_in_out(motion::looped(time, 1.8));
+            let bw = r.width() * 0.28;
+            let x0 = r.left() - bw + (r.width() + bw) * ph;
+            let band = Rect::from_min_max(
+                pos2(x0.max(r.left()), r.top()),
+                pos2((x0 + bw).min(r.right()), r.bottom()),
+            );
+            if band.width() > 1.0 {
+                icons::gradient_tile(
+                    &p,
+                    band,
+                    round,
+                    t.sec_b.gamma_multiply(0.8),
+                    t.sec_a.gamma_multiply(0.8),
+                );
+            }
+        }
+    }
+    if !meter.is_finished() {
+        ui.ctx().request_repaint();
+    }
+    resp
+}
+
+/// The block every running job shows: the share done as a large "42%" (or the step alone
+/// while the total is unknown), the bar, the current step and, only when the estimate is
+/// steady, the time left.
+pub fn progress_block(ui: &mut Ui, t: &Tokens, meter: &Progress, step: &str) {
+    let w = ui.available_width().clamp(120.0, space::MEASURE * 0.75);
+    if let Some(pct) = meter.percent() {
+        let txt = format!("{pct}%");
+        let r = ui.label(
+            RichText::new(&txt)
+                .font(font(size::TITLE2, Weight::SemiBold))
+                .color(t.text),
+        );
+        r.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, txt.clone()));
+        ui.add_space(space::XS);
+    }
+    progress_bar(ui, t, meter, w);
+    ui.add_space(space::S);
+    let fid = font(size::CALLOUT, Weight::Regular);
+    if !step.is_empty() {
+        let shown = truncate_middle(ui.ctx(), step, &fid, w);
+        ui.label(RichText::new(shown).font(fid.clone()).color(t.text_faint));
+    }
+    if let Some(left) = meter.eta_secs() {
+        ui.label(
+            RichText::new(cleancraft_core::progress::eta_text(left))
+                .font(font(size::FOOTNOTE, Weight::Regular))
+                .color(t.text_faint),
+        );
+    }
+}
+
+/// The screen of a running job: the module's 3D object at work, a headline, the progress
+/// bar with the share done and the current step, and, when the work can stop, a Stop
+/// button. Returns true when Stop is clicked.
 pub fn progress(
     ui: &mut Ui,
     t: &Tokens,
     feature: cleancraft_core::FeatureId,
     headline: &str,
     status: &str,
-    elapsed: u64,
+    meter: &Progress,
     can_stop: bool,
 ) -> bool {
-    progress_with(
-        ui,
-        t,
-        feature,
-        headline,
-        status,
-        elapsed,
-        can_stop,
-        0.0,
-        |_| {},
-    )
+    progress_with(ui, t, feature, headline, status, meter, can_stop, |_| {})
 }
 
-/// [`progress`] with a known share done (0 when unknown; it feeds the hero's glow) and extra
-/// content under the elapsed time (Quick Sweep's module chips).
+/// [`progress`] with extra content under the bar (Quick Sweep's module chips).
 #[allow(clippy::too_many_arguments)]
 pub fn progress_with(
     ui: &mut Ui,
@@ -1758,22 +1879,21 @@ pub fn progress_with(
     feature: cleancraft_core::FeatureId,
     headline: &str,
     status: &str,
-    elapsed: u64,
+    meter: &Progress,
     can_stop: bool,
-    done: f32,
     extra: impl FnOnce(&mut Ui),
 ) -> bool {
     let id = ui.id().with(("progress", headline));
     let mut stop = false;
     centered_block(ui, id, |ui| {
         let avail = ui.available_height();
-        let d = if avail < 460.0 { 170.0 } else { 220.0 };
-        // The module's 3D object at work (heroes.rs, scanning).
+        let d = if avail < 460.0 { 150.0 } else { 200.0 };
+        // The module's 3D object at work (heroes.rs, scanning); its glow follows the share.
         show_hero(
             ui,
             feature,
             crate::heroes::HeroPhase::Scanning,
-            done,
+            meter.fraction().unwrap_or(0.0),
             Vec2::splat(d),
         );
         ui.add_space(space::S);
@@ -1782,17 +1902,8 @@ pub fn progress_with(
                 .font(font(size::TITLE2, Weight::SemiBold))
                 .color(t.text),
         );
-        ui.add_space(space::XS);
-        let fid = font(size::CALLOUT, Weight::Regular);
-        let w = ui.available_width().min(space::MEASURE);
-        let shown = truncate_middle(ui.ctx(), status, &fid, w);
-        ui.label(RichText::new(shown).font(fid).color(t.text_faint));
-        ui.add_space(space::XS);
-        ui.label(
-            RichText::new(clock(elapsed))
-                .font(font(size::TITLE3, Weight::SemiBold))
-                .color(t.text_dim),
-        );
+        ui.add_space(space::S);
+        progress_block(ui, t, meter, status);
         extra(ui);
         if can_stop {
             ui.add_space(space::M);

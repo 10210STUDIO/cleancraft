@@ -19,6 +19,7 @@ use crate::executor::Report;
 use crate::features::duplicates::DownloadDuplicates;
 use crate::features::{self, Feature, ScanCtx};
 use crate::plan::{FeatureId, Plan};
+use crate::progress::Progress;
 use crate::settings::Settings;
 
 /// Plan modules Quick Sweep includes when they are registered, in tile order. Duplicates is
@@ -188,20 +189,45 @@ pub fn scan(
     cancel: &AtomicBool,
     progress: &(dyn Fn(&str) + Sync),
 ) -> SweepResult {
-    let mut tiles = Vec::new();
-    // Modules left out on Quick Sweep's start screen (or unticked on a result tile) are not
-    // scanned at all.
-    for id in sources
+    scan_metered(env, settings, sources, cancel, progress, &Progress::new())
+}
+
+/// The modules [`scan`] looks at, in order.
+pub fn scan_ids(settings: &Settings, sources: &Sources) -> Vec<FeatureId> {
+    sources
         .ids()
         .into_iter()
         .filter(|id| !settings.sweep_skip.contains(id))
-    {
+        .collect()
+}
+
+/// [`scan`] reporting into `meter`: modules done of the modules selected, each module's
+/// slice filled by its own scan as it goes.
+pub fn scan_metered(
+    env: &Env,
+    settings: &Settings,
+    sources: &Sources,
+    cancel: &AtomicBool,
+    progress: &(dyn Fn(&str) + Sync),
+    meter: &Progress,
+) -> SweepResult {
+    let mut tiles = Vec::new();
+    // Modules left out on Quick Sweep's start screen (or unticked on a result tile) are not
+    // scanned at all.
+    let ids = scan_ids(settings, sources);
+    let n = ids.len();
+    meter.set(0, n as u64);
+    for (k, id) in ids.into_iter().enumerate() {
         if cancel.load(Ordering::Relaxed) {
             return SweepResult { tiles };
         }
         progress(tile_title(id));
-        if let Some(data) = scan_one(env, settings, sources, id, cancel, progress) {
+        let part = meter.span(k, n);
+        if let Some(data) = scan_one_metered(env, settings, sources, id, cancel, progress, &part) {
             tiles.push(Tile { id, data });
+        }
+        if !cancel.load(Ordering::Relaxed) {
+            part.complete();
         }
     }
     SweepResult { tiles }
@@ -219,12 +245,34 @@ pub fn scan_one(
     cancel: &AtomicBool,
     progress: &(dyn Fn(&str) + Sync),
 ) -> Option<TileData> {
+    scan_one_metered(
+        env,
+        settings,
+        sources,
+        id,
+        cancel,
+        progress,
+        &Progress::new(),
+    )
+}
+
+/// [`scan_one`] reporting into `meter`.
+pub fn scan_one_metered(
+    env: &Env,
+    settings: &Settings,
+    sources: &Sources,
+    id: FeatureId,
+    cancel: &AtomicBool,
+    progress: &(dyn Fn(&str) + Sync),
+    meter: &Progress,
+) -> Option<TileData> {
     if let Some(f) = sources.feature(id) {
         let ctx = ScanCtx {
             env,
             settings,
             cancel,
             progress,
+            meter,
         };
         return Some(match features::scan_with(f.as_ref(), &ctx) {
             Ok(p) => TileData::Plan(p),
@@ -256,7 +304,30 @@ pub fn run(
     confirmed: &[(Plan, String)],
     progress: &(dyn Fn(&str) + Sync),
 ) -> Vec<ModuleRun> {
+    run_metered(
+        env,
+        settings,
+        sources,
+        confirmed,
+        progress,
+        &Progress::new(),
+    )
+}
+
+/// [`run`] reporting into `meter`: items handled of all the selected items of every plan,
+/// with the step "Moving 12 of 40 items".
+pub fn run_metered(
+    env: &Env,
+    settings: &Settings,
+    sources: &Sources,
+    confirmed: &[(Plan, String)],
+    progress: &(dyn Fn(&str) + Sync),
+    meter: &Progress,
+) -> Vec<ModuleRun> {
     let mut out = Vec::new();
+    let grand: usize = confirmed.iter().map(|(p, _)| p.selected_count()).sum();
+    meter.set(0, grand as u64);
+    let mut offset = 0usize;
     for (plan, digest) in confirmed {
         let Some(id) = plan.feature else {
             continue;
@@ -264,11 +335,17 @@ pub fn run(
         progress(tile_title(id));
         let result = match sources.feature(id) {
             Some(f) => {
-                features::run_plan_with(f.as_ref(), env, settings, plan, digest, &mut |_, _| {})
-                    .map_err(|e| format!("{e:#}"))
+                features::run_plan_with(f.as_ref(), env, settings, plan, digest, &mut |n, _| {
+                    let at = (offset + n).min(grand);
+                    meter.set(at as u64, grand as u64);
+                    meter.set_step(&format!("Moving {} of {grand} items", (at + 1).min(grand)));
+                })
+                .map_err(|e| format!("{e:#}"))
             }
             None => Err(format!("{} is not available", id.title())),
         };
+        offset += plan.selected_count();
+        meter.set(offset.min(grand) as u64, grand as u64);
         out.push(ModuleRun { id, result });
     }
     out

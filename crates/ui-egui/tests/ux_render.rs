@@ -301,6 +301,18 @@ fn scenes() -> Vec<Scene> {
             },
         },
         Scene {
+            name: "system-junk-scanning-progress",
+            mac: testkit_cleanup::junk_mac,
+            go: |h| {
+                nav(h, "system_junk");
+                let job = Job::waiting(WAIT_PLACE);
+                job.meter.set(42, 100);
+                h.state_mut().plan_state(FeatureId::SystemJunk).phase =
+                    plan_page::Phase::Scanning(job);
+                settle(h);
+            },
+        },
+        Scene {
             name: "system-junk-results",
             mac: testkit_cleanup::junk_mac,
             go: |h| {

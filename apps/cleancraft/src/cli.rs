@@ -155,7 +155,7 @@ pub fn run_cmd(env: &Env, cmd: Cmd) -> anyhow::Result<()> {
             let f = FeatureId::parse(&feature).ok_or_else(|| {
                 anyhow::anyhow!("unknown feature '{feature}' (see `cleancraft features`)")
             })?;
-            let plan = features::scan(env, &settings, f)?;
+            let plan = scan_with_bar(env, &settings, f, !json)?;
             plans::save(env, &plan)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&plan)?);
@@ -273,6 +273,40 @@ pub fn run_cmd(env: &Env, cmd: Cmd) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Scan `f`; with `bar` and a terminal on stderr, a text progress bar is drawn there while
+/// it runs and cleared at the end (the list on stdout stays clean for pipes).
+fn scan_with_bar(
+    env: &Env,
+    settings: &Settings,
+    f: FeatureId,
+    bar: bool,
+) -> anyhow::Result<cleancraft_core::Plan> {
+    use std::io::{IsTerminal, Write};
+    let meter = cleancraft_core::progress::Progress::new();
+    if !(bar && std::io::stderr().is_terminal()) {
+        return features::scan_metered(env, settings, f, &meter);
+    }
+    let done = std::sync::atomic::AtomicBool::new(false);
+    std::thread::scope(|s| {
+        s.spawn(|| {
+            let mut tick = 0usize;
+            while !done.load(std::sync::atomic::Ordering::Relaxed) {
+                let line = cleancraft_core::progress::text_bar(&meter, 30, tick);
+                let line: String = line.chars().take(100).collect();
+                eprint!("\r\x1b[2K{line}");
+                let _ = std::io::stderr().flush();
+                tick += 1;
+                std::thread::sleep(std::time::Duration::from_millis(120));
+            }
+            eprint!("\r\x1b[2K");
+            let _ = std::io::stderr().flush();
+        });
+        let r = features::scan_metered(env, settings, f, &meter);
+        done.store(true, std::sync::atomic::Ordering::Relaxed);
+        r
+    })
 }
 
 #[cfg(test)]

@@ -10,6 +10,7 @@ use crate::env::Env;
 use crate::executor::{self, ExecError, Method, Report, SkipReason};
 use crate::plan::{FeatureId, Item, Plan};
 use crate::policy;
+use crate::progress::Progress;
 use crate::settings::Settings;
 
 pub mod dev_clutter;
@@ -33,9 +34,23 @@ pub struct ScanCtx<'a> {
     pub cancel: &'a AtomicBool,
     /// Called with the place being looked at, for the progress line.
     pub progress: &'a (dyn Fn(&str) + Sync),
+    /// How far the scan is (the progress bar): report real units with
+    /// [`crate::progress::Progress::set`]; [`ScanCtx::part`] gives a slice of it to a sub-step.
+    pub meter: &'a Progress,
 }
 
 impl<'a> ScanCtx<'a> {
+    /// The same context reporting into `meter` (a slice of this one's bar).
+    pub fn with_meter<'b>(&'b self, meter: &'b Progress) -> ScanCtx<'b> {
+        ScanCtx {
+            env: self.env,
+            settings: self.settings,
+            cancel: self.cancel,
+            progress: self.progress,
+            meter,
+        }
+    }
+
     pub fn cancelled(&self) -> bool {
         self.cancel.load(Ordering::Relaxed)
     }
@@ -285,6 +300,9 @@ pub fn allow_roots(env: &Env, id: FeatureId) -> Vec<PathBuf> {
 /// twice counts once ([`Plan::count_links_once`]).
 pub fn scan_with(f: &dyn Feature, ctx: &ScanCtx<'_>) -> anyhow::Result<Plan> {
     let mut plan = f.scan(ctx)?;
+    if !ctx.cancelled() {
+        ctx.meter.complete();
+    }
     narrow_ignored(f, ctx.env, ctx.settings, &mut plan);
     lock_linked_roots(f, ctx.env, &mut plan);
     plan.count_links_once();
@@ -452,13 +470,24 @@ fn split_around(dir: &Path, ignore: &[PathBuf], depth: usize, out: &mut Vec<Path
 
 /// Scan with a fresh context.
 pub fn scan(env: &Env, settings: &Settings, id: FeatureId) -> anyhow::Result<Plan> {
+    scan_metered(env, settings, id, &Progress::new())
+}
+
+/// [`scan`] reporting into `meter` (the CLI's text bar).
+pub fn scan_metered(
+    env: &Env,
+    settings: &Settings,
+    id: FeatureId,
+    meter: &Progress,
+) -> anyhow::Result<Plan> {
     let f = get(id).ok_or_else(|| anyhow::anyhow!("{} has no scan", id.title()))?;
     let cancel = AtomicBool::new(false);
     let ctx = ScanCtx {
         env,
         settings,
         cancel: &cancel,
-        progress: &|_| {},
+        progress: &|s| meter.set_step(s),
+        meter,
     };
     scan_with(f.as_ref(), &ctx)
 }

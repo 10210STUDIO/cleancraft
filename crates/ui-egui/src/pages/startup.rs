@@ -404,7 +404,13 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         reload(app);
     }
     let Some(data) = app.startup.data.clone() else {
-        kit::progress(ui, &t, f, "Reading startup items...", "", 0, false);
+        let meter = app
+            .startup
+            .loading
+            .as_ref()
+            .map(|j| j.meter.clone())
+            .unwrap_or_default();
+        kit::progress(ui, &t, f, "Reading startup items...", "", &meter, false);
         return;
     };
     let busy = app.startup.busy.is_some() || app.startup.loading.is_some();

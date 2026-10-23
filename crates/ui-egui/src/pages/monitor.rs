@@ -139,7 +139,13 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         ui.ctx().request_repaint_after(app.monitor.interval);
     }
     let Some(snap) = app.monitor.last.clone() else {
-        kit::progress(ui, &t, f, "Reading...", "", 0, false);
+        let meter = app
+            .monitor
+            .job
+            .as_ref()
+            .map(|j| j.meter.clone())
+            .unwrap_or_default();
+        kit::progress(ui, &t, f, "Reading...", "", &meter, false);
         return;
     };
     let out = egui::ScrollArea::vertical()

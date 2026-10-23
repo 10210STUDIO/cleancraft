@@ -123,6 +123,16 @@ pub fn find_groups(
     files: Vec<Candidate>,
     cancelled: &dyn Fn() -> bool,
 ) -> (Vec<Vec<Candidate>>, usize) {
+    find_groups_with(files, cancelled, &|_, _| {})
+}
+
+/// [`find_groups`], calling `done(compared, total)` with the files of equal size compared so
+/// far out of all of them (the progress of the content check).
+pub fn find_groups_with(
+    files: Vec<Candidate>,
+    cancelled: &dyn Fn() -> bool,
+    done: &dyn Fn(usize, usize),
+) -> (Vec<Vec<Candidate>>, usize) {
     // Hard links: keep the first path of each inode.
     let mut seen = std::collections::HashSet::new();
     let mut by_len: BTreeMap<u64, Vec<Candidate>> = BTreeMap::new();
@@ -139,6 +149,9 @@ pub fn find_groups(
     }
     let mut unreadable = 0usize;
     let mut groups = Vec::new();
+    let total: usize = by_len.values().map(Vec::len).filter(|n| *n >= 2).sum();
+    let mut compared = 0usize;
+    done(0, total);
     for (_, same_len) in by_len {
         if same_len.len() < 2 {
             continue;
@@ -146,6 +159,7 @@ pub fn find_groups(
         if cancelled() {
             break;
         }
+        compared += same_len.len();
         let mut by_partial: HashMap<[u8; 32], Vec<Candidate>> = HashMap::new();
         for c in same_len {
             match hash_partial(&c.path) {
@@ -171,6 +185,7 @@ pub fn find_groups(
                 }
             }
         }
+        done(compared, total);
     }
     groups.sort_by(|a, b| {
         let wa = a[0].size * (a.len() as u64 - 1);
@@ -498,7 +513,14 @@ pub fn scan_filtered(
             .push(format!("{} does not exist.", env.display(&root)));
         return Ok(plan);
     }
-    let w = walk_area(ctx, &root, &allow, MIN_LEN + 1, false);
+    // Walking the folders, then comparing contents: each about half of the work.
+    let w = walk_area(
+        &ctx.with_meter(&ctx.meter.range(0.0, 0.5)),
+        &root,
+        &allow,
+        MIN_LEN + 1,
+        false,
+    );
     let files: Vec<Candidate> = w
         .found
         .into_iter()
@@ -519,7 +541,11 @@ pub fn scan_filtered(
         .filter(|c| !in_progress(&c.path))
         .collect();
     (ctx.progress)("file contents");
-    let (sets, unreadable) = find_groups(files, &|| ctx.cancelled());
+    ctx.meter.range(0.0, 0.5).complete();
+    let compare = ctx.meter.range(0.5, 1.0);
+    let (sets, unreadable) = find_groups_with(files, &|| ctx.cancelled(), &|done, total| {
+        compare.set(done as u64, total as u64)
+    });
     for (n, set) in sets.iter().enumerate() {
         let key = format!("dup-{:04}", n + 1);
         let others = set.len() - 1;

@@ -58,6 +58,7 @@ fn tiles_match_each_plan() {
                         settings: &Settings::default(),
                         cancel: &AtomicBool::new(false),
                         progress: &|_| {},
+                        meter: &cleancraft_core::progress::Progress::new(),
                     })
                     .unwrap(),
                 _ => continue,

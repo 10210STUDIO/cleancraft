@@ -827,12 +827,27 @@ pub fn installed_ids(env: &Env, apps: &[AppInfo]) -> std::collections::BTreeSet<
 /// per app, and `codesign` for every app outside `/System`, run [`CODESIGN_THREADS`] at once);
 /// without it the list is quick and runs no command, for matching leftovers.
 pub fn inventory(env: &Env, deep: bool, progress: &dyn Fn(&str)) -> Vec<AppInfo> {
+    inventory_metered(env, deep, progress, &crate::progress::Progress::new())
+}
+
+/// [`inventory`] reporting into `meter`: apps read of the apps found (most of the work),
+/// then the signatures.
+pub fn inventory_metered(
+    env: &Env,
+    deep: bool,
+    progress: &dyn Fn(&str),
+    meter: &crate::progress::Progress,
+) -> Vec<AppInfo> {
     let setapp = env.sys_path("/Applications/Setapp");
     let mut out = Vec::new();
     let mut bundles = Vec::new();
     // Asked once, only when an app needs the app-data fallback.
     let mut full_disk: Option<bool> = None;
-    for (path, system) in app_paths(env) {
+    let found = app_paths(env);
+    let total = found.len() as u64;
+    let reading = meter.range(0.0, if deep { 0.85 } else { 1.0 });
+    for (k, (path, system)) in found.into_iter().enumerate() {
+        reading.set(k as u64, total);
         let Some(b) = read_bundle(&path) else {
             continue;
         };
@@ -881,6 +896,7 @@ pub fn inventory(env: &Env, deep: bool, progress: &dyn Fn(&str)) -> Vec<AppInfo>
         });
         bundles.push(b);
     }
+    reading.complete();
     // The signature: who made the app, and whether macOS signed it as its own. Apps already
     // known to be part of macOS are not asked; every other app is, several at once.
     let ask: Vec<usize> = if deep {

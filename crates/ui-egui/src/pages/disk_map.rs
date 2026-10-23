@@ -31,7 +31,7 @@ use egui::{Align, Color32, CornerRadius, Layout, RichText, Sense, Stroke, Ui, ve
 
 use crate::app::CleanApp;
 use crate::icons::{self, Icon};
-use crate::jobs::Job;
+use crate::jobs::{Job, Progress};
 use crate::kit;
 use crate::kit_list::{self, Filter};
 use crate::theme::{self, Weight, font, motion, size};
@@ -260,9 +260,14 @@ fn start_map(app: &mut CleanApp, root: PathBuf, fresh: bool) {
     // (in Library), which the map would otherwise miss.
     crate::sound::play(&app.env, crate::sound::Cue::ScanStart);
     let env = app.env.clone();
-    let job = Job::start(app.sync, move |status| {
-        let mut tree =
-            space::build_location(&env, &loc, &cancel, &|n, _| status(&format!("{n} files")));
+    let job = Job::start_metered(app.sync, move |meter| {
+        let mut tree = space::build_location_metered(
+            &env,
+            &loc,
+            &cancel,
+            &|n, _| meter.set_step(&format!("{n} files")),
+            meter,
+        );
         // Kept for Mac Health's "what grew" (a stopped measure is not kept).
         // The snapshot file is in CleanCraft's own folder, which a home map measures too.
         if let Ok(true) = space_snapshots::record(&env, &loc, &tree) {
@@ -440,10 +445,11 @@ fn start_remove(app: &mut CleanApp) {
             .filter_map(|p| tree.find(&p).map(|n| (p, n.size)))
             .collect::<Vec<_>>()
     });
-    let job = Job::start(app.sync, move |status| {
+    let job = Job::start_metered(app.sync, move |meter| {
         let digest = plan.digest();
         let r = features::run_plan(&env, &settings, &plan, &digest, &mut |n, total| {
-            status(&format!("{n} of {total}"))
+            meter.set(n as u64, total as u64);
+            meter.set_step(&kit::moving_text(n, total));
         });
         let result = match r {
             Ok(rep) => {
@@ -510,9 +516,9 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: cleancraft_core::FeatureId) {
     match phase {
         0 => idle(app, ui),
         1 => {
-            let (status, secs) = match &app.disk_map.phase {
-                Phase::Scanning(j) => (j.status(), j.elapsed_secs()),
-                _ => (String::new(), 0),
+            let (status, meter) = match &app.disk_map.phase {
+                Phase::Scanning(j) => (j.status(), j.meter.clone()),
+                _ => (String::new(), Progress::new()),
             };
             let what = app
                 .disk_map
@@ -530,7 +536,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: cleancraft_core::FeatureId) {
                     format!("Measuring {what}...")
                 },
                 &status,
-                secs,
+                &meter,
                 true,
             ) {
                 app.act();
@@ -543,9 +549,9 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: cleancraft_core::FeatureId) {
             confirm(app, ui);
         }
         4 => {
-            let (status, secs) = match &app.disk_map.phase {
-                Phase::Working(j) => (j.status(), j.elapsed_secs()),
-                _ => (String::new(), 0),
+            let (status, meter) = match &app.disk_map.phase {
+                Phase::Working(j) => (j.status(), j.meter.clone()),
+                _ => (String::new(), Progress::new()),
             };
             kit::progress(
                 ui,
@@ -553,7 +559,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: cleancraft_core::FeatureId) {
                 f,
                 "Working on the selected items...",
                 &status,
-                secs,
+                &meter,
                 false,
             );
         }

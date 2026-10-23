@@ -16,7 +16,7 @@ use egui::{Align, Color32, Layout, Rect, RichText, Sense, Ui, pos2, vec2};
 
 use crate::app::CleanApp;
 use crate::icons::{self, Icon};
-use crate::jobs::Job;
+use crate::jobs::{Job, Progress};
 use crate::kit;
 use crate::kit_list::{self, Filter, SortKey};
 use crate::theme::{Weight, font, hit, icon as isz, size, space};
@@ -354,7 +354,7 @@ pub fn start_scan(app: &mut CleanApp, f: FeatureId) {
     let sync = app.sync;
     let flag = Arc::new(AtomicBool::new(false));
     app.plan_state(f).cancel = flag.clone();
-    let job = Job::start(sync, move |status| {
+    let job = Job::start_metered(sync, move |meter| {
         let cancel = flag;
         let Some(feat) = features::get(f) else {
             return Err(format!("{} has no scan yet", f.title()));
@@ -363,7 +363,8 @@ pub fn start_scan(app: &mut CleanApp, f: FeatureId) {
             env: &env,
             settings: &settings,
             cancel: &cancel,
-            progress: &|s| status(s),
+            progress: &|s| meter.set_step(s),
+            meter,
         };
         features::scan_with(feat.as_ref(), &ctx).map_err(|e| format!("{e:#}"))
     });
@@ -380,9 +381,10 @@ fn start_clean(app: &mut CleanApp, f: FeatureId) {
     let env = app.env.clone();
     let settings = app.settings.clone();
     let digest = plan.digest();
-    let job = Job::start(app.sync, move |status| {
+    let job = Job::start_metered(app.sync, move |meter| {
         features::run_plan(&env, &settings, &plan, &digest, &mut |n, total| {
-            status(&format!("{n} of {total}"))
+            meter.set(n as u64, total as u64);
+            meter.set_step(&kit::moving_text(n, total));
         })
         .map_err(|e| format!("{e:#}"))
     });
@@ -518,9 +520,9 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     match phase {
         0 => idle(app, ui, f),
         1 => {
-            let (status, secs) = match &app.plan_state(f).phase {
-                Phase::Scanning(j) => (j.status(), j.elapsed_secs()),
-                _ => (String::new(), 0),
+            let (status, meter) = match &app.plan_state(f).phase {
+                Phase::Scanning(j) => (j.status(), j.meter.clone()),
+                _ => (String::new(), Progress::new()),
             };
             let place = if status.is_empty() {
                 "Getting ready...".to_string()
@@ -533,7 +535,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                 f,
                 &format!("Scanning {}", f.title()),
                 &place,
-                secs,
+                &meter,
                 can_stop(f),
             ) {
                 app.act();
@@ -546,9 +548,9 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             confirm(app, ui, f);
         }
         4 => {
-            let (status, secs) = match &app.plan_state(f).phase {
-                Phase::Cleaning(j) => (j.status(), j.elapsed_secs()),
-                _ => (String::new(), 0),
+            let (status, meter) = match &app.plan_state(f).phase {
+                Phase::Cleaning(j) => (j.status(), j.meter.clone()),
+                _ => (String::new(), Progress::new()),
             };
             kit::progress(
                 ui,
@@ -556,7 +558,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                 f,
                 "Moving the selected items...",
                 &status,
-                secs,
+                &meter,
                 false,
             );
         }

@@ -642,8 +642,21 @@ pub fn available_count(env: &Env, _settings: &crate::settings::Settings) -> anyh
 
 /// Check every app and macOS.
 pub fn check_all(env: &Env, apps: &[AppInfo], progress: &dyn Fn(&str)) -> UpdatesReport {
+    check_all_metered(env, apps, progress, &crate::progress::Progress::new())
+}
+
+/// [`check_all`] reporting into `meter`: apps checked of the apps listed, then macOS (one
+/// more step).
+pub fn check_all_metered(
+    env: &Env,
+    apps: &[AppInfo],
+    progress: &dyn Fn(&str),
+    meter: &crate::progress::Progress,
+) -> UpdatesReport {
     let mut r = UpdatesReport::default();
-    for a in apps {
+    let steps = apps.len() as u64 + 1;
+    for (k, a) in apps.iter().enumerate() {
+        meter.set(k as u64, steps);
         progress(&a.name);
         match check_app(env, a) {
             Some(u) => r.apps.push(u),
@@ -659,6 +672,7 @@ pub fn check_all(env: &Env, apps: &[AppInfo], progress: &dyn Fn(&str)) -> Update
             .cmp(&a.available)
             .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
+    meter.set(steps - 1, steps);
     progress("macOS");
     match env.sys.run("/usr/sbin/softwareupdate", &["--list"]) {
         Ok(o) if o.ok() => r.macos = parse_softwareupdate(&o.stdout),

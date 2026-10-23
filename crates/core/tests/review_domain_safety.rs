@@ -38,6 +38,7 @@ fn ctx_scan(
         settings,
         cancel: &cancel,
         progress: &|_| {},
+        meter: &cleancraft_core::progress::Progress::new(),
     };
     f(&ctx).expect("scan")
 }

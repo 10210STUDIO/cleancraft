@@ -83,8 +83,15 @@ fn start_scan(app: &mut CleanApp) {
     let cancel = Arc::new(AtomicBool::new(false));
     app.sweep.cancel = cancel.clone();
     app.sweep.scan_at = 0;
-    let job = Job::start(app.sync, move |status| {
-        sweep::scan(&env, &settings, &src, &cancel, status)
+    let job = Job::start_metered(app.sync, move |meter| {
+        sweep::scan_metered(
+            &env,
+            &settings,
+            &src,
+            &cancel,
+            &|s| meter.set_step(s),
+            meter,
+        )
     });
     app.sweep.phase = Phase::Scanning(job);
     crate::sound::play(&app.env, crate::sound::Cue::ScanStart);
@@ -111,8 +118,15 @@ fn start_run(app: &mut CleanApp) {
     let env = app.env.clone();
     let settings = app.settings.clone();
     let src = sources(app);
-    let job = Job::start(app.sync, move |status| {
-        sweep::run(&env, &settings, &src, &confirmed, status)
+    let job = Job::start_metered(app.sync, move |meter| {
+        sweep::run_metered(
+            &env,
+            &settings,
+            &src,
+            &confirmed,
+            &|s| meter.set_step(s),
+            meter,
+        )
     });
     app.sweep.undone.clear();
     app.sweep.phase = Phase::Running(job);
@@ -253,7 +267,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         Phase::Idle => idle(app, ui),
         Phase::Scanning(j) => {
             let s = j.status();
-            let secs = j.elapsed_secs();
+            let meter = j.meter.clone();
             // Which module the scan is in: its title is the status when it starts (a module
             // then reports its own places, which leave the index where it is).
             let skip = app.settings.sweep_skip.clone();
@@ -266,6 +280,14 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                 && i > app.sweep.scan_at
             {
                 app.sweep.scan_at = i;
+            }
+            // Each module fills an equal slice of the bar, so the share says which modules
+            // are done too.
+            if let Some(f) = meter.fraction() {
+                let i = (f * ids.len() as f32).floor() as usize;
+                if i > app.sweep.scan_at {
+                    app.sweep.scan_at = i;
+                }
             }
             let at = app.sweep.scan_at.min(ids.len().saturating_sub(1));
             let place = if s.is_empty() {
@@ -287,16 +309,14 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                     std::cmp::Ordering::Greater => kit::ChipState::Waiting,
                 })
                 .collect();
-            let share = at as f32 / ids.len().max(1) as f32;
             if kit::progress_with(
                 ui,
                 &t,
                 FeatureId::SmartCare,
                 "Sweeping your Mac",
                 &place,
-                secs,
+                &meter,
                 true,
-                share,
                 |ui| {
                     ui.add_space(space::M);
                     kit::chips_with_state(ui, &t, &looks, &states, 760.0);
@@ -315,14 +335,13 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         }
         Phase::Running(j) => {
             let s = j.status();
-            let secs = j.elapsed_secs();
             kit::progress(
                 ui,
                 &t,
                 FeatureId::SmartCare,
                 "Cleaning",
-                &format!("Cleaning {s}"),
-                secs,
+                &s,
+                &j.meter.clone(),
                 false,
             );
         }

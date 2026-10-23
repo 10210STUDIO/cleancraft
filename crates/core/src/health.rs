@@ -585,10 +585,21 @@ pub struct Facts {
 /// Read every fact (commands through `env.sys`; slow parts: one `mdls` per app, one
 /// `codesign` per startup item, `top` for a second). Run it off the UI thread.
 pub fn gather(env: &Env, now: i64, progress: &dyn Fn(&str)) -> Facts {
+    gather_metered(env, now, progress, &crate::progress::Progress::new())
+}
+
+/// [`gather`] reporting into `meter`: its three steps (disk and memory, apps, startup items).
+pub fn gather_metered(
+    env: &Env,
+    now: i64,
+    progress: &dyn Fn(&str),
+    meter: &crate::progress::Progress,
+) -> Facts {
     let mut f = Facts {
         now,
         ..Default::default()
     };
+    meter.set(0, 3);
     progress("Reading disk, memory and battery");
     let snap = crate::monitor::Sampler::new().sample(env, now as f64);
     f.disk_total = snap.storage.total;
@@ -616,11 +627,13 @@ pub fn gather(env: &Env, now: i64, progress: &dyn Fn(&str)) -> Facts {
     f.threats = notes.get(&FeatureId::Malware).cloned();
     f.updates = notes.get(&FeatureId::Updater).cloned();
 
+    meter.set(1, 3);
     progress("Reading when apps were last opened");
     let (unused, dated) = unused_apps(env, now);
     f.unused_apps = Some(unused);
     f.apps_dated = dated;
 
+    meter.set(2, 3);
     progress("Reading startup items");
     let uid = crate::tasks::current_uid(env).ok();
     let (items, _) = crate::startup::list_launch_items(env, uid);

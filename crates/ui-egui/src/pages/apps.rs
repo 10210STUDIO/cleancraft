@@ -383,9 +383,11 @@ pub fn start_load(app: &mut CleanApp) {
     let env = app.env.clone();
     let settings = app.settings.clone();
     app.apps.watch.prime(&app.env);
-    let job = Job::start(app.sync, move |status| {
-        let list = apps::inventory(&env, true, &|n| status(n));
-        status("leftovers and extensions");
+    let job = Job::start_metered(app.sync, move |meter| {
+        // Reading the apps is most of the work; the leftovers scan is the rest.
+        let list =
+            apps::inventory_metered(&env, true, &|n| meter.set_step(n), &meter.range(0.0, 0.8));
+        meter.set_step("leftovers and extensions");
         let extras =
             features::scan(&env, &settings, FeatureId::Uninstaller).map_err(|e| format!("{e:#}"));
         (list, extras)
@@ -395,9 +397,9 @@ pub fn start_load(app: &mut CleanApp) {
 
 fn start_updates(app: &mut CleanApp) {
     let env = app.env.clone();
-    let job = Job::start(app.sync, move |status| {
+    let job = Job::start_metered(app.sync, move |meter| {
         let list = apps::inventory(&env, false, &|_| {});
-        updater::check_all(&env, &list, &|n| status(n))
+        updater::check_all_metered(&env, &list, &|n| meter.set_step(n), meter)
     });
     app.apps.upd_job = Some(job);
     crate::sound::play(&app.env, crate::sound::Cue::ScanStart);
@@ -573,8 +575,11 @@ fn start_action(app: &mut CleanApp, action: Action) {
     let batch_apps = (action == Action::UninstallApps)
         .then(|| app.apps.batch.as_ref().map(|b| b.apps.clone()))
         .flatten();
-    let job = Job::start(app.sync, move |status| {
-        let mut progress = |n: usize, total: usize| status(&format!("{n} of {total}"));
+    let job = Job::start_metered(app.sync, move |meter| {
+        let mut progress = |n: usize, total: usize| {
+            meter.set(n as u64, total as u64);
+            meter.set_step(&kit::moving_text(n, total));
+        };
         match &batch_apps {
             Some(apps) => {
                 uninstaller::run_batch(&env, &settings, &plan, apps, &digest, &mut progress)
@@ -1164,14 +1169,13 @@ fn remover_page(app: &mut CleanApp, ui: &mut Ui) {
     match &app.apps.phase {
         Phase::Working(job, _) => {
             let s = job.status();
-            let secs = job.elapsed_secs();
             kit::progress(
                 ui,
                 &t,
                 FeatureId::Uninstaller,
                 "Moving to the Trash...",
                 &s,
-                secs,
+                &job.meter.clone(),
                 false,
             );
             return;
@@ -1189,14 +1193,13 @@ fn remover_page(app: &mut CleanApp, ui: &mut Ui) {
     if app.apps.list.is_none() {
         if let Some(job) = &app.apps.load {
             let s = job.status();
-            let secs = job.elapsed_secs();
             kit::progress(
                 ui,
                 &t,
                 FeatureId::Uninstaller,
                 "Looking at your apps",
                 &s,
-                secs,
+                &job.meter.clone(),
                 false,
             );
         } else if kit::primary(ui, &t, "Scan Again") {
@@ -3104,9 +3107,9 @@ fn running_text(app: &CleanApp, name: &str) -> (String, String) {
             format!("Waiting for {name} to quit..."),
             match job.elapsed_secs() {
                 0..=2 => format!("{name} may ask you to save your work first."),
-                s => format!(
-                    "{s} seconds. If {name} shows a dialog, answer it, or force it to quit."
-                ),
+                _ => {
+                    format!("Still open. If {name} shows a dialog, answer it, or force it to quit.")
+                }
             },
         ),
         Quit::StillOpen(msg) => (format!("{name} did not quit"), msg.clone()),
@@ -4539,14 +4542,18 @@ fn updates_page(app: &mut CleanApp, ui: &mut Ui) {
     let t = app.t;
     if let Some(job) = &app.apps.upd_job {
         let s = job.status();
-        let secs = job.elapsed_secs();
+        let step = if s.is_empty() {
+            String::new()
+        } else {
+            format!("Checking {s}...")
+        };
         kit::progress(
             ui,
             &t,
             FeatureId::Updater,
             "Checking for updates",
-            &format!("Checking {s}..."),
-            secs,
+            &step,
+            &job.meter.clone(),
             false,
         );
         return;
