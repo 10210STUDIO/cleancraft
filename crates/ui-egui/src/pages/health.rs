@@ -77,10 +77,10 @@ pub fn refresh(app: &mut CleanApp) {
         return;
     }
     let env = app.env.clone();
-    app.health.job = Some(Job::start(app.sync, move |progress| {
+    app.health.job = Some(Job::start_metered(app.sync, move |meter| {
         let now = chrono::Utc::now().timestamp();
         Read {
-            facts: health::gather(&env, now, progress),
+            facts: health::gather_metered(&env, now, &|s| meter.set_step(s), meter),
             history: space_history::load(&env).history,
             maps: health::map_summaries(&env),
         }
@@ -125,11 +125,11 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
         if app.health.job.is_none() {
             refresh(app);
         }
-        let status = app
+        let (status, meter) = app
             .health
             .job
             .as_ref()
-            .map(|j| j.status())
+            .map(|j| (j.status(), j.meter.clone()))
             .unwrap_or_default();
         kit::progress(
             ui,
@@ -137,7 +137,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
             cleancraft_core::FeatureId::Monitor,
             "Reading your Mac...",
             &status,
-            0,
+            &meter,
             false,
         );
         return;

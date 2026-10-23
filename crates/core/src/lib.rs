@@ -24,6 +24,7 @@ pub mod plan;
 pub mod plans;
 pub mod policy;
 pub mod proc_names;
+pub mod progress;
 pub mod route;
 pub mod schedule;
 pub mod settings;

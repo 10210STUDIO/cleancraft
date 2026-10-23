@@ -39,6 +39,7 @@ fn ctx_scan(m: &FakeMac, f: &dyn Feature) -> Plan {
         settings: &s,
         cancel: &cancel,
         progress: &|_| {},
+        meter: &cleancraft_core::progress::Progress::new(),
     };
     features::scan_with(f, &ctx).unwrap()
 }

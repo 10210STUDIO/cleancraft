@@ -539,9 +539,13 @@ pub fn walk_area(
 ) -> Walk {
     let env = ctx.env;
     let mut w = Walk::default();
-    let mut stack = vec![root.to_path_buf()];
+    // Depth 0 is `root`. Progress: folders right under `root` finished of the ones found
+    // there, each refined by its own sub-folders finished. The stack is depth first, so
+    // everything inside one top folder is done before the next top folder starts.
+    let mut stack = vec![(root.to_path_buf(), 0u8)];
     let mut n = 0u64;
-    while let Some(dir) = stack.pop() {
+    let mut top = Meter2::default();
+    while let Some((dir, depth)) = stack.pop() {
         if ctx.cancelled() {
             w.stopped = true;
             break;
@@ -550,6 +554,9 @@ pub fn walk_area(
         if n % 64 == 1 {
             (ctx.progress)(&env.display(&dir));
         }
+        top.enter(depth);
+        top.report(ctx);
+        let before = stack.len();
         let rd = match std::fs::read_dir(&dir) {
             Ok(rd) => rd,
             Err(_) => {
@@ -580,7 +587,7 @@ pub fn walk_area(
                         }
                     }
                 } else {
-                    stack.push(p);
+                    stack.push((p, depth.saturating_add(1)));
                 }
             } else if md.is_file() && md.len() >= min_len && ctx.allowed(allow, &p) {
                 w.found.push(Found {
@@ -591,9 +598,58 @@ pub fn walk_area(
                 });
             }
         }
+        top.found(depth, stack.len() - before);
     }
     w.found.sort_by(|a, b| a.path.cmp(&b.path));
     w
+}
+
+/// Two-level folder counting for [`walk_area`]'s progress: `a` of `a_total` top folders
+/// entered, `b` of `b_total` sub-folders entered in the current top folder.
+#[derive(Default)]
+struct Meter2 {
+    a: u64,
+    a_total: u64,
+    b: u64,
+    b_total: u64,
+}
+
+impl Meter2 {
+    /// A folder at `depth` is about to be read.
+    fn enter(&mut self, depth: u8) {
+        match depth {
+            1 => {
+                self.a += 1;
+                self.b = 0;
+                self.b_total = 0;
+            }
+            2 => self.b += 1,
+            _ => {}
+        }
+    }
+
+    /// The folder at `depth` held `subdirs` folders to walk.
+    fn found(&mut self, depth: u8, subdirs: usize) {
+        match depth {
+            0 => self.a_total = subdirs as u64,
+            1 => self.b_total = subdirs as u64,
+            _ => {}
+        }
+    }
+
+    fn report(&self, ctx: &ScanCtx<'_>) {
+        if self.a_total == 0 {
+            return;
+        }
+        // The current top folder counts as started, its finished share from its sub-folders.
+        let inner = if self.b_total == 0 {
+            0.0
+        } else {
+            self.b.saturating_sub(1) as f64 / self.b_total as f64
+        };
+        let done = self.a.saturating_sub(1) as f64 + inner;
+        ctx.meter.set_fraction(done / self.a_total as f64);
+    }
 }
 
 fn secs(t: SystemTime) -> i64 {
@@ -786,7 +842,14 @@ pub fn scan_location(ctx: &ScanCtx<'_>, loc: &Location) -> anyhow::Result<Plan> 
         return Ok(plan);
     }
     let min = s.large_min_bytes.min(OLD_MIN_BYTES);
-    let w = walk_area(ctx, &root, &allow, min, true);
+    // The walk is nearly all the work; reading last-used dates is the rest.
+    let w = walk_area(
+        &ctx.with_meter(&ctx.meter.range(0.0, 0.9)),
+        &root,
+        &allow,
+        min,
+        true,
+    );
     let candidates: Vec<PathBuf> = w.found.iter().map(|f| f.path.clone()).collect();
     let used = last_used_dates(env, &candidates);
     let now = SystemTime::now();

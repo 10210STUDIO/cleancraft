@@ -613,11 +613,14 @@ impl Feature for Privacy {
             seen: BTreeSet::new(),
         };
         let running = running_browsers(ctx.env);
-        for b in BROWSERS {
+        // Browsers one by one, then three more steps.
+        let steps = BROWSERS.len() as u64 + 3;
+        for (k, b) in BROWSERS.iter().enumerate() {
             if ctx.cancelled() {
                 s.plan.notes.push("Scan stopped before the end.".into());
                 return Ok(s.plan);
             }
+            ctx.meter.set(k as u64, steps);
             (ctx.progress)(b.name);
             let first = s.plan.items.len();
             match b.engine {
@@ -635,10 +638,13 @@ impl Feature for Privacy {
                 ));
             }
         }
+        ctx.meter.set(steps - 3, steps);
         (ctx.progress)("Recent items");
         s.recent_items();
+        ctx.meter.set(steps - 2, steps);
         (ctx.progress)("Wi-Fi networks");
         s.wifi();
+        ctx.meter.set(steps - 1, steps);
         (ctx.progress)("App permissions");
         s.permissions();
         Ok(s.plan)

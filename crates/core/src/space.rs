@@ -47,6 +47,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use crate::env::Env;
 use crate::fsutil::entry_size;
 use crate::policy;
+use crate::progress::Progress;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Node {
@@ -127,7 +128,9 @@ fn name_of(p: &Path) -> String {
 }
 
 impl Walker<'_> {
-    fn node(&mut self, p: &Path) -> Option<Node> {
+    /// Measure `p`. `slice` is its part of the progress bar: the first two levels split
+    /// their slice between their entries and fill each one as it is finished.
+    fn node(&mut self, p: &Path, slice: Option<&Progress>, depth: u8) -> Option<Node> {
         let md = std::fs::symlink_metadata(p).ok()?;
         let (dev, ino, nlink) = dev_ino(&md);
         let mut n = Node {
@@ -164,11 +167,22 @@ impl Walker<'_> {
                 Ok(rd) => {
                     let mut kids: Vec<PathBuf> = rd.flatten().map(|e| e.path()).collect();
                     kids.sort();
-                    for k in kids {
+                    let count = kids.len();
+                    if let Some(s) = slice {
+                        s.set(0, count as u64);
+                    }
+                    for (i, k) in kids.into_iter().enumerate() {
                         if self.opts.skip.contains(&k) {
                             continue;
                         }
-                        if let Some(c) = self.node(&k) {
+                        let part = slice.filter(|_| depth < 2).map(|s| s.span(i, count));
+                        let c = self.node(&k, part.as_ref(), depth.saturating_add(1));
+                        if let Some(s) = &part
+                            && !self.cancel.load(Ordering::Relaxed)
+                        {
+                            s.complete();
+                        }
+                        if let Some(c) = c {
                             n.size += c.size;
                             n.files += c.files;
                             n.holds_library |= c.holds_library
@@ -222,7 +236,16 @@ pub fn build_opts(
     cancel: &AtomicBool,
     progress: &(dyn Fn(u64, &Path) + Sync),
 ) -> Tree {
-    build_with(root, cancel, progress, &Links::new(), None, opts, None)
+    build_with(
+        root,
+        cancel,
+        progress,
+        &Links::new(),
+        None,
+        opts,
+        None,
+        None,
+    )
 }
 
 /// Measure a Disk Map location (see the module notes for the startup disk).
@@ -232,6 +255,18 @@ pub fn build_location(
     cancel: &AtomicBool,
     progress: &(dyn Fn(u64, &Path) + Sync),
 ) -> Tree {
+    build_location_metered(env, loc, cancel, progress, &Progress::new())
+}
+
+/// [`build_location`] reporting into `meter`: entries of the location finished of the ones
+/// found, each refined by its own entries.
+pub fn build_location_metered(
+    env: &Env,
+    loc: &MapLocation,
+    cancel: &AtomicBool,
+    progress: &(dyn Fn(u64, &Path) + Sync),
+    meter: &Progress,
+) -> Tree {
     build_with(
         &loc.root(env),
         cancel,
@@ -240,11 +275,13 @@ pub fn build_location(
         None,
         &loc.build_opts(env),
         Some(env),
+        Some(meter),
     )
 }
 
 /// [`build`] of a part of a tree whose other link paths are `known`; `dev` is the tree's
 /// device.
+#[allow(clippy::too_many_arguments)]
 fn build_with(
     root: &Path,
     cancel: &AtomicBool,
@@ -253,6 +290,7 @@ fn build_with(
     dev: Option<u64>,
     opts: &BuildOpts,
     env: Option<&Env>,
+    meter: Option<&Progress>,
 ) -> Tree {
     let dev = dev.or_else(|| std::fs::symlink_metadata(root).ok().map(|m| dev_ino(&m).0));
     let mut w = Walker {
@@ -267,7 +305,7 @@ fn build_with(
         cancel,
         progress,
     };
-    let node = w.node(root);
+    let node = w.node(root, meter, 0);
     Tree {
         root: node,
         unreadable: w.unreadable.len() as u32,
@@ -448,6 +486,7 @@ impl Tree {
                 &self.links,
                 dev,
                 &self.opts,
+                None,
                 None,
             )
         } else {

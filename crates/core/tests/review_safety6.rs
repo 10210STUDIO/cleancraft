@@ -817,6 +817,7 @@ fn f12_duplicate_downloads_never_lose_the_last_copy() {
         settings: &s,
         cancel: &cancel,
         progress: &|_| {},
+        meter: &cleancraft_core::progress::Progress::new(),
     };
     let p = DownloadDuplicates.scan(&ctx).expect("scan");
     let sel: Vec<_> = p.selected().map(|i| i.path.clone()).collect();

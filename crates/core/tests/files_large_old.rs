@@ -28,6 +28,7 @@ fn scan(mac: &FakeMac, loc: &Location) -> Plan {
         settings: &s,
         cancel: &cancel,
         progress: &|_| {},
+        meter: &cleancraft_core::progress::Progress::new(),
     };
     large_old::scan_location(&ctx, loc).unwrap()
 }

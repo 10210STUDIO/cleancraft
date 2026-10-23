@@ -210,11 +210,14 @@ impl Feature for SimilarImages {
         );
         let mut pics = Vec::new();
         let mut stopped = false;
-        for root in &allow {
+        // Walking the two folders is half the work, looking at the pictures the other half.
+        for (k, root) in allow.iter().enumerate() {
             if !root.is_dir() {
                 continue;
             }
-            let w = walk_area(ctx, root, &allow, MIN_LEN + 1, false);
+            let part = ctx.meter.range(0.0, 0.5).span(k, allow.len());
+            let w = walk_area(&ctx.with_meter(&part), root, &allow, MIN_LEN + 1, false);
+            part.complete();
             stopped |= w.stopped;
             for f in w.found {
                 if IMAGE_EXTS.contains(&ext(&f.path).as_str()) {
@@ -232,6 +235,7 @@ impl Feature for SimilarImages {
             }
             if n % 16 == 0 {
                 (ctx.progress)(&env.display(&f.path));
+                ctx.meter.range(0.5, 1.0).set(n as u64, pics.len() as u64);
             }
             match decode(env, &f.path) {
                 Some(img) => {

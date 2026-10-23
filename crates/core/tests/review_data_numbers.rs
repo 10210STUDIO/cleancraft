@@ -353,6 +353,7 @@ fn last_opened_uses_calendar_days() {
         settings: &s,
         cancel: &never,
         progress: &|_| {},
+        meter: &cleancraft_core::progress::Progress::new(),
     };
     let plan = scan_location(&ctx, &Location::Downloads).unwrap();
     let it = plan
@@ -386,6 +387,7 @@ fn old_files_need_the_full_number_of_days() {
         settings: &s,
         cancel: &never,
         progress: &|_| {},
+        meter: &cleancraft_core::progress::Progress::new(),
     };
     let plan = scan_location(&ctx, &Location::Downloads).unwrap();
     let o = plan

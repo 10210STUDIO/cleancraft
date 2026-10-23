@@ -11,7 +11,7 @@ use cleancraft_core::{Env, FeatureId};
 use egui::{RichText, Ui};
 
 use crate::app::CleanApp;
-use crate::jobs::Job;
+use crate::jobs::{Job, Progress};
 use crate::kit;
 use crate::theme::{Weight, font, size};
 
@@ -40,16 +40,21 @@ impl State {
     }
 }
 
-fn check_all(env: &Env) -> BTreeMap<String, Ready> {
+fn check_all(env: &Env, meter: &Progress) -> BTreeMap<String, Ready> {
     TASKS
         .iter()
-        .map(|t| (t.id.to_string(), tasks::prepare(env, t.id)))
+        .enumerate()
+        .map(|(k, t)| {
+            meter.set(k as u64, TASKS.len() as u64);
+            meter.set_step(t.title);
+            (t.id.to_string(), tasks::prepare(env, t.id))
+        })
         .collect()
 }
 
 fn start_loading(app: &mut CleanApp) {
     let env = app.env.clone();
-    app.tasks.loading = Some(Job::start(app.sync, move |_| check_all(&env)));
+    app.tasks.loading = Some(Job::start_metered(app.sync, move |m| check_all(&env, m)));
     app.tasks.last = tasks::last_runs(&app.env);
 }
 
@@ -120,18 +125,31 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
     }
     if let Some(job) = &app.tasks.running {
         let status = job.status();
-        let secs = job.elapsed_secs();
-        kit::progress(ui, &t, f, &format!("Running {status}"), "", secs, false);
+        kit::progress(
+            ui,
+            &t,
+            f,
+            "Running the tasks",
+            &status,
+            &job.meter.clone(),
+            false,
+        );
         return;
     }
     if !app.tasks.loaded {
+        let meter = app
+            .tasks
+            .loading
+            .as_ref()
+            .map(|j| j.meter.clone())
+            .unwrap_or_default();
         kit::progress(
             ui,
             &t,
             f,
             "Checking which tasks can run on this Mac...",
             "",
-            0,
+            &meter,
             false,
         );
         return;
@@ -509,10 +527,12 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
             app.tasks.results.remove(&p.id);
         }
         let env = app.env.clone();
-        app.tasks.running = Some(Job::start(app.sync, move |status| {
+        app.tasks.running = Some(Job::start_metered(app.sync, move |meter| {
             ok.iter()
-                .map(|p| {
-                    status(tasks::info(&p.id).map(|i| i.title).unwrap_or(""));
+                .enumerate()
+                .map(|(k, p)| {
+                    meter.set(k as u64, ok.len() as u64);
+                    meter.set_step(tasks::info(&p.id).map(|i| i.title).unwrap_or(""));
                     tasks::run(&env, p)
                 })
                 .collect()

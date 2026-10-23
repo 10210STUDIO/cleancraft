@@ -2,69 +2,76 @@
 //! polls each frame. Tests set `sync` so a click finishes its work before the next frame.
 
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
-use std::sync::{Arc, Mutex};
 use std::time::Instant;
+
+pub use cleancraft_core::progress::Progress;
 
 pub struct Job<T> {
     rx: Option<Receiver<T>>,
     done: Option<T>,
-    /// Last progress line reported by the work.
-    pub status: Arc<Mutex<String>>,
-    /// When the work started (for the elapsed time on progress screens).
+    /// How far the work is (the progress bar) and its last step line. Work started with
+    /// [`Job::start`] only reports steps (the bar stays a moving stripe); work started with
+    /// [`Job::start_metered`] reports real units. Reaches 100% when the work returns.
+    pub meter: Progress,
+    /// When the work started (timeouts such as "the app has not quit yet").
     pub started: Instant,
     /// Keeps a `waiting` job's channel open.
     _hold: Option<Sender<T>>,
 }
 
 impl<T: Send + 'static> Job<T> {
-    /// Start `work`. With `sync` it runs right here.
+    /// Start `work`, which reports its step lines. With `sync` it runs right here.
     pub fn start(
         sync: bool,
         work: impl FnOnce(&(dyn Fn(&str) + Sync)) -> T + Send + 'static,
     ) -> Job<T> {
-        let status = Arc::new(Mutex::new(String::new()));
+        Self::start_metered(sync, move |m: &Progress| {
+            let m2 = m.clone();
+            work(&move |s: &str| m2.set_step(s))
+        })
+    }
+
+    /// Start `work`, which reports into the job's [`Progress`] (units done and step lines).
+    pub fn start_metered(sync: bool, work: impl FnOnce(&Progress) -> T + Send + 'static) -> Job<T> {
+        let meter = Progress::new();
         if sync {
-            let st = status.clone();
-            let v = work(&move |s: &str| {
-                if let Ok(mut g) = st.lock() {
-                    *g = s.to_string();
-                }
-            });
+            let v = work(&meter);
+            meter.finish();
             return Job {
                 rx: None,
                 done: Some(v),
-                status,
+                meter,
                 started: Instant::now(),
                 _hold: None,
             };
         }
         let (tx, rx) = channel();
-        let st = status.clone();
+        let m = meter.clone();
         std::thread::spawn(move || {
-            let v = work(&move |s: &str| {
-                if let Ok(mut g) = st.lock() {
-                    *g = s.to_string();
-                }
-            });
+            let v = work(&m);
+            m.finish();
             let _ = tx.send(v);
         });
         Job {
             rx: Some(rx),
             done: None,
-            status,
+            meter,
             started: Instant::now(),
             _hold: None,
         }
     }
 
     /// Work that never finishes, showing `status`: for screenshots of progress screens and
-    /// for tests of the Stop button.
+    /// for tests of the Stop button. The bar is a moving stripe until a test sets a share on
+    /// [`Job::meter`].
     pub fn waiting(status: &str) -> Job<T> {
         let (tx, rx) = channel();
+        let meter = Progress::new();
+        meter.set_step(status);
         Job {
             rx: Some(rx),
             done: None,
-            status: Arc::new(Mutex::new(status.to_string())),
+            meter,
             started: Instant::now(),
             _hold: Some(tx),
         }
@@ -99,7 +106,8 @@ impl<T: Send + 'static> Job<T> {
         self.rx.is_none() && self.done.is_none()
     }
 
+    /// The last step line reported by the work.
     pub fn status(&self) -> String {
-        self.status.lock().map(|g| g.clone()).unwrap_or_default()
+        self.meter.step()
     }
 }

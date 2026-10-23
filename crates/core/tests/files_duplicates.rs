@@ -44,6 +44,7 @@ fn scan(mac: &FakeMac) -> Plan {
         settings: &s,
         cancel: &cancel,
         progress: &|_| {},
+        meter: &cleancraft_core::progress::Progress::new(),
     };
     duplicates::scan_location(&ctx, &Location::Home).unwrap()
 }

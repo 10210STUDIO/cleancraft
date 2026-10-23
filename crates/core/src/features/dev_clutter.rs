@@ -627,11 +627,16 @@ impl Feature for DevClutter {
                     .join(", ")
             ));
         }
-        for root in &roots {
+        // Code folders done of the code folders found, then the Xcode simulators (one more
+        // step).
+        let steps = roots.len() as u64 + 1;
+        ctx.meter.set(0, steps);
+        for (k, root) in roots.iter().enumerate() {
             if ctx.cancelled() {
                 s.plan.notes.push("Scan stopped before the end.".into());
                 break;
             }
+            ctx.meter.set(k as u64, steps);
             (ctx.progress)(&ctx.env.display(root));
             // A code folder inside a protected place (Documents, Desktop): its projects are
             // listed, locked with the reason.
@@ -640,6 +645,7 @@ impl Feature for DevClutter {
         }
         s.git_pass();
         if !ctx.cancelled() {
+            ctx.meter.set(steps - 1, steps);
             (ctx.progress)("Xcode simulators");
             s.simulators();
         }
