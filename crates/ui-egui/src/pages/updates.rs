@@ -314,20 +314,18 @@ pub fn card(app: &mut CleanApp, ui: &mut Ui) -> bool {
         let last = app.updates.st(&app.env).last_check;
         ui.horizontal(|ui| {
             label_cell(ui, &t, "Version");
-            kit::heading(
-                ui,
-                &format!("CleanCraft {current}"),
-                font(size::CALLOUT, Weight::Medium),
-                t.text,
+            ui.label(
+                RichText::new(format!("CleanCraft {current}"))
+                    .font(font(size::CALLOUT, Weight::Medium))
+                    .color(t.text),
             );
         });
         ui.horizontal(|ui| {
             label_cell(ui, &t, "Last checked");
-            kit::heading(
-                ui,
-                &self_update::last_check_text(last),
-                font(size::CALLOUT, Weight::Medium),
-                t.text,
+            ui.label(
+                RichText::new(self_update::last_check_text(last))
+                    .font(font(size::CALLOUT, Weight::Medium))
+                    .color(t.text),
             );
         });
         let available = app.updates.available(&app.env);
