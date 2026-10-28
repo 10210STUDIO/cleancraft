@@ -97,45 +97,59 @@ their side (a squircle-like tile), app initial tiles 26%.
 | 0 | backdrop, sidebar | none |
 | 1 | glass cards, tiles | `card_shadow`: y 6, blur 22, black 27% |
 | 2 | bottom action bar, dialogs, popups | `float_shadow`: y 10, blur 36, spread 2, black 47% |
-| Modal scrim | behind dialogs | #04060A at 67% |
+| Modal scrim | behind dialogs | #02060E at 67% |
 
-Glass cards are `glass` (#2A3140 at 59%) over the section backdrop, with a 1 pt hairline
+Glass cards are `glass` (#1B2C46 at 59%) over the section backdrop, with a 1 pt hairline
 (`glass_stroke`, white 8%) and a top edge highlight (`glass_edge`, white 13%).
 
 ## Colour roles and contrast
 
-Surfaces (as composited): `bg` #10131A, `sidebar` #0B0E14, glass card #1F2530, well
-(black 24% on glass), selected row (section colour 9% on glass), dialog #1A1F2A, bottom bar
-#1C222E.
+The palette is the "Deep Ocean" brand (docs/design/BRAND.md): navy surfaces, electric blue
+#2F7BFF as the brand colour, cyan #39D5FF as the highlight and the primary button, coral
+#FF7A59 for danger. Brand constants live in `theme.rs` (`BRAND_BLUE`, `BRAND_DEEP`,
+`BRAND_CYAN`, `BRAND_CYAN_LIGHT`, `WORDMARK_BLUE`, `INK`, `DANGER_A`, `DANGER_B`).
+
+Surfaces (as composited): `bg` #0A1424, `sidebar` #081020 (a vertical wash from #0C1629 at
+the top), glass card #142238 (`glass` #1B2C46 at 59% over `bg`; `card` is the same colour
+opaque), card hover #1B2C47 (`glass_hover` #233757 at 69%), well (black 24% on glass,
+`well` #070F1C), selected row (section colour 9% on glass), dialog #122036
+(`kit::DIALOG_FILL`, its well `kit::DIALOG_WELL` #0E1829), bottom bar #132138 at 92%, modal
+scrim #02060E at 67%.
 
 WCAG 2.1 contrast ratios, measured with `docs/design/contrast.py`:
 
-| Text | Colour | bg | sidebar | glass | well | selected row | dialog | bar |
-|---|---|---|---|---|---|---|---|---|
-| `text` | #F0F2F5 | 16.5 | 17.1 | 13.6 | 15.1 | 11.8 | 14.6 | 14.3 |
-| `text_dim` | #BEC6D0 | 10.8 | 11.2 | 8.9 | 9.9 | 7.7 | 9.6 | 9.4 |
-| `text_faint` | #939DAA | 6.8 | 7.0 | 5.6 | 6.2 | 4.9 | 6.0 | 5.9 |
-| `accent` | #2EC4A6 | 8.5 | 8.8 | 7.0 | 7.8 | 6.1 | 7.5 | 7.4 |
-| `danger` | #FF7A74 | 7.3 | 7.6 | 6.1 | 6.7 | 5.3 | 6.5 | 6.4 |
-| `warning` | #F2B13C | 9.9 | 10.2 | 8.2 | 9.0 | 7.1 | 8.7 | 8.6 |
-| `success` | #5AD68A | 10.1 | 10.5 | 8.4 | 9.3 | 7.3 | 9.0 | 8.8 |
-| Clean blue (section) | #4EA8FF | 7.4 | 7.7 | 6.1 | 6.8 | 5.3 | 6.6 | 6.4 |
+| Text | Colour | bg | sidebar | glass | glass hover | well | selected row | dialog | bar |
+|---|---|---|---|---|---|---|---|---|---|
+| `text` | #EDF2FA | 16.4 | 16.9 | 14.2 | 12.5 | 15.5 | 11.9 | 14.5 | 14.5 |
+| `text_dim` | #B5C1D3 | 10.1 | 10.4 | 8.8 | 7.7 | 9.6 | 7.3 | 9.0 | 9.0 |
+| `text_faint` | #9BA9BE | 7.7 | 8.0 | 6.7 | 5.9 | 7.3 | 5.6 | 6.9 | 6.9 |
+| `accent` (cyan) | #39D5FF | 10.7 | 11.0 | 9.2 | 8.1 | 10.1 | 7.7 | 9.4 | 9.4 |
+| `WORDMARK_BLUE` | #5FB8FF | 8.6 | 8.9 | 7.4 | 6.5 | 8.1 | 6.2 | 7.6 | 7.6 |
+| `danger` (coral) | #FF7A59 | 7.2 | 7.4 | 6.2 | 5.5 | 6.8 | 5.2 | 6.4 | 6.4 |
+| `warning` | #FFB547 | 10.5 | 10.8 | 9.1 | 8.0 | 9.9 | 7.6 | 9.3 | 9.3 |
+| `success` | #3DDC97 | 10.4 | 10.8 | 9.0 | 7.9 | 9.9 | 7.6 | 9.2 | 9.2 |
 
-Every text/background pair is at least 4.5:1 (AA for small text). v1's `text_faint`
-(#6E7883) was 3.0 to 4.3 and is gone.
+Every text/background pair is at least 4.5:1 (AA for small text). `BRAND_BLUE` #2F7BFF is
+4.1:1 on a card, so it is a fill and graphics colour only (the icon tile, the start of the
+progress bar), never text; text that wants blue uses `WORDMARK_BLUE`.
 
 Tags draw their text in the full role colour on a 16% tint of it; the tint lowers the
 background by under 1 point of contrast, so tag text stays above 5:1.
 
-Text on gradient fills (primary buttons, the round action, checkbox ticks) uses
-`theme::on_color`: dark ink #08161C on light section colours, white on deep ones.
+Text on colour fills uses `theme::on_color`: navy ink `INK` #061A2E on light fills, white on
+deep ones. The primary pill and the start screen's round action are the brand's call to
+action on every page: a cyan gradient (#6AE0FF to #39D5FF) with `on_accent` #04203A (9.5:1
+or more). The Danger pill is coral (#FF8A6B to #F2694E) with `INK` (5.8:1 or more). The
+progress bar and the progress ring run from brand blue to cyan on every page.
 
 Each section gradient is chosen so its label colour reaches 4.5:1 at both ends (Overview
-end #2690B4: ink 5.0; Neutral end #7A8AA6: ink 5.3; the others 5.5 to 11).
+end #3A84FF: ink 5.0; Neutral end #7A8AA6: ink 5.0; the others 5.8 to 11).
 
-Section colour pairs (start, end) give each sidebar section its own field: Overview mint,
-Clean glacier blue, Protect coral, Speed lime, Apps periwinkle, Files amber, System sky,
-Neutral slate (History and Settings).
+Section colour pairs (start, end) give each sidebar section its own field: Overview brand
+(cyan #39D5FF into blue #3A84FF), Clean aqua (#4CE0D2 into sea blue #2A9FD0), Protect brand
+coral (#FF7A59 into ember #E88A3A), Speed lime, Apps periwinkle, Files amber, System sky,
+Neutral slate (History and Settings). Section colours tint the backdrop, the section icons,
+the 3D heroes, checkboxes, chips and links; they are never the primary button.
 
 ## Hit targets and control heights (`theme::hit`)
 

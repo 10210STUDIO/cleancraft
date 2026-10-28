@@ -144,8 +144,11 @@ pub fn dialog_width(ctx: &egui::Context) -> f32 {
     (ctx.content_rect().width() - 160.0).clamp(420.0, 860.0)
 }
 
+/// A dialog's fill (navy, a step above the card).
+pub const DIALOG_FILL: Color32 = Color32::from_rgb(0x12, 0x20, 0x36);
+
 /// The colour of a well inside a dialog, for [`scroll_fade`].
-pub const DIALOG_WELL: Color32 = Color32::from_rgb(0x14, 0x18, 0x20);
+pub const DIALOG_WELL: Color32 = Color32::from_rgb(0x0E, 0x18, 0x29);
 
 /// Under a list in a dialog that scrolls: the list fades at its cut edge and one line says
 /// how many items it holds, so nobody takes the visible rows for all of them.
@@ -368,15 +371,16 @@ pub fn pill(ui: &mut Ui, t: &Tokens, label: &str, kind: Kind, icon: Option<Icon>
                     &p,
                     r.center(),
                     r.width() * 0.62,
-                    t.sec_a.gamma_multiply(0.22 * hov),
+                    t.accent.gamma_multiply(0.22 * hov),
                     0.45,
                 );
             }
-            let a = icons::lerp(t.sec_a, Color32::WHITE, 0.12 * hov);
-            let b = icons::lerp(t.sec_b, Color32::WHITE, 0.12 * hov);
+            // The brand's call to action on every page: cyan with navy ink (BRAND.md).
+            let a = icons::lerp(theme::BRAND_CYAN_LIGHT, Color32::WHITE, 0.12 * hov);
+            let b = icons::lerp(t.accent, Color32::WHITE, 0.12 * hov);
             icons::gradient_tile(&p, r, round, a, b);
             top_sheen(&p, r, round);
-            t.on_section()
+            t.on_accent
         }
         Kind::Danger => {
             let a = icons::lerp(theme::DANGER_A, Color32::WHITE, 0.1 * hov);
@@ -495,7 +499,7 @@ pub fn well(t: &Tokens) -> Frame {
 /// The floating bar at the bottom of a results page.
 pub fn bar_frame(t: &Tokens) -> Frame {
     Frame::new()
-        .fill(Color32::from_rgba_unmultiplied(0x1C, 0x22, 0x2E, 235))
+        .fill(Color32::from_rgba_unmultiplied(0x13, 0x21, 0x38, 235))
         .stroke(Stroke::new(1.0, t.glass_edge))
         .corner_radius(CornerRadius::same(radius::XL))
         .inner_margin(Margin::symmetric(20, 10))
@@ -505,7 +509,7 @@ pub fn bar_frame(t: &Tokens) -> Frame {
 /// A dialog's frame.
 pub fn dialog_frame(t: &Tokens) -> Frame {
     Frame::new()
-        .fill(Color32::from_rgb(0x1A, 0x1F, 0x2A))
+        .fill(DIALOG_FILL)
         .stroke(Stroke::new(1.0, t.glass_edge))
         .corner_radius(CornerRadius::same(radius::XL))
         .inner_margin(Margin::same(space::XL as i8))
@@ -1666,7 +1670,7 @@ pub fn round_action(ui: &mut Ui, t: &Tokens, label: &str, d: f32) -> Response {
             p.rect_stroke(
                 r.expand(grow),
                 corner + grow,
-                Stroke::new(2.0, t.sec_a.gamma_multiply(a)),
+                Stroke::new(2.0, t.accent.gamma_multiply(a)),
                 egui::StrokeKind::Middle,
             );
         }
@@ -1675,7 +1679,7 @@ pub fn round_action(ui: &mut Ui, t: &Tokens, label: &str, d: f32) -> Response {
         p,
         c,
         r.width().max(r.height()) * 0.85,
-        t.sec_a.gamma_multiply(0.26 + 0.1 * hov),
+        t.accent.gamma_multiply(0.26 + 0.1 * hov),
         r.height() / r.width().max(r.height()),
     );
     p.rect_filled(
@@ -1683,8 +1687,8 @@ pub fn round_action(ui: &mut Ui, t: &Tokens, label: &str, d: f32) -> Response {
         corner,
         Color32::from_black_alpha(80),
     );
-    let a = icons::lerp(t.sec_a, Color32::WHITE, 0.10 * hov);
-    let b = icons::lerp(t.sec_b, Color32::WHITE, 0.10 * hov);
+    let a = icons::lerp(theme::BRAND_CYAN_LIGHT, Color32::WHITE, 0.10 * hov);
+    let b = icons::lerp(t.accent, Color32::WHITE, 0.10 * hov);
     if round {
         icons::gradient_disc(p, c, r.width() / 2.0, a, b);
         icons::glow(
@@ -1715,7 +1719,7 @@ pub fn round_action(ui: &mut Ui, t: &Tokens, label: &str, d: f32) -> Response {
         Align2::CENTER_CENTER,
         label,
         font(size::TITLE2, Weight::Bold),
-        t.on_section(),
+        t.on_accent,
     );
     resp
 }
@@ -1774,10 +1778,11 @@ pub fn progress_bar(ui: &mut Ui, t: &Tokens, meter: &Progress, width: f32) -> Re
                     &p,
                     pos2(fr.right() - round, fr.center().y),
                     h * 1.6,
-                    t.sec_a.gamma_multiply(0.35),
+                    t.accent.gamma_multiply(0.35),
                     0.6,
                 );
-                icons::gradient_tile(&p, fr, round, t.sec_b, t.sec_a);
+                // Brand blue into cyan on every page (BRAND.md).
+                icons::gradient_tile(&p, fr, round, theme::BRAND_BLUE, t.accent);
                 // A gentle sheen sliding over the filled part while the work goes on.
                 if !meter.is_finished() {
                     let ph = motion::looped(time, 2.4);
@@ -1813,8 +1818,8 @@ pub fn progress_bar(ui: &mut Ui, t: &Tokens, meter: &Progress, width: f32) -> Re
                     &p,
                     band,
                     round,
-                    t.sec_b.gamma_multiply(0.8),
-                    t.sec_a.gamma_multiply(0.8),
+                    theme::BRAND_BLUE.gamma_multiply(0.8),
+                    t.accent.gamma_multiply(0.8),
                 );
             }
         }
@@ -1917,7 +1922,7 @@ pub fn progress_with(
 pub fn progress_ring(p: &egui::Painter, c: Pos2, d: f32, t: &Tokens, time: f64) {
     let r = d / 2.0;
     let w = (d * 0.055).max(5.0);
-    icons::glow(p, c, r * 1.35, t.sec_a.gamma_multiply(0.20), 1.0);
+    icons::glow(p, c, r * 1.35, t.accent.gamma_multiply(0.20), 1.0);
     p.circle_filled(c, r - w * 1.4, Color32::from_black_alpha(70));
     p.circle_stroke(c, r, Stroke::new(w, Color32::from_white_alpha(16)));
     let head = motion::looped(time, motion::SPIN) * 360.0;
@@ -1929,7 +1934,7 @@ pub fn progress_ring(p: &egui::Painter, c: Pos2, d: f32, t: &Tokens, time: f64) 
         let f1 = (i + 1) as f32 / seg as f32;
         let a0 = (head - len + len * f0).to_radians();
         let a1 = (head - len + len * f1).to_radians();
-        let col = icons::lerp(t.sec_b, t.sec_a, f1).gamma_multiply(0.25 + 0.75 * f1);
+        let col = icons::lerp(theme::BRAND_BLUE, t.accent, f1).gamma_multiply(0.25 + 0.75 * f1);
         p.line_segment(
             [
                 c + vec2(a0.cos(), a0.sin()) * r,
@@ -1940,8 +1945,8 @@ pub fn progress_ring(p: &egui::Painter, c: Pos2, d: f32, t: &Tokens, time: f64) 
     }
     let ah = head.to_radians();
     let tip = c + vec2(ah.cos(), ah.sin()) * r;
-    icons::glow(p, tip, w * 2.6, t.sec_a.gamma_multiply(0.7), 1.0);
-    p.circle_filled(tip, w / 2.0, icons::lerp(t.sec_a, Color32::WHITE, 0.3));
+    icons::glow(p, tip, w * 2.6, t.accent.gamma_multiply(0.7), 1.0);
+    p.circle_filled(tip, w / 2.0, icons::lerp(t.accent, Color32::WHITE, 0.3));
 }
 
 /// The Done picture: a disc that grows in and a check that draws itself. `started` is the
@@ -1974,8 +1979,8 @@ fn done_check_in(ui: &mut Ui, t: &Tokens, r: Rect, started: f64) {
         p,
         c,
         rad,
-        Color32::from_rgb(0x5E, 0xE0, 0x9A),
-        Color32::from_rgb(0x1E, 0xA8, 0x84),
+        Color32::from_rgb(0x5E, 0xE0, 0xA8),
+        Color32::from_rgb(0x1F, 0xA8, 0x77),
     );
     p.circle_stroke(c, rad, Stroke::new(1.5, Color32::from_white_alpha(80)));
     // The check, drawn along its length.
@@ -2100,7 +2105,7 @@ pub fn sparkline(p: &egui::Painter, r: Rect, values: &[f64], slots: usize, color
             Align2::CENTER_CENTER,
             "Collecting",
             font(size::FOOTNOTE, Weight::Medium),
-            Color32::from_rgb(0x93, 0x9D, 0xAA),
+            Color32::from_rgb(0x9B, 0xA9, 0xBE),
         );
         return;
     }
@@ -2335,9 +2340,9 @@ impl Dialog {
             .area(area)
             .frame(Frame::NONE)
             .backdrop_color(Color32::from_rgba_unmultiplied(
-                4,
+                2,
                 6,
-                10,
+                14,
                 (170.0 * k).round() as u8,
             ))
             .show(ctx, |ui| {
