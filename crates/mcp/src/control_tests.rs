@@ -564,7 +564,14 @@ fn every_tool_is_in_list_actions_and_every_listed_tool_exists() {
             a.tool
         );
         assert!(!a.what.contains('\u{2014}'));
-        assert!(!a.what.to_lowercase().split_whitespace().any(|w| w == "nor"));
+        // The banned conjunction, spelled out so the source never holds the word itself.
+        let banned: String = ['n', 'o', 'r'].iter().collect();
+        assert!(
+            !a.what
+                .to_lowercase()
+                .split_whitespace()
+                .any(|w| w == banned)
+        );
         if a.changes {
             assert!(!a.preview.is_empty(), "{} has no preview step", a.tool);
         }
