@@ -998,8 +998,9 @@ fn plist_label(path: &Path) -> Option<String> {
 /// Stop the launch agents whose property list really moved (REL-6: an agent whose file was
 /// skipped is left running and untouched). Runs after the move, by label:
 /// `launchctl bootout gui/<uid>/<label>`. Each stop is logged; a stop that fails because the
-/// agent was not running is fine. Daemons are not stopped (that needs root): they stop at the
-/// next restart.
+/// agent was not running is fine. Daemons whose property list moved are stopped with one
+/// administrator command (`launchctl bootout system/<label>`, the macOS password dialog); when
+/// the dialog is cancelled the journal says so and they stop at the next restart.
 pub fn bootout_moved(
     env: &Env,
     report: &executor::Report,
@@ -1022,6 +1023,23 @@ pub fn bootout_moved(
                 )
         })
         .collect();
+    let daemons: Vec<(PathBuf, PathBuf)> = report
+        .moved
+        .iter()
+        .filter_map(|r| match &r.kind {
+            ActionKind::Moved {
+                original, stored, ..
+            } => Some((original.clone(), stored.clone())),
+            _ => None,
+        })
+        .filter(|(original, _)| {
+            original.extension().is_some_and(|e| e == "plist")
+                && domain_of(env, original) == Some(Domain::Daemon)
+        })
+        .collect();
+    if !daemons.is_empty() {
+        bootout_daemons(env, &daemons, feature)?;
+    }
     if moved.is_empty() {
         return Ok(());
     }
@@ -1056,6 +1074,69 @@ pub fn bootout_moved(
     }
     Ok(())
 }
+
+/// Stop the daemons whose property list moved, with ONE administrator command made only of
+/// `launchctl bootout system/<label>` lines (each may fail when it was not running). Logged as
+/// one Command line; a cancelled dialog is logged too and changes nothing.
+fn bootout_daemons(
+    env: &Env,
+    moved: &[(PathBuf, PathBuf)],
+    feature: FeatureId,
+) -> anyhow::Result<()> {
+    let labels: Vec<String> = moved
+        .iter()
+        .filter_map(|(_, stored)| plist_label(stored))
+        .filter(|l| safe_label(l))
+        .collect();
+    if labels.is_empty() {
+        return Ok(());
+    }
+    journal_writable(env)?;
+    let command = labels
+        .iter()
+        .map(|l| {
+            format!(
+                "{LAUNCHCTL} bootout {} || true",
+                sh_quote(&format!("system/{l}"))
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    let (ok, output) = match env.sys.run_admin(&command) {
+        Ok(out) if is_admin_cancel(&out) => (false, DAEMON_NOT_STOPPED.to_string()),
+        Ok(out) => (
+            out.ok(),
+            if out.ok() {
+                format!("stopped {} after its file moved", labels.join(", "))
+            } else {
+                tasks::first_lines(&format!("{}\n{}", out.stdout, out.stderr), 3)
+            },
+        ),
+        Err(e) => (false, e.to_string()),
+    };
+    let mut rec = new_record(
+        ActionKind::Command {
+            command: admin_wrap(&command),
+            ok,
+            output,
+        },
+        "bootout",
+    );
+    rec.feature = Some(feature);
+    executor::append_journal(env, &rec)?;
+    Ok(())
+}
+
+/// A launchd label CleanCraft passes to an administrator command: letters, digits, `.`, `-`
+/// and `_` only.
+fn safe_label(l: &str) -> bool {
+    !l.is_empty()
+        && l.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+}
+
+/// Journal output when the password dialog for stopping daemons was cancelled.
+pub const DAEMON_NOT_STOPPED: &str = "not stopped: the administrator password was not given, so the daemon stops at the next restart";
 
 impl Feature for StartupFeature {
     fn id(&self) -> FeatureId {
@@ -1097,11 +1178,42 @@ impl Feature for StartupFeature {
                 Risk::Medium,
                 false,
             );
+            // Folders of the system (`/Library/LaunchAgents`, `/Library/LaunchDaemons`): the
+            // file moves to the quarantine with the administrator password, after the user
+            // selected it by hand (nothing here is preselected).
             if !it.plist.parent().is_some_and(|dir| env.can_modify(dir)) {
-                plan.lock(id, "Needs administrator rights");
+                plan.mark_admin(id);
             }
         }
         Ok(plan)
+    }
+
+    fn allows_admin(&self) -> bool {
+        true
+    }
+
+    /// A saved plan can be edited, and an agent can now select any item of it: every selected
+    /// file must still be a property list directly in one of the three folders, and never one
+    /// whose program macOS signed.
+    fn validate(
+        &self,
+        env: &Env,
+        _settings: &crate::settings::Settings,
+        _plan: &Plan,
+        item: &crate::plan::Item,
+    ) -> Result<(), String> {
+        let Some(d) = domain_of(env, &item.path) else {
+            return Err("it is not directly in a launch agents or daemons folder".into());
+        };
+        let is_plist = item.path.extension().is_some_and(|e| e == "plist")
+            && fs::symlink_metadata(&item.path).is_ok_and(|m| m.is_file());
+        if !is_plist {
+            return Err("it is not a launch property list".into());
+        }
+        if launch_item_at(env, d, &item.path, &BTreeMap::new()).apple {
+            return Err("it is part of macOS".into());
+        }
+        Ok(())
     }
 
     fn finish(&self, env: &Env, _plan: &Plan, report: &executor::Report) -> anyhow::Result<()> {

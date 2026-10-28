@@ -308,7 +308,8 @@ fn remove_agent_plist_through_the_plan_with_bootout_after_the_move_and_undo() {
         .iter()
         .find(|i| i.path.ends_with("com.example.global.plist"))
         .unwrap();
-    assert!(global.locked.is_some(), "root-owned folder");
+    // Root-owned folder: selectable by hand, moved with the administrator password.
+    assert!(global.locked.is_none() && global.needs_admin && !global.selected);
     let helper_path = m
         .env
         .home_path("Library/LaunchAgents/com.example.helper.plist");
