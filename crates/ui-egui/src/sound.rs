@@ -1,7 +1,8 @@
 //! Interface sounds: short, quiet cues for moments that matter (a scan starts or finishes, a
 //! cleanup finishes, something moves to the Trash, an error).
 //!
-//! The sounds are CleanCraft's own, synthesized by `examples/make_sounds.rs` into
+//! The sounds are CleanCraft's own "Deep Ocean" set (drops, bubbles, sonar pings and waves),
+//! synthesized by `examples/make_sounds.rs` into
 //! `assets/sounds/*.wav` and built into the binary. The first time a cue plays it is copied to
 //! `<Application Support>/CleanCraft/Sounds/` (the env's data folder, so a fake Mac in tests)
 //! and played with `/usr/bin/afplay` through [`Sys::spawn`](cleancraft_core::sys::Sys::spawn),
@@ -25,17 +26,18 @@ pub const AFPLAY: &str = "/usr/bin/afplay";
 /// One interface sound.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Cue {
-    /// A scan started: a soft rising swell.
+    /// A scan started: a soft underwater swell, filtered noise rising like a slow wave over a
+    /// deep sine glide.
     ScanStart,
-    /// A scan finished with results: three soft mallet notes.
+    /// A scan finished with results: two soft sonar pings a fifth apart, with a gentle tail.
     ScanDone,
-    /// A cleanup finished: a breath of air and a resolving chord.
+    /// A cleanup finished: a wave washes in and draws back, then one bright water drop plink.
     CleanDone,
-    /// Items moved to the Trash (a single item or a small action): a short paper swoosh.
+    /// Items moved to the Trash (a single item or a small action): a short bubble gulp.
     Trash,
-    /// Something went wrong: two soft low tones.
+    /// Something went wrong: a low, muted double tone, calm, as if heard through water.
     Error,
-    /// A very subtle tick for switches and taps. Plays only when `sound_ticks` is on.
+    /// A tiny water drop tick for switches and taps. Plays only when `sound_ticks` is on.
     Tap,
 }
 
@@ -61,7 +63,7 @@ impl Cue {
         }
     }
 
-    /// The WAV file (16-bit, 48 kHz, mono).
+    /// The WAV file (16-bit, 44.1 kHz, mono).
     pub fn wav(self) -> &'static [u8] {
         match self {
             Cue::ScanStart => include_bytes!("../../../assets/sounds/scan-start.wav"),

@@ -119,3 +119,18 @@ pair, cyan into blue.
 - Do not use coral for anything that is not a warning or an action that moves files.
 - Do not draw the menu bar icon in colour; it is a template image.
 - Do not use another typeface for the wordmark.
+
+## Sound
+
+The interface sounds are part of the brand: water, never alarms. All are synthesized by
+`crates/ui-egui/examples/make_sounds.rs` (no samples) into `assets/sounds/*.wav`, 44.1 kHz,
+16-bit mono, peaks at -6 to -8 dBFS (the tap at -18), with fades at both ends.
+
+| Cue | Sound |
+|---|---|
+| Scan start | a soft underwater swell: filtered noise rising like a slow wave over a deep glide |
+| Scan done | two soft sonar pings a fifth apart (A5, E6) with a gentle tail |
+| Clean done | a wave washes in and draws back, then a bright water drop plink |
+| Trash | a short bubble gulp |
+| Error | a low, muted double tone (G3, E3), calm |
+| Tap | a tiny water drop tick |

@@ -149,7 +149,7 @@ fn the_wavs_are_clean() {
         total += bytes.len();
         let (rate, s) = sound::decode_wav(bytes)
             .unwrap_or_else(|| panic!("{cue:?} is not a 16-bit mono PCM WAV"));
-        assert_eq!(rate, 48_000, "{cue:?}");
+        assert_eq!(rate, 44_100, "{cue:?}");
         let secs = s.len() as f32 / rate as f32;
         let (min, max) = if cue == Cue::Tap {
             (0.03, 0.15)
