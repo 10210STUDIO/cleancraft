@@ -120,6 +120,27 @@ fn plan_view(
     })
 }
 
+/// `update_status`: a fresh check when it works, else the last saved one with the error.
+pub fn update_status_json(env: &Env, current: &str) -> serde_json::Value {
+    use cleancraft_core::self_update::{self, Found, UpdateState};
+    let (found, error) = match self_update::check_against(env, current) {
+        Ok(f) => (Some(f), None),
+        Err(e) => (UpdateState::load(env).found, Some(e)),
+    };
+    let notes = match &found {
+        Some(Found::Available { release }) => release.notes.clone(),
+        _ => String::new(),
+    };
+    json!({
+        "current": current,
+        "latest": found.as_ref().map(|f| f.latest().to_string()),
+        "available": matches!(found, Some(Found::Available { .. })),
+        "ahead": matches!(found, Some(Found::Ahead { .. })),
+        "notes": notes,
+        "error": error,
+    })
+}
+
 #[tool_router]
 impl CleanCraftMcp {
     #[tool(description = "List CleanCraft features with ids. Plan-based ones can be scanned.")]
@@ -209,6 +230,14 @@ impl CleanCraftMcp {
     }
 
     #[tool(
+        description = "CleanCraft's own version and whether a newer release is on GitHub (looks only; installing is done in the app). Returns current, latest, available and the release notes."
+    )]
+    async fn update_status(&self) -> ToolResult {
+        let current = cleancraft_core::self_update::CURRENT;
+        ok(update_status_json(&self.env, current))
+    }
+
+    #[tool(
         description = "Whether CleanCraft has Full Disk Access (needed for Mail, Safari and Trash data)."
     )]
     async fn full_disk_access(&self) -> ToolResult {
@@ -222,5 +251,36 @@ impl ServerHandler for CleanCraftMcp {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("cleancraft", env!("CARGO_PKG_VERSION")))
             .with_instructions(INSTRUCTIONS)
+    }
+}
+
+#[cfg(test)]
+mod update_tests {
+    use super::*;
+    use cleancraft_core::testkit::FakeMac;
+    use cleancraft_core::testkit_update::*;
+
+    #[test]
+    fn update_status_reads_only_and_says_what_is_available() {
+        let m = FakeMac::new();
+        install_app(&m, "0.1.2");
+        answer_check(&m, &release_json("0.1.3", true, "Faster."));
+        let v = update_status_json(&m.env, "0.1.2");
+        assert_eq!(v["current"], "0.1.2");
+        assert_eq!(v["latest"], "0.1.3");
+        assert_eq!(v["available"], true);
+        assert_eq!(v["notes"], "Faster.");
+        let calls = m.env.fake_sys().map(|f| f.calls()).unwrap_or_default();
+        assert_eq!(calls, vec![check_line()], "one look, nothing downloaded");
+        assert_eq!(installed_version(&m).as_deref(), Some("0.1.2"));
+        // Offline: the error, with what the last check found.
+        fail_check(&m);
+        let v = update_status_json(&m.env, "0.1.2");
+        assert_eq!(v["available"], false);
+        assert!(
+            v["error"]
+                .as_str()
+                .is_some_and(|e| e.contains("no internet"))
+        );
     }
 }

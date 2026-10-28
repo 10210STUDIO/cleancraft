@@ -86,6 +86,9 @@ pub enum Cmd {
         #[arg(long)]
         page: Option<String>,
     },
+    /// CleanCraft's own update: --check (default) looks on GitHub Releases, --install
+    /// installs the newer version (the old one goes to the Trash, with Undo in History).
+    Update(crate::cli_update::UpdateArgs),
     #[command(flatten)]
     Apps(crate::cli_apps::AppsCmd),
 }
@@ -250,6 +253,12 @@ pub fn run_cmd(env: &Env, cmd: Cmd) -> anyhow::Result<()> {
         }
         Cmd::Startup => crate::cli_perf::startup(env, &mut std::io::stdout())?,
         Cmd::Agent => crate::agent::run(env)?,
+        Cmd::Update(a) => crate::cli_update::run(
+            env,
+            &a,
+            cleancraft_core::self_update::CURRENT,
+            &mut std::io::stdout(),
+        )?,
         Cmd::McpSetup { args } => {
             let code = cleancraft_core::mcp_setup::cli(env, &args);
             if code != 0 {

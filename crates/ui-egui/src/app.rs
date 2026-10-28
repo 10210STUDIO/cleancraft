@@ -138,6 +138,8 @@ pub struct CleanApp {
     pub health: pages::health::State,
     pub guide: pages::guide::State,
     pub welcome: pages::welcome::State,
+    /// CleanCraft's own updates (Settings > Updates and the banner).
+    pub updates: pages::updates::State,
     pub fda: Access,
     /// A message at the top of the page: (text, is_error).
     pub notice: Option<(String, bool)>,
@@ -217,6 +219,7 @@ impl CleanApp {
             health: Default::default(),
             guide: Default::default(),
             welcome: Default::default(),
+            updates: Default::default(),
             fda,
             notice: settings_warning.map(|m| (m, true)),
             notice_undo: None,
@@ -589,6 +592,8 @@ impl CleanApp {
             // Mac Health's state for the line on Quick Sweep's start screen (U7-4).
             pages::health::refresh(self);
         }
+        // A new CleanCraft on GitHub (at most once a day, shared with the menu bar agent).
+        pages::updates::launch_check(self);
         if !self.settings.setup_done {
             // Welcome, then Full Disk Access, then AI apps (when one is found) (U7-5). Seen
             // as soon as it shows: from the second launch on the app opens on Quick Sweep,
@@ -705,6 +710,7 @@ impl CleanApp {
         busy |= pages::monitor::poll(self);
         busy |= pages::health::poll(self);
         busy |= pages::welcome::poll(self);
+        busy |= pages::updates::poll(self);
         self.follow_journal();
         // "Open at this page" requests from the menu bar agent and `cleancraft open` (tray6).
         pages::settings::follow_open_requests(self, ctx);
@@ -969,6 +975,7 @@ impl CleanApp {
 
     fn banners(&mut self, ui: &mut Ui) {
         let t = self.t;
+        pages::updates::banner(self, ui);
         // Only where it matters, and it can be put away (REVIEW-U U14).
         if self.fda == Access::Missing && !self.fda_dismissed && self.needs_fda() {
             egui::Frame::new()

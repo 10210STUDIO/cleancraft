@@ -10,6 +10,7 @@ mod cli;
 mod cli_apps;
 mod cli_monitor;
 mod cli_perf;
+mod cli_update;
 mod native_notify;
 mod tray;
 
