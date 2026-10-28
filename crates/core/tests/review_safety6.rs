@@ -867,9 +867,12 @@ fn x1_background_features_default_off() {
     // Any round 6 switch named like a watcher or schedule must be off by default.
     let v = serde_json::to_value(&fresh).unwrap();
     for (k, val) in v.as_object().unwrap() {
-        if ["watch", "notify", "menu_bar_agent", "schedule", "auto"]
-            .iter()
-            .any(|w| k.contains(w))
+        // update_check_auto is on by the owner's request (update10): it only looks at GitHub
+        // Releases once a day; installing by itself (update_install_auto) stays off.
+        if k != "update_check_auto"
+            && ["watch", "notify", "menu_bar_agent", "schedule", "auto"]
+                .iter()
+                .any(|w| k.contains(w))
         {
             assert!(
                 val != &serde_json::Value::Bool(true),

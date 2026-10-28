@@ -37,6 +37,10 @@ bash scripts/install-app.sh
 
 This builds the app, installs `/Applications/CleanCraft.app` and links the `cleancraft` command in `~/.local/bin`. The app is signed ad hoc: the first time, macOS may ask you to allow it in System Settings > Privacy & Security.
 
+### Updates
+
+CleanCraft updates itself from GitHub Releases. It looks for a new version at most once a day (from the menu bar agent, or when the app opens) and shows "Update available" with what is new; Install downloads the Apple silicon disk image, checks its SHA-256 and signature, moves the current app to the Trash (History can put it back) and restarts. Turn on Settings > Updates > "Install updates automatically" to skip the click, or use `cleancraft update --check` and `cleancraft update --install` from your own schedule. An app built from source with `scripts/install-app.sh` updates the same way; a build newer than the latest release says "You are ahead of the latest release" and installs nothing.
+
 For the full experience, grant Full Disk Access (and App Management to remove App Store apps) in System Settings > Privacy & Security. CleanCraft explains each one when it needs it.
 
 ## AI agents

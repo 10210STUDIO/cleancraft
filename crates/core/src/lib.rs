@@ -27,6 +27,7 @@ pub mod proc_names;
 pub mod progress;
 pub mod route;
 pub mod schedule;
+pub mod self_update;
 pub mod settings;
 pub mod space;
 pub mod space_history;
@@ -45,6 +46,7 @@ pub mod testkit_monitor;
 pub mod testkit_perf;
 pub mod testkit_quit;
 pub mod testkit_trash;
+pub mod testkit_update;
 pub mod updater;
 pub mod watch;
 

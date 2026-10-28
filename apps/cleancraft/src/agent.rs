@@ -8,12 +8,15 @@
 //!
 //! The agent never cleans or moves anything: it scans (look only), notifies and opens the app.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
 use chrono::NaiveDateTime;
 use cleancraft_core::monitor::{self, Sampler, Snapshot};
 use cleancraft_core::schedule::{self, Agent, CheckReport, MenuAction, MenuModel};
+use cleancraft_core::self_update::{self, Auto};
 use cleancraft_core::sweep::Sources;
 use cleancraft_core::watch::{WatchEvent, WatchHandle, Watcher};
 use cleancraft_core::{Env, Settings, login_agent, notify};
@@ -36,6 +39,8 @@ pub struct Worker {
     /// Events from the watcher thread, shown at the next round.
     events_tx: Sender<WatchEvent>,
     events: Receiver<WatchEvent>,
+    /// The update check is running on its own thread.
+    updating: Arc<AtomicBool>,
 }
 
 impl Worker {
@@ -51,6 +56,7 @@ impl Worker {
             watcher: None,
             events_tx,
             events,
+            updating: Arc::default(),
         }
     }
 
@@ -112,8 +118,56 @@ impl Worker {
             rep.shown.extend(r.shown);
             rep.failed.extend(r.failed);
             log_report(&rep);
+            self.check_updates(&settings);
         }
         (self.agent.menu(self.snap.as_ref(), &settings), rep)
+    }
+
+    /// CleanCraft's own update check, at most once every 24 hours: a newer version is
+    /// notified (once per version), or installed when "Install automatically" is on and the
+    /// app is closed (so no cleanup can be running). On a real Mac it runs on its own thread
+    /// so the menu stays live; on a fake Mac (tests) right here.
+    fn check_updates(&mut self, settings: &Settings) {
+        let now = chrono::Utc::now().timestamp();
+        if !settings.update_check_auto
+            || !self_update::UpdateState::load(&self.env).due(now)
+            || self.updating.swap(true, Ordering::SeqCst)
+        {
+            return;
+        }
+        let env = self.env.clone();
+        let settings = settings.clone();
+        let flag = self.updating.clone();
+        let work = move || {
+            let install = self_update::installed_app(&env)
+                .filter(|a| !self_update::app_running(&env, a))
+                .map(|app| self_update::Target {
+                    app,
+                    current: self_update::CURRENT.into(),
+                    busy: None,
+                });
+            let ctx = self_update::AutoCtx {
+                now,
+                notify: true,
+                install,
+                current: self_update::CURRENT,
+            };
+            let r = self_update::auto_check(&env, &settings, &ctx, &self_update::check);
+            match r {
+                Auto::Failed(e) => eprintln!("CleanCraft agent: {e}"),
+                Auto::Installed(i) => eprintln!("CleanCraft agent: {}", i.message()),
+                Auto::InstallFailed { why, .. } => {
+                    eprintln!("CleanCraft agent: the update did not install: {why}")
+                }
+                _ => {}
+            }
+            flag.store(false, Ordering::SeqCst);
+        };
+        if self.env.is_fake() {
+            work();
+        } else {
+            std::thread::spawn(work);
+        }
     }
 
     /// A menu choice: true when the agent should quit. Errors are logged (there is no window
@@ -326,6 +380,36 @@ mod tests {
         Settings::default().save(&m.env).expect("save");
         w.round(Instant::now(), at("2026-10-20 09:00"));
         assert_eq!(w.watching(), None);
+        assert!(cleancraft_core::executor::history(&m.env).is_empty());
+    }
+
+    #[test]
+    fn the_agent_checks_for_updates_once_a_day_and_notifies_without_installing() {
+        use cleancraft_core::testkit_update::*;
+        let m = sweep_mac();
+        let fake = m.env.fake_sys().expect("fake");
+        answer_all(fake);
+        fake.answer("osascript", "");
+        answer_check(&m, &release_json("99.0.0", true, "Big release."));
+        let mut w = Worker::new(m.env.clone(), sweep_sources());
+        let t0 = Instant::now();
+        w.round(t0, at("2026-10-20 09:00"));
+        let told = |f: &cleancraft_core::sys::FakeSys| {
+            f.calls()
+                .iter()
+                .filter(|c| c.contains("A CleanCraft update is available"))
+                .count()
+        };
+        assert_eq!(told(fake), 1);
+        let checks = |f: &cleancraft_core::sys::FakeSys| {
+            f.calls().iter().filter(|c| **c == check_line()).count()
+        };
+        assert_eq!(checks(fake), 1);
+        // The next check round, a minute later: not due for a day.
+        w.round(t0 + CHECK_EVERY, at("2026-10-20 09:01"));
+        assert_eq!(checks(fake), 1);
+        assert_eq!(told(fake), 1);
+        assert!(!fake.calls().iter().any(|c| c.contains("hdiutil")));
         assert!(cleancraft_core::executor::history(&m.env).is_empty());
     }
 }

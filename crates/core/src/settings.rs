@@ -64,6 +64,16 @@ pub struct Settings {
     /// users never see the steps); a fresh install (no file) starts with false.
     #[serde(default = "set_up")]
     pub setup_done: bool,
+    /// Look for a new CleanCraft on GitHub at most once a day (menu bar agent, app launch).
+    #[serde(default = "on")]
+    pub update_check_auto: bool,
+    /// Install a new CleanCraft by itself. Off: the person is told and installs from the
+    /// "Update available" banner.
+    pub update_install_auto: bool,
+}
+
+fn on() -> bool {
+    true
 }
 
 fn set_up() -> bool {
@@ -103,6 +113,8 @@ impl Default for Settings {
             watch_trash_offer: false,
             watch_new_items: false,
             setup_done: false,
+            update_check_auto: true,
+            update_install_auto: false,
         }
     }
 }

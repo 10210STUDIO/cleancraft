@@ -12,7 +12,7 @@ use crate::kit;
 use crate::theme::{Weight, font, size, space};
 
 /// A card's heading with its icon.
-fn heading(ui: &mut Ui, t: &crate::theme::Tokens, icon: Icon, text: &str) {
+pub(crate) fn heading(ui: &mut Ui, t: &crate::theme::Tokens, icon: Icon, text: &str) {
     ui.horizontal(|ui| {
         kit::badge(ui, t.sec_a, icon, 28.0);
         ui.add_space(2.0);
@@ -29,7 +29,13 @@ fn heading(ui: &mut Ui, t: &crate::theme::Tokens, icon: Icon, text: &str) {
 /// it. The slider keeps `name` as its accessible name.
 /// A form row: label in the right-aligned label column, a switch after it, and `text`
 /// beside the switch. Returns true when clicked. The switch is announced as `text`.
-fn switch_row(ui: &mut Ui, t: &crate::theme::Tokens, on: bool, text: &str, label: &str) -> bool {
+pub(crate) fn switch_row(
+    ui: &mut Ui,
+    t: &crate::theme::Tokens,
+    on: bool,
+    text: &str,
+    label: &str,
+) -> bool {
     ui.horizontal(|ui| {
         let (r, _) = ui.allocate_exact_size(vec2(260.0, crate::theme::hit::FIELD), Sense::hover());
         ui.painter().text(
@@ -369,7 +375,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
         &t,
         Icon::Settings,
         "Settings",
-        "Where removed items go, Full Disk Access, what scans leave alone, how big and old files are judged, code folders, AI assistants, the menu bar and sounds. Changes are saved as you make them.",
+        "Where removed items go, Full Disk Access, what scans leave alone, how big and old files are judged, code folders, AI assistants, the menu bar, updates and sounds. Changes are saved as you make them.",
     );
     let mut changed = false;
     // The folder dialog answered.
@@ -588,6 +594,8 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
             });
             ui.add_space(space::M);
             changed |= menu_bar_card(app, ui);
+            ui.add_space(space::M);
+            changed |= super::updates::card(app, ui);
             ui.add_space(space::M);
             kit::card(&t).show(ui, |ui| {
                 ui.set_width(ui.available_width());
@@ -1143,7 +1151,7 @@ fn menu_bar_card(app: &mut CleanApp, ui: &mut Ui) -> bool {
 }
 
 /// The label column of a form row (260 pt, right-aligned), like [`switch_row`]'s.
-fn label_cell(ui: &mut Ui, t: &crate::theme::Tokens, label: &str) {
+pub(crate) fn label_cell(ui: &mut Ui, t: &crate::theme::Tokens, label: &str) {
     let (r, _) = ui.allocate_exact_size(vec2(260.0, crate::theme::hit::FIELD), Sense::hover());
     ui.painter().text(
         r.right_center() - vec2(12.0, 0.0),
@@ -1155,7 +1163,7 @@ fn label_cell(ui: &mut Ui, t: &crate::theme::Tokens, label: &str) {
 }
 
 /// A small dim line under a row, in the value column.
-fn note(ui: &mut Ui, t: &crate::theme::Tokens, text: &str) {
+pub(crate) fn note(ui: &mut Ui, t: &crate::theme::Tokens, text: &str) {
     ui.horizontal(|ui| {
         ui.add_space(272.0);
         ui.add(

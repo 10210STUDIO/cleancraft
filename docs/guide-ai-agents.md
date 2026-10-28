@@ -72,6 +72,7 @@ claude mcp list
 | `list_startup_items` | Login items, agents and daemons, and heavy apps | No |
 | `full_disk_access` | Whether CleanCraft has Full Disk Access | No |
 | `history` | Recent CleanCraft actions | No |
+| `update_status` | CleanCraft's version, the latest release on GitHub and whether it is newer (installing happens in the app) | No |
 | `execute_plan` | Carries out a plan you confirmed, with its `digest`; can leave items out of it, never add | Moves to Trash or quarantine; needs the switch |
 | `run_task` | Runs one Tune-up Task you agreed to | Needs the switch |
 | `toggle_startup_item` | Turns a startup item off or on (never one of macOS) | Needs the switch |
