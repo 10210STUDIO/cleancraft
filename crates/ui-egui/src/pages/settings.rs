@@ -975,11 +975,11 @@ fn add_dev_root(app: &mut CleanApp, p: std::path::PathBuf) -> bool {
 /// The menu bar switch, also its accessible name.
 pub const MENU_BAR_SWITCH: &str = "Show CleanCraft in the menu bar";
 pub const DISK_ALERT_SWITCH: &str = "Warn when the startup disk is almost full";
-pub const PAUSE_SWITCH: &str = "Pause notifications";
+pub const PAUSE_SWITCH: &str = "Pause scheduled scans and notifications";
 pub const TRASH_OFFER_SWITCH: &str = "Offer to clean up after an app goes to the Trash";
 pub const NEW_ITEMS_SWITCH: &str = "Check new apps and startup items";
 /// Said under the menu bar group: where a notification leads (U7-2).
-pub const NOTIFY_NOTE: &str = "Clicking a notification opens CleanCraft on the page it is about. What it found also waits in the menu bar menu under Review.";
+pub const NOTIFY_NOTE: &str = "Clicking a notification opens CleanCraft on the page it is about. What it found also waits in the menu bar panel, and the icon shows a dot until you open it. While paused, scheduled scans are skipped and nothing is notified.";
 /// Said under the Trash offer switch.
 pub const TRASH_FDA_NOTE: &str = "Needs Full Disk Access (macOS keeps the Trash private).";
 /// The button beside it while Full Disk Access is off.
@@ -1043,7 +1043,7 @@ fn menu_bar_card(app: &mut CleanApp, ui: &mut Ui) -> bool {
             toggle_menu_bar(app);
         }
         note(ui, &t, if on {
-            "CPU and memory in the menu bar, from login on. It only looks: it scans, warns and opens CleanCraft, and never cleans by itself."
+            "A small CleanCraft icon in the menu bar, from login on. Click it for a live panel with CPU, memory, free space, battery, network and the busiest apps. It only looks: it scans, warns and opens CleanCraft, and never cleans by itself."
         } else {
             "Off: nothing of CleanCraft runs while the app is closed. The options below need the menu bar."
         });

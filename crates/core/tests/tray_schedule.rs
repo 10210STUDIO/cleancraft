@@ -261,7 +261,7 @@ fn nothing_found_means_no_notification() {
 }
 
 #[test]
-fn paused_notifications_are_not_shown_but_kept_in_the_menu() {
+fn paused_skips_scheduled_scans_and_notifications_and_resuming_does_not_catch_up() {
     let m = sweep_mac();
     m.env.fake_sys().expect("fake").answer("osascript", "");
     let s = Settings {
@@ -271,13 +271,20 @@ fn paused_notifications_are_not_shown_but_kept_in_the_menu() {
     let mut a = Agent::new(&m.env, sweep_sources());
     a.check(&m.env, &s, None, at("2026-10-20 09:00"));
     let r = a.check(&m.env, &s, None, at("2026-10-20 10:00"));
-    assert!(r.scanned.is_some());
+    assert_eq!(r.scanned, None, "paused: the 10:00 scan is skipped");
     assert!(r.shown.is_empty());
     assert!(osascripts(&m.env).is_empty());
     let menu = a.menu(None, &s);
     assert!(menu.paused);
     assert_eq!(menu.pause_label(), RESUME);
-    assert_eq!(menu.reviews.len(), 1);
+    assert!(menu.reviews.is_empty());
+    // Resumed later the same day: the skipped moment does not run now, the next one does.
+    let r = a.check(&m.env, &daily(10), None, at("2026-10-20 15:00"));
+    assert_eq!(r.scanned, None);
+    let r = a.check(&m.env, &daily(10), None, at("2026-10-21 10:00"));
+    assert!(r.scanned.is_some());
+    assert_eq!(a.menu(None, &daily(10)).reviews.len(), 1);
+    assert_eq!(osascripts(&m.env).len(), 1);
 }
 
 #[test]

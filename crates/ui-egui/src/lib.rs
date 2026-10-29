@@ -9,6 +9,7 @@ pub mod jobs;
 pub mod kit;
 pub mod kit_list;
 pub mod logo;
+pub mod menubar_panel;
 pub mod motion;
 pub mod pages;
 pub mod render3d;

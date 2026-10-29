@@ -12,6 +12,7 @@ mod cli_monitor;
 mod cli_perf;
 mod cli_update;
 mod native_notify;
+mod panel;
 mod tray;
 
 use cleancraft_core::Env;

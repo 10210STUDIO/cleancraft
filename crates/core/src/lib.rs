@@ -17,6 +17,7 @@ pub mod health;
 pub mod login_agent;
 pub mod malware_rules;
 pub mod mcp_setup;
+pub mod menubar;
 pub mod monitor;
 pub mod notify;
 pub mod permissions;
