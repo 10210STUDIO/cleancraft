@@ -6,7 +6,7 @@
 //! every command, so tests can check what would have run without running anything.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
-use std::io::{self, Read};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
@@ -170,6 +170,29 @@ pub trait Sys: Send + Sync {
             format!("{program} cannot be started without waiting here"),
         ))
     }
+    /// Start a long-lived helper and keep talking to it: its stdin to write to, its stdout
+    /// read line by line on a background thread, and a way to wait for it to exit. For the
+    /// menu bar panel, its own short-lived process (REVIEW-R6). The default refuses, so an
+    /// implementation has to opt in.
+    fn spawn_piped(&self, program: &str, args: &[&str]) -> io::Result<PipedChild> {
+        let _ = args;
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            format!("{program} cannot be started with pipes here"),
+        ))
+    }
+}
+
+/// A long-lived helper process started with [`Sys::spawn_piped`]: its stdin to write to, its
+/// stdout as lines read on a background thread, and a way to wait for it to exit.
+pub struct PipedChild {
+    pub stdin: Box<dyn Write + Send>,
+    /// Lines from the child's stdout, in order. The channel closes once the child's stdout
+    /// closes (the process exited or closed it itself).
+    pub lines: mpsc::Receiver<String>,
+    /// Blocks until the child exits. Called once, from whichever thread is done reading
+    /// `lines`.
+    pub wait: Box<dyn FnOnce() + Send>,
 }
 
 /// The real operating system.
@@ -328,6 +351,38 @@ impl Sys for RealSys {
             let _ = child.wait();
         });
         Ok(())
+    }
+
+    fn spawn_piped(&self, program: &str, args: &[&str]) -> io::Result<PipedChild> {
+        let mut child = Command::new(program)
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| io::Error::other("no stdin pipe"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| io::Error::other("no stdout pipe"))?;
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                let Ok(line) = line else { break };
+                if tx.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+        Ok(PipedChild {
+            stdin: Box::new(stdin),
+            lines: rx,
+            wait: Box::new(move || {
+                let _ = child.wait();
+            }),
+        })
     }
 }
 
@@ -775,6 +830,22 @@ impl Sys for FakeSys {
             .join(" ");
         self.with(|s| s.spawned.push(line));
         Ok(())
+    }
+
+    fn spawn_piped(&self, program: &str, args: &[&str]) -> io::Result<PipedChild> {
+        let line = std::iter::once(program)
+            .chain(args.iter().copied())
+            .collect::<Vec<_>>()
+            .join(" ");
+        self.with(|s| s.spawned.push(line));
+        // No real process: stdin goes nowhere and stdout is empty, as if the helper closed
+        // both pipes and exited at once.
+        let (_tx, rx) = mpsc::channel();
+        Ok(PipedChild {
+            stdin: Box::new(io::sink()),
+            lines: rx,
+            wait: Box::new(|| {}),
+        })
     }
 }
 

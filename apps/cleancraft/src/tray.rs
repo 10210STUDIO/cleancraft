@@ -111,13 +111,13 @@ pub fn run(models: Receiver<MenuModel>, actions: Sender<MenuAction>) -> anyhow::
 
 #[cfg(target_os = "macos")]
 mod mac {
-    use std::io::{BufRead, BufReader};
-    use std::process::{ChildStdin, Command, Stdio};
+    use std::io::Write;
     use std::sync::mpsc::{Receiver, Sender};
     use std::time::{Duration, Instant};
 
     use cleancraft_core::menubar::{self, ClickDo, PanelCmd, PanelToggle, PhysRect, Screen};
     use cleancraft_core::schedule::{MenuAction, MenuModel};
+    use cleancraft_core::sys::{RealSys, Sys};
     use objc2_app_kit::{NSEvent, NSEventModifierFlags};
     use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
     use tray_icon::{
@@ -150,7 +150,7 @@ mod mac {
         items: Vec<Option<MenuItem>>,
         toggle: PanelToggle,
         /// The open panel's standard input: dropping it closes the panel.
-        panel_in: Option<ChildStdin>,
+        panel_in: Option<Box<dyn Write + Send>>,
     }
 
     fn image(badge: bool) -> Option<Icon> {
@@ -245,14 +245,18 @@ mod mac {
                 h: f64::from(rect.size.height),
             };
             let (x, y) = menubar::panel_origin(icon, &screens, menubar::PANEL_W, menubar::PANEL_H);
-            let child = std::env::current_exe().and_then(|exe| {
-                Command::new(exe)
-                    .args(["panel", "--at", &menubar::at_arg(x, y)])
-                    .stdin(Stdio::piped())
-                    .stdout(Stdio::piped())
-                    .spawn()
-            });
-            let mut child = match child {
+            let exe = match std::env::current_exe() {
+                Ok(e) => e,
+                Err(e) => {
+                    eprintln!("CleanCraft agent: the panel could not open: {e}");
+                    self.toggle.closed(Instant::now());
+                    return;
+                }
+            };
+            let exe = exe.to_string_lossy().into_owned();
+            let at = menubar::at_arg(x, y);
+            let child = RealSys.spawn_piped(&exe, &["panel", "--at", &at]);
+            let child = match child {
                 Ok(c) => c,
                 Err(e) => {
                     eprintln!("CleanCraft agent: the panel could not open: {e}");
@@ -260,20 +264,16 @@ mod mac {
                     return;
                 }
             };
-            self.panel_in = child.stdin.take();
-            let out = child.stdout.take();
+            self.panel_in = Some(child.stdin);
             let actions = self.actions.clone();
             let proxy = self.proxy.clone();
             std::thread::spawn(move || {
-                if let Some(out) = out {
-                    for line in BufReader::new(out).lines() {
-                        let Ok(line) = line else { break };
-                        if let Some(c) = PanelCmd::parse(&line) {
-                            let _ = actions.send(c.action());
-                        }
+                for line in child.lines {
+                    if let Some(c) = PanelCmd::parse(&line) {
+                        let _ = actions.send(c.action());
                     }
                 }
-                let _ = child.wait();
+                (child.wait)();
                 let _ = proxy.send_event(Wake::PanelClosed);
             });
         }
