@@ -1,16 +1,17 @@
-//! Writes CleanCraft's interface sounds to `assets/sounds/*.wav` (16-bit, 48 kHz, mono).
+//! Writes CleanCraft's interface sounds to `assets/sounds/*.wav` (16-bit, 44.1 kHz, mono).
 //!
-//! Every sound is synthesized here from scratch: additive partials with soft envelopes,
-//! band-passed noise for air and paper, and a small Freeverb-style room for the tails. Nothing
-//! is sampled. The output is deterministic (fixed noise seeds), so running this again gives
-//! byte-identical files unless the recipes change.
+//! The "Deep Ocean" set (docs/design/BRAND.md): every sound is synthesized here from scratch
+//! with water in mind: pitch-swept sines for drops and bubbles, resonant band-passed noise for
+//! swells and waves, soft sine pings for sonar, and a small Freeverb-style room for the tails.
+//! Nothing is sampled. The output is deterministic (fixed noise seeds), so running this again
+//! gives byte-identical files unless the recipes change.
 //!
 //! `cargo run -p cleancraft-ui-egui --example make_sounds`
 
 use std::f32::consts::{PI, TAU};
 use std::path::Path;
 
-const SR: f32 = 48_000.0;
+const SR: f32 = 44_100.0;
 
 fn main() -> std::io::Result<()> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/sounds");
@@ -41,222 +42,211 @@ fn main() -> std::io::Result<()> {
 // ---------------------------------------------------------------------------------------------
 // Recipes
 
-/// A soft rising swell: an open fifth (D4, A4, a little D5) gliding up a whole tone while it
-/// breathes in, with a band of air rising behind it. Says "working" without a fanfare.
+/// A scan starts: a soft underwater swell. Noise through a resonant band that rises from
+/// 220 Hz to 900 Hz as the swell breathes in, a slow wave-like sway in its level, and a deep
+/// sine glide (A2 to E3) under it. Low-passed, so it stays gentle.
 fn scan_start() -> Vec<f32> {
-    let len = 0.75;
+    let len = 0.8;
     let mut b = buf(len);
     let swell = |t: f32| {
-        // In over 0.42 s (sine squared), then a gentle fall.
-        if t < 0.42 {
-            (t / 0.42 * PI / 2.0).sin().powi(2)
+        if t < 0.45 {
+            (t / 0.45 * PI / 2.0).sin().powi(2)
         } else {
-            (-(t - 0.42) / 0.16).exp()
+            (-(t - 0.45) / 0.14).exp()
         }
     };
-    let glide = |t: f32| 2f32.powf((-2.0 + 2.0 * smooth(t / 0.5)) / 12.0);
-    for (f, amp) in [(293.66, 0.55), (440.0, 0.38), (587.33, 0.16)] {
-        let partials = [(1.0, 1.0), (2.0, 0.22), (3.0, 0.07)];
-        let mut ph = [0.0f32; 3];
-        for (i, s) in b.iter_mut().enumerate() {
-            let t = i as f32 / SR;
-            let fr = f * glide(t);
-            let mut v = 0.0;
-            for (k, (r, a)) in partials.iter().enumerate() {
-                ph[k] = (ph[k] + TAU * fr * r / SR) % TAU;
-                v += a * ph[k].sin();
-            }
-            *s += amp * swell(t) * v;
-        }
-    }
-    let mut air = noise(len, 11);
-    bandpass_sweep(&mut air, |t| 500.0 * 5f32.powf(smooth(t / 0.5)), 1.1);
-    lowpass(&mut air, 3500.0);
+    let mut water = noise(len, 11);
+    bandpass_sweep(
+        &mut water,
+        |t| 220.0 * (900.0f32 / 220.0).powf(smooth(t / 0.5)),
+        3.0,
+    );
+    lowpass(&mut water, 1800.0);
+    lowpass(&mut water, 2400.0);
     for (i, s) in b.iter_mut().enumerate() {
         let t = i as f32 / SR;
-        *s += 0.30 * swell(t) * air[i];
+        // The sway: a slow wave in the level, 3 Hz.
+        let sway = 0.82 + 0.18 * (TAU * 3.0 * t).sin();
+        *s += 1.0 * swell(t) * sway * water[i];
     }
-    lowpass(&mut b, 7000.0);
-    finish(b, 0.24, -10.0, 0.30)
+    glide(&mut b, 0.0, 110.0, 164.81, 0.5, 0.20, 0.05, swell);
+    finish(b, 0.30, -8.0, 0.30)
 }
 
-/// Scan finished: three soft mallet notes on an open C (C5, G5, C6), a fifth and an octave,
-/// so it reads as "done" and never as a jingle.
+/// A scan finished: two soft sonar pings a fifth apart (A5, then E6), each a pure sine that
+/// sinks a few cents as it rings, with a long, soft room tail.
 fn scan_done() -> Vec<f32> {
-    let mut b = buf(1.1);
-    for (at, f, amp) in [
-        (0.0, 523.25, 0.75),
-        (0.085, 783.99, 0.66),
-        (0.17, 1046.5, 0.42),
-    ] {
-        bell(&mut b, at, f, amp, 0.42);
-    }
-    // A barely-there low C under the last note for body on small speakers.
-    sine_note(&mut b, 0.17, 261.63, 0.10, 0.012, 0.35);
-    lowpass(&mut b, 9000.0);
-    finish(b, 0.22, -7.0, 0.35)
+    let mut b = buf(1.15);
+    ping(&mut b, 0.0, 880.0, 0.75, 0.30);
+    ping(&mut b, 0.17, 1318.51, 0.55, 0.34);
+    // A barely-there low A for body on small speakers.
+    sine_note(&mut b, 0.0, 220.0, 0.08, 0.02, 0.30);
+    lowpass(&mut b, 6000.0);
+    finish(b, 0.42, -6.0, 0.35)
 }
 
-/// Cleanup finished: a breath of air sweeping up and settling, then a suspended F over C that
-/// resolves to E and G, landing on the same open C as "scan done".
+/// A cleanup finished: a wave washes in and draws back (noise through a band that sweeps up
+/// to 2.4 kHz and settles), then one bright, clean water drop "plink" with a soft note under
+/// it as the wave goes out.
 fn clean_done() -> Vec<f32> {
     let len = 1.2;
     let mut b = buf(len);
-    let mut air = noise(len, 23);
+    let mut wave = noise(len, 23);
     bandpass_sweep(
-        &mut air,
+        &mut wave,
         |t| {
-            if t < 0.28 {
-                700.0 * (3200.0f32 / 700.0).powf(smooth(t / 0.28))
+            if t < 0.32 {
+                380.0 * (2400.0f32 / 380.0).powf(smooth(t / 0.32))
             } else {
-                3200.0 * (1800.0f32 / 3200.0).powf(smooth(((t - 0.28) / 0.3).min(1.0)))
+                2400.0 * (700.0f32 / 2400.0).powf(smooth(((t - 0.32) / 0.4).min(1.0)))
             }
         },
-        0.9,
+        1.6,
     );
-    lowpass(&mut air, 5000.0);
+    lowpass(&mut wave, 4000.0);
     for (i, s) in b.iter_mut().enumerate() {
         let t = i as f32 / SR;
-        let e = if t < 0.22 {
-            (t / 0.22 * PI / 2.0).sin().powi(2)
+        let e = if t < 0.3 {
+            (t / 0.3 * PI / 2.0).sin().powi(2)
         } else {
-            (-(t - 0.22) / 0.12).exp()
+            (-(t - 0.3) / 0.16).exp()
         };
-        *s += 0.42 * e * air[i];
+        // Foam: a fast shimmer on the crest.
+        let foam = 0.85 + 0.15 * (TAU * 11.0 * t).sin();
+        *s += 0.70 * e * foam * wave[i];
     }
-    // Suspension...
-    bell_soft(&mut b, 0.22, 523.25, 0.45, 0.30);
-    bell_soft(&mut b, 0.24, 698.46, 0.40, 0.16);
-    // ...and resolution.
-    bell_soft(&mut b, 0.36, 659.26, 0.55, 0.50);
-    bell_soft(&mut b, 0.41, 783.99, 0.48, 0.50);
-    bell_soft(&mut b, 0.48, 1046.5, 0.24, 0.45);
-    sine_note(&mut b, 0.36, 261.63, 0.12, 0.02, 0.45);
-    lowpass(&mut b, 9000.0);
-    finish(b, 0.28, -7.0, 0.32)
+    // The drop: a quick upward chirp that rings briefly.
+    drop_plink(&mut b, 0.50, 1250.0, 2600.0, 0.55, 0.075);
+    // A soft note under it (E6 into a low E5), the "clean" landing.
+    ping(&mut b, 0.52, 1318.51, 0.20, 0.32);
+    ping(&mut b, 0.52, 659.26, 0.16, 0.36);
+    lowpass(&mut b, 8000.0);
+    finish(b, 0.34, -6.0, 0.30)
 }
 
-/// Move to Trash: a short dry swoosh, like a sheet slid off a desk: band-passed noise falling
-/// from 4.2 kHz to 1.4 kHz with a slight paper grain, and a soft low tuck as it lands.
+/// Items move to the Trash: a short bubble gulp. Two sine bubbles whose pitch rises as they
+/// form (190 to 540 Hz, then a smaller one 320 to 860 Hz), with a little low water noise.
 fn trash() -> Vec<f32> {
-    let len = 0.38;
-    let mut b = noise(len, 37);
-    bandpass_sweep(
-        &mut b,
-        |t| 4200.0 * (1400.0f32 / 4200.0).powf(smooth((t / 0.24).min(1.0))),
-        1.5,
-    );
-    // Two more poles above the band: paper, not hiss.
-    lowpass(&mut b, 3800.0);
-    lowpass(&mut b, 5000.0);
-    // Grain: a slowly wandering amplitude (sample and hold every 4 ms, smoothed).
-    let mut rng = Rng(91);
-    let hold = (0.004 * SR) as usize;
-    let mut target = 1.0;
-    let mut g = 1.0f32;
+    let len = 0.36;
+    let mut b = buf(len);
+    bubble(&mut b, 0.0, 190.0, 540.0, 0.13, 0.80);
+    bubble(&mut b, 0.075, 320.0, 860.0, 0.08, 0.40);
+    let mut n = noise(len, 37);
+    bandpass_sweep(&mut n, |t| 500.0 + 900.0 * smooth(t / 0.15), 2.0);
     for (i, s) in b.iter_mut().enumerate() {
-        if i % hold == 0 {
-            target = 1.0 - 0.45 * (rng.next() * 0.5 + 0.5);
-        }
-        g += (target - g) * 0.02;
         let t = i as f32 / SR;
-        let e = if t < 0.05 {
-            (t / 0.05 * PI / 2.0).sin().powi(2)
-        } else if t < 0.15 {
-            1.0 - 0.4 * (t - 0.05) / 0.1
-        } else {
-            0.6 * (-(t - 0.15) / 0.045).exp()
-        };
-        *s *= g * e;
+        *s += 0.22 * attack(t, 0.006) * (-t / 0.05).exp() * n[i];
     }
-    sine_note(&mut b, 0.13, 170.0, 0.16, 0.008, 0.05);
-    sine_note(&mut b, 0.13, 340.0, 0.05, 0.008, 0.04);
-    finish(b, 0.10, -11.0, 0.35)
+    lowpass(&mut b, 5000.0);
+    finish(b, 0.14, -8.0, 0.35)
 }
 
-/// Error: two soft, low, rounded tones stepping down a minor third (E flat 4, C4). Noticeable
-/// on a laptop speaker, never alarming.
+/// Something went wrong: a low, muted double tone (G3, then E3), round sines with a hint of
+/// a second partial behind a low-pass, as if heard through water. Calm, never a buzzer.
 fn error() -> Vec<f32> {
-    let mut b = buf(0.6);
-    for (at, f) in [(0.0, 311.13), (0.15, 261.63)] {
-        let partials = [(1.0, 1.0), (2.0, 0.30), (3.0, 0.12), (4.0, 0.04)];
+    let mut b = buf(0.62);
+    for (at, f) in [(0.0, 196.0), (0.17, 164.81)] {
         let start = (at * SR) as usize;
-        let mut ph = [0.0f32; 4];
+        let mut ph = [0.0f32; 2];
         for (n, out) in b[start..].iter_mut().enumerate() {
             let t = n as f32 / SR;
-            let e = attack(t, 0.008) * (-t / 0.11).exp();
+            let e = attack(t, 0.012) * (-t / 0.13).exp();
             let mut v = 0.0;
-            for (k, (r, a)) in partials.iter().enumerate() {
+            for (k, (r, a)) in [(1.0f32, 1.0f32), (2.0, 0.18)].iter().enumerate() {
                 ph[k] = (ph[k] + TAU * f * r / SR) % TAU;
-                // Higher partials fade faster: the tone darkens as it decays.
-                v += a * ph[k].sin() * (-t * 6.0 * (r - 1.0)).exp();
+                v += a * ph[k].sin();
             }
-            *out += 0.6 * e * v;
+            *out += 0.7 * e * v;
         }
     }
-    lowpass(&mut b, 4000.0);
-    finish(b, 0.15, -9.0, 0.35)
+    lowpass(&mut b, 1200.0);
+    lowpass(&mut b, 2000.0);
+    finish(b, 0.16, -8.0, 0.35)
 }
 
-/// Tap: a tiny damped wooden tick, mostly felt. Off unless the user turns it on.
+/// Tap: one tiny water-drop tick, a 6 ms chirp from 1.9 to 3.4 kHz that dies at once. Mostly
+/// felt. Off unless the user turns it on.
 fn tap() -> Vec<f32> {
     let mut b = buf(0.06);
-    for (i, s) in b.iter_mut().enumerate() {
-        let t = i as f32 / SR;
-        let a = attack(t, 0.0015);
-        *s = a
-            * ((TAU * 2400.0 * t).sin() * (-t / 0.006).exp()
-                + 0.5 * (TAU * 1250.0 * t).sin() * (-t / 0.009).exp());
-    }
-    finish(b, 0.0, -22.0, 0.30)
+    drop_plink(&mut b, 0.0, 1900.0, 3400.0, 1.0, 0.009);
+    finish(b, 0.0, -18.0, 0.30)
 }
 
 // ---------------------------------------------------------------------------------------------
 // Voices
 
-/// A soft mallet bell: slightly stretched partials, higher ones dying faster, 4 ms attack,
-/// two oscillators 1.5 cents apart for a little warmth.
-fn bell(b: &mut [f32], at: f32, f: f32, amp: f32, tau: f32) {
-    let partials = [
-        (1.0, 1.0, 1.0),
-        (2.0, 0.32, 0.55),
-        (3.01, 0.10, 0.35),
-        (4.07, 0.05, 0.25),
-        (5.2, 0.025, 0.18),
-    ];
-    voice(b, at, f, amp, tau, 0.004, &partials);
-}
-
-/// A rounder bell for the resolve: fewer, quieter overtones and a softer 7 ms attack.
-fn bell_soft(b: &mut [f32], at: f32, f: f32, amp: f32, tau: f32) {
-    let partials = [(1.0, 1.0, 1.0), (2.0, 0.22, 0.5), (3.0, 0.06, 0.3)];
-    voice(b, at, f, amp, tau, 0.007, &partials);
-}
-
-fn voice(
-    b: &mut [f32],
-    at: f32,
-    f: f32,
-    amp: f32,
-    tau: f32,
-    att: f32,
-    partials: &[(f32, f32, f32)],
-) {
+/// A sonar ping: a sine with a 3 ms attack, a little of its octave, sinking 6 cents over its
+/// ring, decaying with time constant `tau`.
+fn ping(b: &mut [f32], at: f32, f: f32, amp: f32, tau: f32) {
     let start = (at * SR) as usize;
-    let detune = 2f32.powf(1.5 / 1200.0);
+    let mut ph = [0.0f32; 2];
     for (n, out) in b[start..].iter_mut().enumerate() {
         let t = n as f32 / SR;
-        let a = attack(t, att);
-        let mut v = 0.0;
-        for (r, pa, d) in partials {
-            let e = (-t / (tau * d)).exp();
-            if e < 1e-4 {
-                continue;
-            }
-            let w = TAU * f * r * t;
-            v += pa * e * 0.5 * (w.sin() + (w * detune).sin());
+        let e = attack(t, 0.003) * (-t / tau).exp();
+        if e < 1e-5 && t > 0.01 {
+            break;
         }
-        *out += amp * a * v;
+        let fr = f * 2f32.powf(-6.0 / 1200.0 * (1.0 - (-t / tau).exp()));
+        ph[0] = (ph[0] + TAU * fr / SR) % TAU;
+        ph[1] = (ph[1] + TAU * fr * 2.0 / SR) % TAU;
+        *out += amp * e * (ph[0].sin() + 0.08 * (-t / (tau * 0.3)).exp() * ph[1].sin());
+    }
+}
+
+/// A water drop: a sine whose pitch rises fast from `f0` to `f1` (the "plink"), decaying with
+/// time constant `tau`.
+fn drop_plink(b: &mut [f32], at: f32, f0: f32, f1: f32, amp: f32, tau: f32) {
+    let start = (at * SR) as usize;
+    let mut ph = 0.0f32;
+    for (n, out) in b[start..].iter_mut().enumerate() {
+        let t = n as f32 / SR;
+        let e = attack(t, 0.0012) * (-t / tau).exp();
+        if e < 1e-5 && t > 0.01 {
+            break;
+        }
+        let fr = f0 * (f1 / f0).powf(1.0 - (-t / (tau * 0.5)).exp());
+        ph = (ph + TAU * fr / SR) % TAU;
+        *out += amp * e * ph.sin();
+    }
+}
+
+/// A bubble: a sine rising from `f0` to `f1` over `dur` as it forms, swelling in and fading
+/// out with it.
+fn bubble(b: &mut [f32], at: f32, f0: f32, f1: f32, dur: f32, amp: f32) {
+    let start = (at * SR) as usize;
+    let mut ph = 0.0f32;
+    for (n, out) in b[start..].iter_mut().enumerate() {
+        let t = n as f32 / SR;
+        if t > dur * 1.6 {
+            break;
+        }
+        let x = (t / dur).min(1.0);
+        let fr = f0 * (f1 / f0).powf(x * x);
+        let e = attack(t, 0.006) * (-(t / dur).powi(2) * 2.2).exp();
+        ph = (ph + TAU * fr / SR) % TAU;
+        *out += amp * e * ph.sin();
+    }
+}
+
+/// A sine gliding from `f0` to `f1` over `secs`, shaped by `env(t)`.
+#[allow(clippy::too_many_arguments)]
+fn glide(
+    b: &mut [f32],
+    at: f32,
+    f0: f32,
+    f1: f32,
+    secs: f32,
+    amp: f32,
+    att: f32,
+    env: impl Fn(f32) -> f32,
+) {
+    let start = (at * SR) as usize;
+    let mut ph = 0.0f32;
+    for (n, out) in b[start..].iter_mut().enumerate() {
+        let t = n as f32 / SR;
+        let fr = f0 * (f1 / f0).powf(smooth(t / secs));
+        ph = (ph + TAU * fr / SR) % TAU;
+        *out += amp * attack(t, att) * env(t) * ph.sin();
     }
 }
 
@@ -431,7 +421,7 @@ fn finish(b: Vec<f32>, wet: f32, peak_db: f32, release: f32) -> Vec<f32> {
     b
 }
 
-/// 16-bit 48 kHz mono PCM WAV, with TPDF dither.
+/// 16-bit 44.1 kHz mono PCM WAV, with TPDF dither.
 fn wav(samples: &[f32]) -> Vec<u8> {
     let mut rng = Rng(0x5EED);
     let data_len = (samples.len() * 2) as u32;

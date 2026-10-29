@@ -1,5 +1,6 @@
-//! CleanCraft's own look: deep ink surfaces, a mint accent, per-section colour fields, glass
-//! cards and Inter type (SIL OFL). Every design token lives here: colours, spacing, radii,
+//! CleanCraft's own look ("Deep Ocean", docs/design/BRAND.md): navy surfaces, an electric
+//! blue brand with a cyan highlight, per-section colour fields, glass cards and Inter type
+//! (SIL OFL). Every design token lives here: colours, spacing, radii,
 //! shadows, type sizes and motion timings. Pages and `kit` read them, never their own numbers.
 
 use craft_ui::theme::WidgetPalette;
@@ -190,13 +191,13 @@ impl Section {
     /// (main colour, second colour) of the section's gradient.
     pub fn colors(self) -> (Color32, Color32) {
         match self {
-            // Mint into deep sea green.
+            // The brand: cyan into electric blue (Quick Sweep).
             // Ends chosen so the dark ink label reads at 4.5:1 or more on both (WCAG).
-            Section::Overview => (rgb(0x34, 0xD8, 0xB4), rgb(0x26, 0x90, 0xB4)),
-            // Glacier blue into cyan.
-            Section::Clean => (rgb(0x4E, 0xA8, 0xFF), rgb(0x2B, 0xC8, 0xD8)),
-            // Coral into ember.
-            Section::Protect => (rgb(0xFF, 0x6B, 0x6B), rgb(0xE8, 0x8A, 0x3A)),
+            Section::Overview => (BRAND_CYAN, rgb(0x3A, 0x84, 0xFF)),
+            // Aqua into sea blue.
+            Section::Clean => (rgb(0x4C, 0xE0, 0xD2), rgb(0x2A, 0x9F, 0xD0)),
+            // Brand coral into ember.
+            Section::Protect => (rgb(0xFF, 0x7A, 0x59), rgb(0xE8, 0x8A, 0x3A)),
             // Lime into teal.
             Section::Speed => (rgb(0x9A, 0xE2, 0x4A), rgb(0x2E, 0xB8, 0x8A)),
             // Periwinkle into azure.
@@ -209,6 +210,18 @@ impl Section {
         }
     }
 }
+
+/// Brand electric blue: the app icon tile, the progress bar start, graphics. Never text on
+/// navy (4.1:1 on a card).
+pub const BRAND_BLUE: Color32 = rgb(0x2F, 0x7B, 0xFF);
+/// The deep end of the app icon tile's gradient.
+pub const BRAND_DEEP: Color32 = rgb(0x15, 0x46, 0xB8);
+/// Brand cyan: the highlight and the primary button fill (with `on_accent` ink).
+pub const BRAND_CYAN: Color32 = rgb(0x39, 0xD5, 0xFF);
+/// The lighter cyan at the top of a primary button.
+pub const BRAND_CYAN_LIGHT: Color32 = rgb(0x6A, 0xE0, 0xFF);
+/// "Craft" in the wordmark, and links on navy (7.4:1 on a card).
+pub const WORDMARK_BLUE: Color32 = rgb(0x5F, 0xB8, 0xFF);
 
 const fn rgb(r: u8, g: u8, b: u8) -> Color32 {
     Color32::from_rgb(r, g, b)
@@ -275,7 +288,7 @@ impl Tokens {
     /// The glass card colour as it looks over the backdrop (opaque), for things that must
     /// hide what is under them inside a card.
     pub fn glass_solid(&self) -> Color32 {
-        Color32::from_rgb(0x21, 0x27, 0x33)
+        Color32::from_rgb(0x14, 0x22, 0x38)
     }
 
     /// Text colour that reads well on the section gradient.
@@ -284,9 +297,9 @@ impl Tokens {
     }
 }
 
-/// The Danger pill's gradient (the button that moves files): coral to rose.
-pub const DANGER_A: Color32 = Color32::from_rgb(0xFF, 0x76, 0x6E);
-pub const DANGER_B: Color32 = Color32::from_rgb(0xEE, 0x5A, 0x64);
+/// The Danger pill's gradient (the button that moves files): light coral to brand coral red.
+pub const DANGER_A: Color32 = Color32::from_rgb(0xFF, 0x8A, 0x6B);
+pub const DANGER_B: Color32 = Color32::from_rgb(0xF2, 0x69, 0x4E);
 
 /// The Danger pill's label: ink, which reads at least 4.5:1 on both ends of its gradient
 /// (white would read 2.7:1 at the light end).
@@ -302,8 +315,8 @@ fn icons_mid(a: Color32, b: Color32) -> Color32 {
     )
 }
 
-/// Dark ink for text on colour fills.
-pub const INK: Color32 = Color32::from_rgb(0x08, 0x16, 0x1C);
+/// Dark navy ink for text on colour fills.
+pub const INK: Color32 = Color32::from_rgb(0x06, 0x1A, 0x2E);
 
 /// WCAG relative luminance of a colour (0 black, 1 white).
 pub fn luminance(c: Color32) -> f32 {
@@ -338,25 +351,27 @@ pub fn on_color(c: Color32) -> Color32 {
 impl Tokens {
     pub fn dark() -> Tokens {
         Tokens {
-            bg: Color32::from_rgb(0x10, 0x13, 0x1A),
-            sidebar: Color32::from_rgb(0x0B, 0x0E, 0x14),
-            card: Color32::from_rgb(0x1A, 0x1F, 0x29),
-            card_hover: Color32::from_rgb(0x23, 0x29, 0x35),
+            // Deep Ocean (docs/design/BRAND.md): navy, a darker sidebar, card #142238.
+            bg: Color32::from_rgb(0x0A, 0x14, 0x24),
+            sidebar: Color32::from_rgb(0x08, 0x10, 0x20),
+            card: Color32::from_rgb(0x14, 0x22, 0x38),
+            card_hover: Color32::from_rgb(0x1B, 0x2C, 0x47),
             border: Color32::from_rgba_unmultiplied(255, 255, 255, 22),
-            well: Color32::from_rgb(0x11, 0x14, 0x18),
-            // WCAG contrast on glass (#1F2530): text 13.9, dim 8.9, faint 5.6.
-            text: Color32::from_rgb(0xF0, 0xF2, 0xF5),
-            text_dim: Color32::from_rgb(0xBE, 0xC6, 0xD0),
-            text_faint: Color32::from_rgb(0x93, 0x9D, 0xAA),
-            accent: Color32::from_rgb(0x2E, 0xC4, 0xA6),
-            accent_dim: Color32::from_rgba_unmultiplied(0x2E, 0xC4, 0xA6, 40),
-            on_accent: Color32::from_rgb(0x06, 0x1A, 0x16),
-            danger: Color32::from_rgb(0xFF, 0x7A, 0x74),
-            warning: Color32::from_rgb(0xF2, 0xB1, 0x3C),
-            success: Color32::from_rgb(0x5A, 0xD6, 0x8A),
-            overlay: Color32::from_black_alpha(150),
-            glass: Color32::from_rgba_unmultiplied(0x2A, 0x31, 0x40, 150),
-            glass_hover: Color32::from_rgba_unmultiplied(0x34, 0x3C, 0x4E, 175),
+            well: Color32::from_rgb(0x07, 0x0F, 0x1C),
+            // WCAG contrast on glass (#142238): text 14.2, dim 8.8, faint 6.7.
+            text: Color32::from_rgb(0xED, 0xF2, 0xFA),
+            text_dim: Color32::from_rgb(0xB5, 0xC1, 0xD3),
+            text_faint: Color32::from_rgb(0x9B, 0xA9, 0xBE),
+            accent: BRAND_CYAN,
+            accent_dim: Color32::from_rgba_unmultiplied(0x39, 0xD5, 0xFF, 40),
+            on_accent: Color32::from_rgb(0x04, 0x20, 0x3A),
+            danger: Color32::from_rgb(0xFF, 0x7A, 0x59),
+            warning: Color32::from_rgb(0xFF, 0xB5, 0x47),
+            success: Color32::from_rgb(0x3D, 0xDC, 0x97),
+            overlay: Color32::from_rgba_unmultiplied(2, 6, 14, 150),
+            // Composite over `bg`: #142238 (the card) and #1B2C47 (the card hover).
+            glass: Color32::from_rgba_unmultiplied(0x1B, 0x2C, 0x46, 150),
+            glass_hover: Color32::from_rgba_unmultiplied(0x23, 0x37, 0x57, 175),
             glass_stroke: Color32::from_rgba_unmultiplied(255, 255, 255, 20),
             glass_edge: Color32::from_rgba_unmultiplied(255, 255, 255, 34),
             sec_a: Section::Overview.colors().0,
@@ -522,7 +537,7 @@ pub fn apply(ctx: &egui::Context, t: &Tokens) {
     visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, t.glass_stroke);
     visuals.widgets.inactive.weak_bg_fill = t.glass_hover;
     visuals.widgets.inactive.bg_fill = t.card_hover;
-    visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(0x30, 0x38, 0x48);
+    visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(0x22, 0x38, 0x5A);
     visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, t.accent.gamma_multiply(0.8));
     visuals.widgets.active.weak_bg_fill = t.accent.gamma_multiply(0.35);
     visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, t.glass_stroke);

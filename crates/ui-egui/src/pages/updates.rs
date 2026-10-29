@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 
 use cleancraft_core::self_update::{self, Auto, AutoCtx, Found, Installed, Release, UpdateState};
-use egui::{Color32, CornerRadius, RichText, Stroke, Ui};
+use egui::{CornerRadius, RichText, Stroke, Ui};
 
 use crate::app::CleanApp;
 use crate::icons::{self, Icon};
@@ -472,11 +472,7 @@ pub fn banner(app: &mut CleanApp, ui: &mut Ui) {
 
 fn frame(t: &theme::Tokens) -> egui::Frame {
     egui::Frame::new()
-        .fill(icons::lerp(
-            Color32::from_rgb(0x1A, 0x1F, 0x29),
-            t.accent,
-            0.12,
-        ))
+        .fill(icons::lerp(t.card, t.accent, 0.12))
         .stroke(Stroke::new(1.0, t.accent.gamma_multiply(0.4)))
         .corner_radius(CornerRadius::same(theme::radius::M))
         .inner_margin(egui::Margin::symmetric(14, 10))

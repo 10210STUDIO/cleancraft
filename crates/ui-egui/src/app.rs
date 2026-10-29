@@ -833,7 +833,7 @@ impl CleanApp {
         icons::vertical_gradient(
             ui.painter(),
             side,
-            Color32::from_rgb(0x12, 0x16, 0x1F),
+            Color32::from_rgb(0x0C, 0x16, 0x29),
             t.sidebar,
         );
         ui.painter().vline(
@@ -847,11 +847,21 @@ impl CleanApp {
             ui.add_space(4.0);
             crate::logo::show(ui, crate::logo::SIDEBAR_PT);
             ui.add_space(6.0);
-            ui.label(
-                RichText::new("CleanCraft")
-                    .font(font(size::TITLE2, Weight::Bold))
-                    .color(t.text),
-            );
+            // The wordmark: "Clean" in text white, "Craft" in the wordmark blue (BRAND.md).
+            let mut job = egui::text::LayoutJob::default();
+            for (part, color) in [("Clean", t.text), ("Craft", theme::WORDMARK_BLUE)] {
+                job.append(
+                    part,
+                    0.0,
+                    egui::TextFormat {
+                        font_id: font(size::TITLE2, Weight::Bold),
+                        color,
+                        extra_letter_spacing: -0.3,
+                        ..Default::default()
+                    },
+                );
+            }
+            ui.label(job);
         });
         ui.add_space(space::L);
         let current = page_group(self.page);
@@ -1024,11 +1034,7 @@ impl CleanApp {
         if let Some((msg, err)) = self.notice.clone() {
             let color = if err { t.danger } else { t.success };
             egui::Frame::new()
-                .fill(icons::lerp(
-                    Color32::from_rgb(0x1A, 0x1F, 0x29),
-                    color,
-                    0.14,
-                ))
+                .fill(icons::lerp(t.card, color, 0.14))
                 .stroke(Stroke::new(1.0, color.gamma_multiply(0.4)))
                 .corner_radius(CornerRadius::same(theme::radius::M))
                 .inner_margin(egui::Margin::symmetric(14, 8))
