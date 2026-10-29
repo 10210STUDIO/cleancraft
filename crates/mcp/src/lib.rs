@@ -1,9 +1,10 @@
 //! MCP server: CleanCraft for AI agents, over stdio.
 //!
-//! Agents can scan and read plans freely. Carrying out a plan needs two things: the setting
-//! "Let AI agents carry out confirmed cleanups" (off by default, set in the app), and the plan
-//! digest returned by `scan`, which proves the agent acts on exactly the list it showed.
-//! Removal is a move to the Trash or quarantine, logged, undoable.
+//! Agents can scan, select and preview freely. Every tool that changes the Mac needs the
+//! setting "Let AI assistants clean after you confirm" (off by default, set in the app; no
+//! tool can turn it on), and plans need the digest of the previewed selection, which proves
+//! the agent acts on exactly the list it showed. Removal is a move to the Trash or quarantine,
+//! logged, undoable.
 
 pub mod perf;
 
@@ -17,13 +18,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use cleancraft_core::executor;
-use cleancraft_core::features;
+use cleancraft_core::features::{self, uninstaller};
 use cleancraft_core::fsutil::human_size;
 use cleancraft_core::permissions;
 use cleancraft_core::plans;
 use cleancraft_core::{Env, FeatureId, Settings};
 
 pub mod apps;
+pub mod control;
 pub mod monitor;
 
 pub type ToolResult = Result<String, String>;
@@ -32,7 +34,23 @@ pub fn ok(v: impl Serialize) -> ToolResult {
     serde_json::to_string_pretty(&v).map_err(|e| e.to_string())
 }
 
-const INSTRUCTIONS: &str = "CleanCraft cleans a Mac safely. Workflow: list_features, then scan(feature) which returns a plan_id, the items with sizes and reasons, and a digest. Show the list to the user. Only after the user confirms, call execute_plan(plan_id, digest). Nothing is deleted: items move to the Trash or CleanCraft's quarantine and undo puts them back. execute_plan is refused unless the user turned on 'Let AI agents carry out confirmed cleanups' in CleanCraft Settings.";
+const INSTRUCTIONS: &str = "CleanCraft cleans and maintains a Mac safely. Start with list_actions (everything you can do) and agent_permissions (whether the user lets agents change the Mac). Cleanups: scan(feature) returns a plan with plan_id, items (sizes, reasons) and a digest; select_items picks exactly the items the user wants (also ones not ticked by default) and returns the preview with a new digest. Always show the user the preview and get a clear yes before execute_plan(plan_id, digest). Items that need administrator rights make macOS show its password or Touch ID dialog on the Mac; the user approves it there and CleanCraft never takes a password. Nothing is deleted: items move to the Trash or CleanCraft's quarantine and undo puts them back. Every changing tool is refused unless the user turned on 'Let AI assistants clean after you confirm' in CleanCraft Settings; you cannot turn it on.";
+
+/// The name of the setting that lets agents change the Mac, as Settings shows it.
+pub const SWITCH_NAME: &str = "Let AI assistants clean after you confirm";
+
+/// The answer of every changing tool while that setting is off.
+pub const REFUSED: &str = "Refused: the CleanCraft setting 'Let AI assistants clean after you confirm' (Settings, AI assistants) is off, so agents may not change the Mac. Nothing changed. Ask the user to do this in the CleanCraft app, or to turn that setting on there. No tool can turn it on.";
+
+/// The gate of every tool that changes the Mac: the settings when the user lets agents act.
+pub fn gate(env: &Env) -> Result<Settings, String> {
+    let (s, _) = Settings::load_checked(env);
+    if s.agents_may_clean {
+        Ok(s)
+    } else {
+        Err(REFUSED.into())
+    }
+}
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct FeatureArg {
@@ -84,7 +102,8 @@ impl CleanCraftMcp {
             tool_router: Self::tool_router()
                 + Self::monitor_router()
                 + Self::apps_router()
-                + Self::perf_router(),
+                + Self::perf_router()
+                + Self::control_router(),
         }
     }
 
@@ -118,6 +137,64 @@ fn plan_view(
             "category": i.category, "reason": i.reason, "risk": i.risk,
             "selected": i.selected, "locked": i.locked})).collect::<Vec<_>>(),
     })
+}
+
+/// `execute_plan`: the gate, the digest of the saved plan's selection, `only_items` (which can
+/// only leave items out), then the one way every front end carries out a plan.
+pub fn execute_plan_json(env: &Env, a: &ExecuteArgs) -> Result<serde_json::Value, String> {
+    let settings = gate(env)?;
+    let mut plan = plans::load(env, &a.plan_id).map_err(|e| e.to_string())?;
+    if plan.digest() != a.digest {
+        return Err("Refused: the digest does not match this plan's current selection. Call get_plan or select_items, show the user that list, and use the digest it returns. Nothing moved.".into());
+    }
+    // The digest above is the confirmed list; only_items may only leave items out of it.
+    if let Some(only) = &a.only_items {
+        features::narrow_selection(&mut plan, only)?;
+    }
+    let digest = plan.digest();
+    let admin = features::admin_count(&plan);
+    let journal_before = executor::history(env).len();
+    let rep = features::run_plan(env, &settings, &plan, &digest, &mut |_, _| {})
+        .map_err(|e| format!("{e:#}"))?;
+    let mut v = control::report_json(env, &rep);
+    // What ran besides the moves (stopping launch agents and daemons), from the journal.
+    let ran: Vec<serde_json::Value> = executor::history(env)
+        .into_iter()
+        .skip(journal_before)
+        .filter_map(|r| match r.kind {
+            executor::ActionKind::Command {
+                command,
+                ok,
+                output,
+            } => Some(json!({"command": command, "ok": ok, "output": output})),
+            _ => None,
+        })
+        .collect();
+    if !ran.is_empty() {
+        v["also_ran"] = json!(ran);
+    }
+    if admin > 0 {
+        v["admin_note"] = json!(control::ADMIN_PROMPT);
+    }
+    if uninstaller::is_batch(&plan) {
+        let apps: Vec<uninstaller::BatchApp> = uninstaller::batch_entries(env, &plan.id)
+            .into_iter()
+            .map(|e| uninstaller::BatchApp {
+                group: uninstaller::group_key(&e.path),
+                path: e.path,
+                name: e.name,
+                lock: None,
+                running: false,
+            })
+            .collect();
+        v["apps"] = json!(
+            uninstaller::batch_results(&plan, &apps, &rep)
+                .iter()
+                .map(|r| json!({"name": r.name, "uninstalled": r.removed, "moved": r.moved.len(), "size": human_size(r.moved_size), "skipped": r.skipped.len()}))
+                .collect::<Vec<_>>()
+        );
+    }
+    Ok(v)
 }
 
 /// `update_status`: a fresh check when it works, else the last saved one with the error.
@@ -180,36 +257,17 @@ impl CleanCraftMcp {
     }
 
     #[tool(
-        description = "Carry out a plan the user confirmed: moves the selected items to the Trash or quarantine (never deletes). Needs the digest from scan and the CleanCraft setting that lets agents clean."
+        description = "Carry out a plan the user confirmed: moves the selected items to the Trash or quarantine (never deletes). Needs the digest of the preview the user said yes to (from scan, get_plan or select_items) and the CleanCraft setting that lets agents clean. Items that need administrator rights make macOS show its password or Touch ID dialog on the Mac; if the user cancels it those items are skipped. Returns moved, skipped with reasons, the size and undo_with."
     )]
     async fn execute_plan(&self, Parameters(a): Parameters<ExecuteArgs>) -> ToolResult {
-        let settings = self.settings();
-        if !settings.agents_may_clean {
-            return Err("Refused: in CleanCraft Settings, 'Let AI agents (MCP) carry out confirmed cleanups' is off. Ask the user to clean from the app, or to turn that on.".into());
-        }
-        let mut plan = plans::load(&self.env, &a.plan_id).map_err(|e| e.to_string())?;
-        if plan.digest() != a.digest {
-            return Err("Refused: the digest does not match this plan. Scan again and show the user the new list.".into());
-        }
-        // The digest above is the confirmed list; only_items may only leave items out of it.
-        if let Some(only) = &a.only_items {
-            features::narrow_selection(&mut plan, only)?;
-        }
-        let digest = plan.digest();
-        let rep = features::run_plan(&self.env, &settings, &plan, &digest, &mut |_, _| {})
-            .map_err(|e| format!("{e:#}"))?;
-        ok(json!({
-            "freed": human_size(rep.freed), "freed_bytes": rep.freed,
-            "message": features::moved_text([&rep]),
-            "moved": rep.moved.iter().map(|r| json!({"action_id": r.id, "size": r.size, "kind": r.kind})).collect::<Vec<_>>(),
-            "skipped": rep.skipped.iter().map(|(p, s)| json!({"path": self.env.display(p), "reason": s.to_string()})).collect::<Vec<_>>(),
-            "undo_with": rep.plan_id,
-        }))
+        execute_plan_json(&self.env, &a).and_then(ok)
     }
 
-    #[tool(description = "Undo one action (action id) or a whole cleanup (plan id).")]
+    #[tool(
+        description = "Undo one action (action id) or a whole cleanup (plan id, the undo_with of a result). Administrator moves show the macOS password dialog on the Mac again."
+    )]
     async fn undo(&self, Parameters(a): Parameters<UndoArgs>) -> ToolResult {
-        if a.id.contains('#') {
+        if executor::history(&self.env).iter().any(|r| r.id == a.id) {
             executor::undo(&self.env, &a.id)
                 .map_err(|e| e.to_string())
                 .and_then(|r| ok(json!({"undone": r.id})))
@@ -284,3 +342,6 @@ mod update_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod control_tests;

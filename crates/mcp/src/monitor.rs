@@ -9,13 +9,14 @@
 use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 
-use rmcp::{tool, tool_router};
+use rmcp::{handler::server::wrapper::Parameters, schemars, tool, tool_router};
+use serde::Deserialize;
 use serde_json::{Value, json};
 
 use cleancraft_core::fsutil::human_size;
 use cleancraft_core::monitor::{self, Sampler};
 use cleancraft_core::sweep::{self, Sources, TileData};
-use cleancraft_core::{Env, Settings, plans};
+use cleancraft_core::{Env, FeatureId, Settings, plans};
 
 use crate::{CleanCraftMcp, ToolResult, ok};
 
@@ -82,6 +83,38 @@ pub fn sweep_preview_value(env: &Env, settings: &Settings, sources: &Sources) ->
     })
 }
 
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+pub struct SweepArgs {
+    /// Only these modules (feature ids, e.g. ["system_junk", "mail_downloads"]). Default: the
+    /// modules the user keeps on in Quick Sweep.
+    pub modules: Option<Vec<String>>,
+}
+
+/// The settings Quick Sweep scans with: only `modules` when given.
+pub fn sweep_settings(
+    settings: &Settings,
+    sources: &Sources,
+    modules: Option<&[String]>,
+) -> Result<Settings, String> {
+    let mut s = settings.clone();
+    if let Some(m) = modules {
+        let mut keep = Vec::new();
+        for name in m {
+            let id = FeatureId::parse(name).ok_or_else(|| format!("unknown module '{name}'"))?;
+            if !sources.ids().contains(&id) {
+                return Err(format!("{} is not a Quick Sweep module", id.title()));
+            }
+            keep.push(id);
+        }
+        s.sweep_skip = sources
+            .ids()
+            .into_iter()
+            .filter(|i| !keep.contains(i))
+            .collect();
+    }
+    Ok(s)
+}
+
 #[tool_router(router = monitor_router, vis = "pub")]
 impl CleanCraftMcp {
     #[tool(
@@ -94,15 +127,12 @@ impl CleanCraftMcp {
     }
 
     #[tool(
-        description = "Quick Sweep preview: scans junk, mail downloads, Trash, threats and other available modules (look only). Returns one entry per module with size or count, and for cleanup modules a saved plan_id and digest for execute_plan."
+        description = "Quick Sweep preview: scans junk, mail downloads, Trash, threats and other available modules (look only), or only the modules named. Returns one entry per module with size or count, and for cleanup modules a saved plan_id and digest. Show each plan (get_plan, adjust with select_items); after the user says yes, run them with sweep_run or execute_plan."
     )]
-    async fn sweep_preview(&self) -> ToolResult {
-        let settings = Settings::load(&self.env);
-        ok(sweep_preview_value(
-            &self.env,
-            &settings,
-            &Sources::registered(),
-        ))
+    async fn sweep_preview(&self, Parameters(a): Parameters<SweepArgs>) -> ToolResult {
+        let sources = Sources::registered();
+        let settings = sweep_settings(&Settings::load(&self.env), &sources, a.modules.as_deref())?;
+        ok(sweep_preview_value(&self.env, &settings, &sources))
     }
 }
 

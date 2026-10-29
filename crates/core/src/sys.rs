@@ -54,30 +54,86 @@ pub fn shell_quote(s: &str) -> String {
 /// one `/bin/mv -n -- 'from' 'to'` line per pair. This is the only shape of administrator move
 /// CleanCraft runs; [`parse_admin_moves`] reads it back.
 pub fn admin_move_script(pairs: &[(&str, &str)]) -> String {
-    pairs
+    admin_script(&[], pairs)
+}
+
+/// The whole administrator shell command of one run, so the person sees ONE password dialog:
+/// first a `/bin/launchctl bootout '<target>' || true` line per launchd target to stop (a
+/// daemon whose property list is about to move; a target that is not loaded is fine), then the
+/// `/bin/mv -n` lines of [`admin_move_script`]. Targets that are not plain launchd names are
+/// left out. [`parse_admin_script`] reads it back; nothing else is ever run as administrator.
+pub fn admin_script(stop_targets: &[String], pairs: &[(&str, &str)]) -> String {
+    stop_targets
         .iter()
-        .map(|(a, b)| format!("{MV_PREFIX}{} {}", shell_quote(a), shell_quote(b)))
+        .filter(|t| safe_launchd_target(t))
+        .map(|t| format!("{BOOTOUT_PREFIX}{}{TOLERANT_SUFFIX}", shell_quote(t)))
+        .chain(
+            pairs
+                .iter()
+                .map(|(a, b)| format!("{MV_PREFIX}{} {}", shell_quote(a), shell_quote(b))),
+        )
         .collect::<Vec<_>>()
         .join("\n")
 }
 
 const MV_PREFIX: &str = "/bin/mv -n -- ";
+const BOOTOUT_PREFIX: &str = "/bin/launchctl bootout ";
+/// A stop line ends with this: a target that is not loaded must not stop the moves.
+const TOLERANT_SUFFIX: &str = " || true";
 
-/// The `(from, to)` pairs of a script made by [`admin_move_script`]; `None` for anything else.
-pub fn parse_admin_moves(script: &str) -> Option<Vec<(String, String)>> {
-    let mut out = Vec::new();
+/// A launchd target CleanCraft names in an administrator command: "system/com.example.x" or
+/// "gui/501/com.example.x". Letters, digits, `.`, `-`, `_` and `/` only, so the shell has
+/// nothing to interpret even before it is quoted.
+pub fn safe_launchd_target(t: &str) -> bool {
+    !t.is_empty()
+        && t.len() < 256
+        && t.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '/'))
+}
+
+/// What an administrator command of CleanCraft may hold: the launchd targets it stops first,
+/// then the moves. `None` for anything else, so neither a saved plan nor a journal line can
+/// smuggle in another command.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AdminScript {
+    pub stops: Vec<String>,
+    pub moves: Vec<(String, String)>,
+}
+
+/// Read back a script written by [`admin_script`]; `None` for anything else.
+pub fn parse_admin_script(script: &str) -> Option<AdminScript> {
+    let mut out = AdminScript::default();
     let mut rest = script;
     loop {
-        rest = rest.strip_prefix(MV_PREFIX)?;
-        let (a, r) = parse_quoted(rest)?;
-        let r = r.strip_prefix(' ')?;
-        let (b, r) = parse_quoted(r)?;
-        out.push((a, b));
-        if r.is_empty() {
+        if let Some(r) = rest.strip_prefix(BOOTOUT_PREFIX) {
+            // Stops come before the moves, never after one.
+            if !out.moves.is_empty() {
+                return None;
+            }
+            let (target, r) = parse_quoted(r)?;
+            if !safe_launchd_target(&target) {
+                return None;
+            }
+            out.stops.push(target);
+            rest = r.strip_prefix(TOLERANT_SUFFIX)?;
+        } else {
+            let r = rest.strip_prefix(MV_PREFIX)?;
+            let (a, r) = parse_quoted(r)?;
+            let r = r.strip_prefix(' ')?;
+            let (b, r) = parse_quoted(r)?;
+            out.moves.push((a, b));
+            rest = r;
+        }
+        if rest.is_empty() {
             return Some(out);
         }
-        rest = r.strip_prefix('\n')?;
+        rest = rest.strip_prefix('\n')?;
     }
+}
+
+/// The `(from, to)` pairs of a script made by [`admin_script`]; `None` for anything else.
+pub fn parse_admin_moves(script: &str) -> Option<Vec<(String, String)>> {
+    parse_admin_script(script).map(|s| s.moves)
 }
 
 /// One word written by [`shell_quote`]: the text and what follows it.
@@ -718,14 +774,19 @@ impl Sys for FakeSys {
                     stderr: "User canceled. (-128)".into(),
                 })
             } else if shell_command.starts_with(MV_PREFIX) {
-                // Administrator moves: only the exact script admin_move_script writes.
-                match parse_admin_moves(shell_command) {
-                    Some(pairs) => Ok(FakeSys::admin_moves(s, &pairs)),
+                // Administrator moves: only the exact script admin_script writes.
+                match parse_admin_script(shell_command) {
+                    Some(script) => Ok(FakeSys::admin_moves(s, &script.moves)),
                     None => Err(io::Error::new(
                         io::ErrorKind::InvalidInput,
                         format!("fake: refused administrator command `{shell_command}`"),
                     )),
                 }
+            } else if let Some(script) = parse_admin_script(shell_command)
+                && !script.moves.is_empty()
+            {
+                // The one command of a run: stop lines (recorded in admin_calls), then moves.
+                Ok(FakeSys::admin_moves(s, &script.moves))
             } else {
                 let key = format!("admin:{shell_command}");
                 let out = s.answers.get(&key).cloned().unwrap_or_default();

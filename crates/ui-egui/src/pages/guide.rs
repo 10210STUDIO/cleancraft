@@ -310,6 +310,7 @@ mod tests {
             include_str!("../../../mcp/src/apps.rs"),
             include_str!("../../../mcp/src/monitor.rs"),
             include_str!("../../../mcp/src/perf.rs"),
+            include_str!("../../../mcp/src/control.rs"),
         ];
         let mut n = 0;
         for src in srcs {
@@ -329,7 +330,7 @@ mod tests {
                 }
             }
         }
-        assert!(n >= 16, "{n} tools found");
+        assert!(n >= 37, "{n} tools found");
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! MCP tools for Tune-up Tasks and Startup Items.
 //!
 //! Listing is free. Running a task or turning a startup item off or on changes the Mac, so it
-//! needs the same setting as cleaning ("Let AI agents carry out confirmed cleanups"). Tasks
+//! needs the same setting as cleaning ("Let AI assistants clean after you confirm"). Tasks
 //! that need the administrator password still show the macOS password dialog to the user,
 //! who can cancel it. Every change is logged; startup changes can be undone with `undo`.
 
@@ -15,7 +15,7 @@ use cleancraft_core::{Env, Settings};
 
 use crate::{CleanCraftMcp, ToolResult, ok};
 
-pub const REFUSED: &str = "Refused: in CleanCraft Settings, 'Let AI agents (MCP) carry out confirmed cleanups' is off. Ask the user to do this in the app, or to turn that on.";
+pub use crate::REFUSED;
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct TaskArg {

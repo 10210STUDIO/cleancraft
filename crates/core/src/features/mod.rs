@@ -83,6 +83,14 @@ pub trait Feature: Send + Sync {
     fn allows_admin(&self) -> bool {
         false
     }
+    /// launchd targets ("system/com.example.x") to stop with `launchctl bootout` inside the
+    /// SAME administrator command as the moves of `items`, right before they move (a daemon
+    /// whose property list is about to go). Asked only about the items that passed every
+    /// check, so a skipped item's daemon is left running, and only when
+    /// [`Feature::allows_admin`] is on. One run asks for the password once.
+    fn admin_stops(&self, _env: &Env, _items: &[&Item]) -> Vec<String> {
+        Vec::new()
+    }
     /// Check one selected item again, right before anything moves, with the same rules the
     /// scan used to propose it. A saved plan is a plain file that a person or an agent can
     /// edit, so its categories, its locks and its groups are not trusted: only what this
@@ -155,13 +163,14 @@ pub fn run_plan_with(
     let allow = f.allow_roots(env);
     let method = f.method_override().unwrap_or(settings.method);
     f.prepare(env, &checked)?;
-    let mut report = executor::execute_with(
+    let mut report = executor::execute_stopping(
         env,
         &checked,
         &allow,
         &checked.digest(),
         method,
         f.allows_admin(),
+        &|items| f.admin_stops(env, items),
         progress,
     )?;
     // The files moved; what finish could not do is logged in the journal by finish itself.
