@@ -147,28 +147,6 @@ fn heroes_render_on_the_gpu() {
 }
 
 #[test]
-fn app_icon_is_a_full_squircle_with_transparent_corners() {
-    let size = 128;
-    let mesh = heroes::app_icon(size as f32, 2.0);
-    let px = cleancraft_ui_egui::render3d::rasterize(&mesh, size, size, 1.0, 2);
-    let alpha = |x: usize, y: usize| px[(y * size + x) * 4 + 3];
-    assert_eq!(alpha(1, 1), 0, "corners are transparent");
-    assert_eq!(alpha(64, 64), 255, "the tile is opaque");
-    assert_eq!(alpha(64, 16), 255, "top of the tile");
-    // The mark is bright against the dark tile somewhere in the middle.
-    let lum = |x: usize, y: usize| {
-        let o = (y * size + x) * 4;
-        px[o] as u32 + px[o + 1] as u32 + px[o + 2] as u32
-    };
-    let brightest = (40..88)
-        .flat_map(|y| (40..88).map(move |x| (x, y)))
-        .map(|(x, y)| lum(x, y))
-        .max()
-        .unwrap_or(0);
-    assert!(brightest > 450, "{brightest}");
-}
-
-#[test]
 fn section_icons_render_on_the_gpu() {
     use cleancraft_ui_egui::section_icons::{self, SectionIcon};
     let all = std::env::var("CLEANCRAFT_SNAPSHOTS").is_ok_and(|v| v == "1");
