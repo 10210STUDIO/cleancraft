@@ -38,7 +38,7 @@ use cleancraft_core::{Env, FeatureId, Plan, Settings};
 use crate::{CleanCraftMcp, ToolResult, gate, ok, plan_view};
 
 /// What the agent tells the user before a run that needs the administrator password.
-pub const ADMIN_PROMPT: &str = "Some items need administrator rights. macOS shows its password or Touch ID dialog on the Mac: the user must approve it there. CleanCraft never asks for the password itself. If the user cancels, those items are skipped and the rest still runs.";
+pub const ADMIN_PROMPT: &str = "Some items need administrator rights. macOS shows its password or Touch ID dialog on the Mac once for the whole run: the user must approve it there. CleanCraft never asks for the password itself. If the user cancels, those items are skipped and the rest still runs.";
 
 /// What every preview says the agent must do next.
 pub const CONFIRM_STEP: &str = "Show this list to the user (path, size and reason of each item, the totals, and whether the administrator password is needed) and ask for a clear yes. Only after that, call execute_plan with this plan_id and this digest.";
@@ -167,7 +167,7 @@ pub fn selection_view(env: &Env, settings: &Settings, plan: &Plan) -> Value {
     }
     if plan.feature == Some(FeatureId::LoginItems) {
         v["startup_note"] = json!(
-            "Each agent or daemon is stopped (launchctl bootout) right after its file moved; an item whose file did not move is left running and untouched. Undo puts the file back; it starts again at the next login or restart."
+            "A daemon is stopped by the same administrator command that moves its file, so one password dialog covers the whole run; an agent of yours is stopped right after its file moved. An item whose file did not move is left running and untouched. Undo puts the file back; it starts again at the next login or restart."
         );
     }
     if !settings.agents_may_clean {

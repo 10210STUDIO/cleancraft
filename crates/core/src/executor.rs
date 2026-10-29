@@ -23,7 +23,7 @@ use crate::env::{Env, Fault};
 use crate::fsutil::tree_size_once;
 use crate::plan::{FeatureId, Item, Plan};
 use crate::policy::{self, Refusal};
-use crate::sys::{CmdOut, RunningApp, admin_cancelled, admin_move_script};
+use crate::sys::{CmdOut, RunningApp, admin_cancelled, admin_script};
 
 #[derive(
     Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
@@ -237,6 +237,33 @@ pub fn execute_with(
     admin: bool,
     progress: &mut dyn FnMut(usize, usize),
 ) -> Result<Report, ExecError> {
+    execute_stopping(
+        env,
+        plan,
+        allow,
+        confirmed_digest,
+        method,
+        admin,
+        &|_| Vec::new(),
+        progress,
+    )
+}
+
+/// [`execute_with`], with the launchd targets to stop inside the SAME administrator command,
+/// before the items move (`stops` is asked only about the items that passed every check and
+/// really go to the administrator command, so a skipped item's daemon is left running).
+/// One run, one password dialog.
+#[allow(clippy::too_many_arguments)]
+pub fn execute_stopping(
+    env: &Env,
+    plan: &Plan,
+    allow: &[PathBuf],
+    confirmed_digest: &str,
+    method: Method,
+    admin: bool,
+    stops: &dyn Fn(&[&Item]) -> Vec<String>,
+    progress: &mut dyn FnMut(usize, usize),
+) -> Result<Report, ExecError> {
     if plan.digest() != confirmed_digest {
         return Err(ExecError::DigestMismatch);
     }
@@ -292,7 +319,9 @@ pub fn execute_with(
         }
     }
     if !admin_batch.is_empty() {
-        admin_move(env, plan, &admin_batch, &mut report, &mut used);
+        let items: Vec<&Item> = admin_batch.iter().map(|(it, _)| *it).collect();
+        let targets = stops(&items);
+        admin_move(env, plan, &admin_batch, &targets, &mut report, &mut used);
     }
     progress(total, total);
     Ok(report)
@@ -399,7 +428,11 @@ fn moved_record(
 
 /// Run one administrator command made of `mv -n` lines and return it with its result.
 /// `Err` carries the reason every pair failed (cancelled dialog, command not started).
-fn run_admin_moves(env: &Env, pairs: &[(PathBuf, PathBuf)]) -> Result<CmdOut, SkipReason> {
+fn run_admin_moves(
+    env: &Env,
+    stop_targets: &[String],
+    pairs: &[(PathBuf, PathBuf)],
+) -> Result<CmdOut, SkipReason> {
     let mut text = Vec::new();
     for (a, b) in pairs {
         match (a.to_str(), b.to_str()) {
@@ -411,7 +444,7 @@ fn run_admin_moves(env: &Env, pairs: &[(PathBuf, PathBuf)]) -> Result<CmdOut, Sk
             }
         }
     }
-    let script = admin_move_script(&text);
+    let script = admin_script(stop_targets, &text);
     match env.sys.run_admin(&script) {
         Ok(out) if admin_cancelled(&out) => Err(SkipReason::AdminCancelled),
         Ok(out) => Ok(out),
@@ -447,6 +480,7 @@ fn admin_move(
     env: &Env,
     plan: &Plan,
     batch: &[(&Item, u64)],
+    stop_targets: &[String],
     report: &mut Report,
     used: &mut HashSet<String>,
 ) {
@@ -480,7 +514,7 @@ fn admin_move(
         taken.insert(dest.clone());
         pairs.push((it.path.clone(), dest));
     }
-    let out = match run_admin_moves(env, &pairs) {
+    let out = match run_admin_moves(env, stop_targets, &pairs) {
         Ok(out) => out,
         Err(why) => return fail_all(report, why),
     };
@@ -508,7 +542,7 @@ fn admin_move(
         .iter()
         .map(|(d, s, _)| (d.clone(), s.clone()))
         .collect();
-    let res = run_admin_moves(env, &back);
+    let res = run_admin_moves(env, &[], &back);
     for (dest, src, e) in unlogged {
         let restored = fs::symlink_metadata(&src).is_ok();
         let why = if restored {
@@ -937,7 +971,7 @@ fn undo_admin(env: &Env, ids: &[String]) -> (usize, Vec<(String, UndoError)>) {
         .iter()
         .map(|(_, s, o)| (s.clone(), o.clone()))
         .collect();
-    let out = match run_admin_moves(env, &pairs) {
+    let out = match run_admin_moves(env, &[], &pairs) {
         Ok(out) => out,
         Err(why) => {
             let e = match why {

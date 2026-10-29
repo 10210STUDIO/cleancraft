@@ -193,7 +193,7 @@ fn select_items_picks_unticked_startup_items_and_the_new_digest_is_the_one_that_
     assert!(s.keystone_agent.exists() && s.nord.exists());
 
     // The new digest runs: Keystone to the Trash, the system items through the
-    // administrator path (one password dialog for the moves, one for stopping the daemon).
+    // administrator path, with ONE password dialog that stops the daemon and then moves.
     let r = exec(env, &plan_id, &new_digest).unwrap();
     assert_eq!(r["moved"].as_array().unwrap().len(), 4, "{r:#}");
     assert!(r["skipped"].as_array().unwrap().is_empty(), "{r:#}");
@@ -211,14 +211,18 @@ fn select_items_picks_unticked_startup_items_and_the_new_digest_is_the_one_that_
     assert!(trash.join("com.google.keystone.xpcservice.plist").exists());
     let fake = env.fake_sys().unwrap();
     let admin = fake.admin_calls();
-    assert_eq!(admin.len(), 2, "{admin:#?}");
-    assert!(admin[0].starts_with("/bin/mv -n -- "));
+    assert_eq!(admin.len(), 1, "one password dialog: {admin:#?}");
+    let lines: Vec<&str> = admin[0].lines().collect();
+    assert_eq!(
+        lines[0], "/bin/launchctl bootout 'system/com.nordvpn.macos.helper' || true",
+        "the daemon is stopped first, in the same command"
+    );
+    assert!(lines[1..].iter().all(|l| l.starts_with("/bin/mv -n -- ")));
     assert!(admin[0].contains("com.nordvpn.macos.helper.plist"));
     assert!(admin[0].contains("com.google.GoogleUpdater.wake.plist"));
-    assert_eq!(
-        admin[1],
-        "/bin/launchctl bootout 'system/com.nordvpn.macos.helper' || true"
-    );
+    let script = cleancraft_core::sys::parse_admin_script(&admin[0]).expect("our own shape");
+    assert_eq!(script.stops, vec!["system/com.nordvpn.macos.helper"]);
+    assert_eq!(script.moves.len(), 2);
     let calls = fake.calls();
     for l in [
         "com.google.keystone.agent",
@@ -285,7 +289,7 @@ fn a_cancelled_password_dialog_skips_the_admin_items_and_the_rest_runs() {
 }
 
 #[test]
-fn a_daemon_stop_cancelled_after_the_move_is_reported_and_undo_still_works() {
+fn a_daemon_whose_file_does_not_move_is_never_stopped() {
     let s = startup();
     let env = &s.mac.env;
     allow(env);
@@ -295,29 +299,28 @@ fn a_daemon_stop_cancelled_after_the_move_is_reported_and_undo_still_works() {
         env,
         &SelectArgs {
             plan_id: plan_id.clone(),
-            paths: Some(vec![shown(&s.mac, &s.nord)]),
+            paths: Some(vec![shown(&s.mac, &s.nord), shown(&s.mac, &s.updater_wake)]),
             ..Default::default()
         },
     )
     .unwrap();
-    // The move is approved; the second dialog (stopping the daemon) is cancelled.
-    let f = env.fake_sys().unwrap();
-    f.answer_full(
-        "admin:/bin/launchctl bootout 'system/com.nordvpn.macos.helper' || true",
-        cleancraft_core::sys::CmdOut {
-            status: 1,
-            stdout: String::new(),
-            stderr: "User canceled. (-128)".into(),
-        },
-    );
+    // macOS refuses even the administrator for the daemon's file.
+    env.fake_sys().unwrap().fail_admin_move(&s.nord);
     let r = exec(env, &plan_id, p["digest"].as_str().unwrap()).unwrap();
     assert_eq!(r["moved"].as_array().unwrap().len(), 1);
-    let ran = &r["also_ran"][0];
-    assert_eq!(ran["ok"], false);
-    assert!(ran["output"].as_str().unwrap().contains("next restart"));
-    assert!(!s.nord.exists());
+    assert_eq!(r["skipped"][0]["path"], shown(&s.mac, &s.nord));
+    assert!(s.nord.exists() && !s.updater_wake.exists());
+    // The stop was asked for in the same command (the file was still there when it ran), but
+    // nothing says the daemon stopped, so the journal holds no line about it.
+    assert!(
+        !executor::history(env).iter().any(|rec| matches!(
+            &rec.kind,
+            ActionKind::Command { command, .. } if command.contains("system/com.nordvpn")
+        )),
+        "a daemon whose file stayed was reported as stopped"
+    );
     executor::undo_plan(env, r["undo_with"].as_str().unwrap());
-    assert!(s.nord.exists());
+    assert!(s.updater_wake.exists());
 }
 
 #[test]
