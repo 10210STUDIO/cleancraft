@@ -71,6 +71,14 @@ pub enum Cmd {
     /// Run the menu bar agent (live CPU and memory, scheduled scans, notifications). Started
     /// at login when Settings > "Show CleanCraft in the menu bar" is on. It never cleans.
     Agent,
+    /// The menu bar panel the agent opens under its icon (internal: started by the agent,
+    /// which reads its commands on stdout and closes it by closing stdin).
+    #[command(hide = true)]
+    Panel {
+        /// Top-left corner in points, "x,y".
+        #[arg(long, allow_hyphen_values = true)]
+        at: String,
+    },
     /// Undo of "Connect AI Apps": `mcp-setup remove <config file> [--drop-empty]`.
     #[command(name = "mcp-setup")]
     McpSetup {
@@ -253,6 +261,7 @@ pub fn run_cmd(env: &Env, cmd: Cmd) -> anyhow::Result<()> {
         }
         Cmd::Startup => crate::cli_perf::startup(env, &mut std::io::stdout())?,
         Cmd::Agent => crate::agent::run(env)?,
+        Cmd::Panel { at } => crate::panel::run(env, &at)?,
         Cmd::Update(a) => crate::cli_update::run(
             env,
             &a,

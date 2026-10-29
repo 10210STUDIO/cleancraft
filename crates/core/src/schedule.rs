@@ -242,8 +242,9 @@ pub struct MenuModel {
 
 pub const OPEN_APP: &str = "Open CleanCraft";
 pub const QUICK_SWEEP: &str = "Quick Sweep...";
-pub const PAUSE: &str = "Pause Notifications";
-pub const RESUME: &str = "Resume Notifications";
+/// Pause stops scheduled scans and notifications (the menu bar panel and menu, and Settings).
+pub const PAUSE: &str = "Pause Scans and Notifications";
+pub const RESUME: &str = "Resume Scans and Notifications";
 pub const QUIT: &str = "Quit Menu Bar Agent";
 pub const DISK_LOW_BADGE: &str = "Disk low";
 
@@ -362,7 +363,8 @@ impl Agent {
     }
 
     /// The periodic work: a scheduled scan when one is due, and the disk alert at most once a
-    /// day. Notifications are shown unless paused. The state is saved.
+    /// day. While paused, scheduled scans are skipped and notifications are not shown. The
+    /// state is saved.
     pub fn check(
         &mut self,
         env: &Env,
@@ -377,14 +379,18 @@ impl Agent {
             self.state.key = key;
             self.state.armed = (settings.scan_every != ScanEvery::Off).then(|| secs(now));
         }
-        if due(
+        let is_due = due(
             settings.scan_every,
             settings.scan_hour,
             settings.scan_weekday,
             now,
             self.state.last_scan.and_then(from_secs),
             self.state.armed.and_then(from_secs),
-        ) {
+        );
+        if is_due && settings.notifications_paused {
+            // Paused: the moment passes without a scan, and resuming does not catch up on it.
+            self.state.armed = Some(secs(now));
+        } else if is_due {
             let found = scan_only(env, settings, &self.sources);
             // A light home measure for Mac Health's "What grew" (at most once a day).
             let _ = crate::health::record_baseline(env, chrono::Utc::now().timestamp());

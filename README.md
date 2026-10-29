@@ -13,7 +13,7 @@ An original macOS cleaner and maintenance app, written in Rust (egui), with a co
 - **Apps**: App Remover (with leftovers, several apps at once) and App Updates.
 - **Files**: Large & Old Files, Duplicates, Similar Images, Disk Map.
 - **Live Monitor and Mac Health**: CPU, memory, storage, battery, network, recommendations and free space history.
-- **Menu bar agent** (optional): live figures, scheduled scans (look only) and notifications.
+- **Menu bar agent** (optional): a small icon that opens a live panel (CPU, memory, disk, battery, network, busiest apps, what waits for review), scheduled scans (look only) and notifications.
 
 Every list has search, filters and sorting. The full feature contract, with the status of each feature, is in [docs/FEATURES.md](docs/FEATURES.md).
 

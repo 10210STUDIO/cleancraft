@@ -5,6 +5,9 @@
 //! every few seconds, runs the schedule and alert checks of [`cleancraft_core::schedule`] and
 //! carries out menu choices; the main thread runs the status item ([`crate::tray`], the only
 //! macOS code). They talk over two channels: menu models one way, menu actions the other.
+//! A click on the icon opens the live panel, a separate `cleancraft panel` process
+//! ([`crate::panel`]) that reads on its own while open; its buttons come back here as the
+//! same menu actions, so this worker stays the only writer of the agent's state.
 //!
 //! The agent never cleans or moves anything: it scans (look only), notifies and opens the app.
 

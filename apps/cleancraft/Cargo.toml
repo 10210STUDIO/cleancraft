@@ -20,6 +20,8 @@ clap = { workspace = true }
 egui = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11"] }
 serde_json = { workspace = true }
+# Reads the menu bar template PNG (tray.rs).
+image = { workspace = true }
 tokio = { workspace = true }
 rmcp = { workspace = true }
 
@@ -32,3 +34,6 @@ winit = { version = "0.30.13", default-features = false }
 # Notifications posted as CleanCraft (not Script Editor), reporting a click, so a click opens
 # the app on the notification's page (U7-2). Safe API; osascript stays the fallback.
 mac-notification-sys = "0.6.15"
+# Control-click on the status item shows the compact menu (NSEvent's modifier flags). Same
+# version and feature tray-icon already uses.
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSEvent"] }

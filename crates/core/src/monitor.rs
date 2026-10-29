@@ -577,6 +577,8 @@ pub struct Sampler {
     trash: Option<(f64, (Option<u64>, Option<String>))>,
     /// Battery cycles and health (ioreg), read again after [`SLOW_FACTS_SECS`].
     battery_io: Option<(f64, (Option<u32>, Option<u8>))>,
+    /// Leave the Trash unmeasured (the menu bar panel does not show it).
+    skip_trash: bool,
 }
 
 /// Facts that change slowly (Trash size, battery wear) are read at most this often.
@@ -604,6 +606,15 @@ fn run_text(env: &Env, prog: &str, args: &[&str]) -> Result<String, String> {
 impl Sampler {
     pub fn new() -> Sampler {
         Sampler::default()
+    }
+
+    /// A sampler that never walks the Trash (its size stays `None`, with no problem noted):
+    /// the menu bar panel reads every second and shows no Trash size.
+    pub fn without_trash() -> Sampler {
+        Sampler {
+            skip_trash: true,
+            ..Sampler::default()
+        }
     }
 
     /// Read everything once. `now` is seconds since the epoch (fractions allowed); speeds use
@@ -715,6 +726,7 @@ impl Sampler {
         };
 
         let trash = match &self.trash {
+            _ if self.skip_trash => (None, None),
             Some((at, v)) if now - at < SLOW_FACTS_SECS && now >= *at => v.clone(),
             _ => {
                 let v = trash_size(env);
