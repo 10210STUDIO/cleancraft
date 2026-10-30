@@ -335,3 +335,29 @@ fn remove_agent_plist_through_the_plan_with_bootout_after_the_move_and_undo() {
     executor::undo_plan(&m.env, &rep.plan_id);
     assert!(helper_path.exists());
 }
+
+#[test]
+fn an_empty_launch_list_says_it_names_no_program() {
+    // Google Keystone leaves such empty lists on a real Mac (`plutil -p` prints `{}`).
+    let m = tp::startup_mac();
+    let p = m
+        .env
+        .home_path("Library/LaunchAgents/com.google.keystone.agent.plist");
+    std::fs::write(
+        &p,
+        r#"<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict/></plist>"#,
+    )
+    .unwrap();
+    let plan = features::scan(&m.env, &Settings::default(), FeatureId::LoginItems).unwrap();
+    let it = plan.items.iter().find(|i| i.path == p).unwrap();
+    assert_eq!(
+        it.reason,
+        "com.google.keystone.agent: names no program, so it runs nothing"
+    );
+    let old = plan
+        .items
+        .iter()
+        .find(|i| i.path.ends_with("com.example.old.plist"))
+        .unwrap();
+    assert!(old.reason.contains("is missing"), "{}", old.reason);
+}

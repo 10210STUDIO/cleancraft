@@ -1148,11 +1148,13 @@ impl Feature for StartupFeature {
                 continue;
             }
             (ctx.progress)(&it.plist_shown);
-            let program = it.program.clone().unwrap_or_else(|| "no program".into());
-            let reason = if it.program_exists {
-                format!("{}: runs {program} ({})", it.label, it.signer.label())
-            } else {
-                format!("{}: its program {program} is missing", it.label)
+            // An empty list (old Google Keystone ones on a real Mac) names no program at all.
+            let reason = match &it.program {
+                Some(p) if it.program_exists => {
+                    format!("{}: runs {p} ({})", it.label, it.signer.label())
+                }
+                Some(p) => format!("{}: its program {p} is missing", it.label),
+                None => format!("{}: names no program, so it runs nothing", it.label),
             };
             let id = plan.push(
                 it.plist.clone(),

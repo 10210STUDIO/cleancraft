@@ -140,7 +140,12 @@ pub fn run(env: &Env, cmd: AppsCmd, out: &mut dyn Write) -> anyhow::Result<()> {
                 writeln!(out, "{:<28} {state}", u.name)?;
             }
             for m in &r.macos {
-                writeln!(out, "macOS: {} {}", m.title, m.version)?;
+                // The title often has the version already ("macOS 27.2"), as on the app page.
+                if m.title.contains(&m.version) {
+                    writeln!(out, "macOS: {}", m.title)?;
+                } else {
+                    writeln!(out, "macOS: {} {}", m.title, m.version)?;
+                }
             }
             if let Some(e) = &r.macos_error {
                 writeln!(out, "macOS: {e}")?;
@@ -207,9 +212,16 @@ mod tests {
         );
         assert!(r.is_err(), "Apple app refused");
 
+        // softwareupdate output from macOS 26: the version is in the title once, then on its own.
+        mac.env.fake_sys().unwrap().answer(
+            "/usr/sbin/softwareupdate --list",
+            "* Label: macOS 27.2-27C5\n\tTitle: macOS 27.2, Version: 27.2, Size: 1000KiB, Recommended: YES, Action: restart,\n* Label: Safari27.2TahoeAuto-27.2\n\tTitle: Safari, Version: 27.2, Size: 100KiB, Recommended: YES,\n",
+        );
         let (r, s) = text(&mac.env, AppsCmd::Updates { json: false });
         r.unwrap();
         assert!(s.contains("1.0 -> 1.1"), "{s}");
+        assert!(s.contains("macOS: macOS 27.2\n"), "{s}");
+        assert!(s.contains("macOS: Safari 27.2\n"), "{s}");
 
         let (r, s) = text(
             &mac.env,

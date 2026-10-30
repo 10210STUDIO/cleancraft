@@ -613,6 +613,15 @@ pub fn check_app(env: &Env, app: &AppInfo) -> Option<UpdateInfo> {
     };
     u.latest = Some(item.shown_version().to_string());
     u.available = is_newer(item, &app.build, &app.version);
+    // Same version, newer build (uTorrent Web 1.6.0 build 6413 then 6575): show the builds.
+    if u.available
+        && u.latest.as_deref() == Some(u.installed.as_str())
+        && !app.build.is_empty()
+        && !item.version.is_empty()
+    {
+        u.installed = format!("{} ({})", u.installed, app.build);
+        u.latest = Some(format!("{} ({})", item.shown_version(), item.version));
+    }
     u.download_url = item.download_url.clone();
     u.notes = if !item.description.trim().is_empty() {
         strip_html(&item.description)
