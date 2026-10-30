@@ -58,6 +58,16 @@ fn ps_usage_and_top_lists() {
 }
 
 #[test]
+fn pressure_percent_is_100_minus_memorystatus_level() {
+    assert_eq!(parse_pressure_percent("89"), Some(11));
+    assert_eq!(parse_pressure_percent(" 0\n"), Some(100));
+    assert_eq!(parse_pressure_percent("100"), Some(0));
+    assert_eq!(parse_pressure_percent("101"), None);
+    assert_eq!(parse_pressure_percent("-1"), None);
+    assert_eq!(parse_pressure_percent(""), None);
+}
+
+#[test]
 fn vm_stat_memory_like_activity_monitor() {
     let (page, m) = parse_vm_stat(VM_STAT).unwrap();
     assert_eq!(page, 16384);

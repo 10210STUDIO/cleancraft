@@ -380,12 +380,7 @@ fn memory_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
                 let w = ui.available_width();
                 kit::bar(ui, &t, frac, level_color(app, frac), w);
                 row(app, ui, "Available", &memory_size(m.available()));
-                row(
-                    app,
-                    ui,
-                    "Pressure",
-                    m.pressure.map(|p| p.label()).unwrap_or(UNKNOWN),
-                );
+                row(app, ui, "Pressure", &monitor::pressure_text(m));
                 row(
                     app,
                     ui,

@@ -95,9 +95,9 @@ fn the_panel_shows_live_readings_with_plain_process_names() {
     let l = labels(&h);
     assert!(has(&h, "CPU: 17%, 8 cores"), "{l:?}");
     assert!(
-        l.iter()
-            .any(|x| x.starts_with("Memory: ")
-                && x.ends_with(" GB used, of 16.0 GB, pressure normal")),
+        l.iter().any(
+            |x| x.starts_with("Memory: 11% pressure, ") && x.ends_with(" GB of 16.0 GB in use")
+        ),
         "{l:?}"
     );
     assert!(has(&h, "Free space: 81.9 GB free, of 500 GB"), "{l:?}");

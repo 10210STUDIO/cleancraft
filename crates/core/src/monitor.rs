@@ -3,7 +3,7 @@
 //!
 //! Commands (each one cheap, all read-only):
 //! - `/usr/sbin/sysctl hw.memsize hw.ncpu kern.boottime vm.loadavg vm.swapusage
-//!   kern.memorystatus_vm_pressure_level` ("name: value" lines, parsed by name so a key the
+//!   kern.memorystatus_vm_pressure_level kern.memorystatus_level` ("name: value" lines, parsed by name so a key the
 //!   system does not know only loses that value).
 //! - `/usr/bin/top -l 2 -n 0 -s 1` for the CPU load (the second sample covers the last second).
 //!   When it fails, the load is the sum of `ps` CPU shares divided by the number of cores.
@@ -39,13 +39,14 @@ pub const TOP_APPS: usize = 5;
 /// Points kept for the CPU history line.
 pub const CPU_HISTORY: usize = 60;
 
-pub const SYSCTL_KEYS: [&str; 6] = [
+pub const SYSCTL_KEYS: [&str; 7] = [
     "hw.memsize",
     "hw.ncpu",
     "kern.boottime",
     "vm.loadavg",
     "vm.swapusage",
     "kern.memorystatus_vm_pressure_level",
+    "kern.memorystatus_level",
 ];
 
 /// The administrator command behind "Free Up RAM".
@@ -105,6 +106,10 @@ pub struct Memory {
     /// File cache macOS gives back on demand.
     pub cached: u64,
     pub pressure: Option<Pressure>,
+    /// Memory pressure in percent (100 minus `kern.memorystatus_level`, the share macOS
+    /// counts as free), the figure `memory_pressure` and other cleaners show.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pressure_percent: Option<u8>,
     pub swap_used: Option<u64>,
     pub swap_total: Option<u64>,
     pub top: Vec<AppUse>,
@@ -120,6 +125,15 @@ impl Memory {
             0.0
         } else {
             self.used as f64 / self.total as f64
+        }
+    }
+
+    /// How full the memory gauges are: the pressure when macOS gave it, else the used share.
+    /// The used share stays high on a healthy Mac because macOS keeps memory busy on purpose.
+    pub fn gauge_fraction(&self) -> f64 {
+        match self.pressure_percent {
+            Some(p) => p as f64 / 100.0,
+            None => self.used_fraction(),
         }
     }
 }
@@ -289,6 +303,22 @@ pub fn parse_pressure_level(v: &str) -> Option<Pressure> {
     }
 }
 
+/// "11% (Normal)", "Normal" or "Unknown": the pressure as Live Monitor and the CLI show it.
+pub fn pressure_text(m: &Memory) -> String {
+    let label = m.pressure.map(|p| p.label());
+    match (m.pressure_percent, label) {
+        (Some(p), Some(l)) => format!("{p}% ({l})"),
+        (Some(p), None) => format!("{p}%"),
+        (None, l) => l.unwrap_or(UNKNOWN).into(),
+    }
+}
+
+/// `kern.memorystatus_level` (percent of memory macOS counts as free) as pressure percent.
+pub fn parse_pressure_percent(v: &str) -> Option<u8> {
+    let free: u8 = v.trim().parse().ok()?;
+    (free <= 100).then(|| 100 - free)
+}
+
 /// `top -l 2 -n 0 -s 1`: the last "CPU usage: 7.69% user, 10.25% sys, 82.5% idle" line.
 /// Returns (load, user, sys) in percent.
 pub fn parse_top_cpu(stdout: &str) -> Option<(f64, f64, f64)> {
@@ -425,6 +455,7 @@ pub fn memory_from_vm_stat(total: u64, page: u64, m: &BTreeMap<String, u64>) -> 
         compressed,
         cached,
         pressure: None,
+        pressure_percent: None,
         swap_used: None,
         swap_total: None,
         top: Vec::new(),
@@ -697,6 +728,9 @@ impl Sampler {
                         m.pressure = sysctl
                             .get("kern.memorystatus_vm_pressure_level")
                             .and_then(|v| parse_pressure_level(v));
+                        m.pressure_percent = sysctl
+                            .get("kern.memorystatus_level")
+                            .and_then(|v| parse_pressure_percent(v));
                         if let Some((u, t)) =
                             sysctl.get("vm.swapusage").and_then(|v| parse_swapusage(v))
                         {
@@ -956,7 +990,7 @@ pub fn menu_bar_title(s: &Snapshot) -> String {
     let ram = s
         .memory
         .as_ref()
-        .map(|m| pct(m.used_fraction() * 100.0))
+        .map(|m| pct(m.gauge_fraction() * 100.0))
         .unwrap_or("?".into());
     format!("CPU {cpu} RAM {ram}")
 }

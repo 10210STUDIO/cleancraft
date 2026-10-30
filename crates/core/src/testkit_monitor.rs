@@ -16,13 +16,16 @@ use crate::sys::{CmdOut, FakeSys};
 use crate::testkit::FakeMac;
 
 // SAMPLE: `sysctl hw.memsize hw.ncpu kern.boottime vm.loadavg vm.swapusage
-// kern.memorystatus_vm_pressure_level` on an Apple silicon Mac.
+// kern.memorystatus_vm_pressure_level kern.memorystatus_level` on an Apple silicon Mac
+// (kern.memorystatus_level checked on macOS 26.6.2: it is 100 minus `memory_pressure`'s
+// pressure, the "free percentage" that tool prints).
 pub const SYSCTL: &str = "hw.memsize: 17179869184
 hw.ncpu: 8
 kern.boottime: { sec = 1760000000, usec = 123456 } Thu Oct  9 08:53:20 2025
 vm.loadavg: { 1.85 2.10 2.30 }
 vm.swapusage: total = 2048.00M  used = 1024.50M  free = 1023.50M  (encrypted)
 kern.memorystatus_vm_pressure_level: 1
+kern.memorystatus_level: 89
 ";
 
 // SAMPLE: `top -l 2 -n 0 -s 1` (two samples; the first covers time since boot).

@@ -31,7 +31,7 @@ pub fn status_text(s: &Snapshot) -> String {
             "{} of {} used, pressure {}",
             memory_size(m.used),
             memory_size(m.total),
-            m.pressure.map(|p| p.label()).unwrap_or(UNKNOWN)
+            monitor::pressure_text(m)
         )))
     ));
     o.push(format!(

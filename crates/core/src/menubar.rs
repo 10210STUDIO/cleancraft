@@ -355,16 +355,22 @@ pub fn panel_view(snap: Option<&Snapshot>, reviews: &[Review], settings: &Settin
                 Some(monitor::Pressure::Warning | monitor::Pressure::Critical)
             );
             Meter {
-                value: format!("{} used", memory_size(m.used)),
-                detail: match m.pressure {
-                    Some(p) => format!(
+                value: match m.pressure_percent {
+                    Some(p) => format!("{p}% pressure"),
+                    None => format!("{} used", memory_size(m.used)),
+                },
+                detail: match (m.pressure_percent, m.pressure) {
+                    (Some(_), _) => {
+                        format!("{} of {} in use", memory_size(m.used), memory_size(m.total))
+                    }
+                    (None, Some(p)) => format!(
                         "of {}, pressure {}",
                         memory_size(m.total),
                         p.label().to_lowercase()
                     ),
-                    None => format!("of {}", memory_size(m.total)),
+                    (None, None) => format!("of {}", memory_size(m.total)),
                 },
-                fill: Some(m.used_fraction().clamp(0.0, 1.0) as f32),
+                fill: Some(m.gauge_fraction().clamp(0.0, 1.0) as f32),
                 warn: pressed,
             }
         }
@@ -644,6 +650,24 @@ mod tests {
     }
 
     #[test]
+    fn without_the_pressure_percent_the_panel_shows_memory_used() {
+        let m = crate::testkit_monitor::sweep_mac();
+        let fake = m.env.fake_sys().expect("fake");
+        crate::testkit_monitor::answer_all(fake);
+        fake.answer(
+            "sysctl",
+            &crate::testkit_monitor::SYSCTL.replace("kern.memorystatus_level: 89\n", ""),
+        );
+        let snap = monitor::Sampler::new().sample(&m.env, 1000.0);
+        let mem = snap.memory.clone().expect("memory");
+        assert_eq!(mem.pressure_percent, None);
+        let v = panel_view(Some(&snap), &[], &Settings::default());
+        assert!(v.memory.value.ends_with(" GB used"), "{}", v.memory.value);
+        assert_eq!(v.memory.detail, "of 16.0 GB, pressure normal");
+        assert_eq!(v.memory.fill, Some(mem.used_fraction() as f32));
+    }
+
+    #[test]
     fn the_view_reads_the_sample_mac() {
         let m = crate::testkit_monitor::sweep_mac();
         let fake = m.env.fake_sys().expect("fake");
@@ -655,8 +679,14 @@ mod tests {
         assert!(!v.reading);
         assert_eq!(v.cpu.value, "17%");
         assert_eq!(v.cpu.detail, "8 cores");
-        assert!(v.memory.value.ends_with(" GB used"), "{}", v.memory.value);
-        assert_eq!(v.memory.detail, "of 16.0 GB, pressure normal");
+        // kern.memorystatus_level 89: 11% pressure, and the bar follows the pressure.
+        assert_eq!(v.memory.value, "11% pressure");
+        assert!(
+            v.memory.detail.ends_with(" GB of 16.0 GB in use"),
+            "{}",
+            v.memory.detail
+        );
+        assert_eq!(v.memory.fill, Some(0.11));
         assert_eq!(v.disk.value, "81.9 GB free");
         assert_eq!(v.disk.detail, "of 500 GB");
         let b = v.battery.clone().expect("a MacBook");
