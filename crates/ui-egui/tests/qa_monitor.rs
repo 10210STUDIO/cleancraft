@@ -65,7 +65,8 @@ fn cards_show_the_parsed_reading() {
     // Recalculated from the vm_stat sample: (anonymous - purgeable + wired + compressor) pages.
     assert_eq!(mem.used, (330_000 + 130_000 + 50_000) * 16384);
     assert!(has(&h, &memory_size(mem.available())));
-    assert!(has(&h, "Normal"));
+    // Pressure: 100 - kern.memorystatus_level (89 in the sample), with the level's label.
+    assert!(has(&h, "11% (Normal)"));
     assert!(has(&h, &memory_size(mem.swap_used.unwrap())));
     for g in cleancraft_core::proc_names::top_groups_by_memory(&s.processes, mem.top.len()) {
         assert!(has(&h, &memory_size(g.memory)), "{}", g.name);

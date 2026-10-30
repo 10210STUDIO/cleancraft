@@ -40,6 +40,8 @@ fn full_snapshot_from_tools() {
     assert_eq!(mem.total, 17_179_869_184);
     assert_eq!(mem.used, (330_000 + 130_000 + 50_000) * 16384);
     assert_eq!(mem.pressure, Some(Pressure::Normal));
+    assert_eq!(mem.pressure_percent, Some(11));
+    assert_eq!(pressure_text(mem), "11% (Normal)");
     assert_eq!(mem.swap_total, Some(2048 * 1048576));
     assert_eq!(mem.top[0].name, "Xcode");
 
@@ -216,9 +218,8 @@ fn kinds(s: &Snapshot) -> Vec<AlertKind> {
 fn menu_bar_texts() {
     let m = mac();
     let snap = Sampler::new().sample(&m.env, NOW);
-    let mem = snap.memory.as_ref().unwrap();
-    let ram = (mem.used as f64 / mem.total as f64 * 100.0).round();
-    assert_eq!(menu_bar_title(&snap), format!("CPU 17% RAM {ram}%"));
+    // RAM is the pressure (100 - kern.memorystatus_level 89), like `memory_pressure`.
+    assert_eq!(menu_bar_title(&snap), "CPU 17% RAM 11%");
     let e = menu_bar_entries(&snap);
     assert_eq!(e.last().unwrap(), "Quit CleanCraft");
     assert!(e.contains(&"Battery: 64%, discharging".to_string()));
