@@ -32,6 +32,8 @@ pub struct State {
     running: Option<Job<Vec<RunResult>>>,
     pub results: BTreeMap<String, RunResult>,
     pub show_log: BTreeSet<String>,
+    /// A task to tick and confirm once the list is checked (route `task:<id>`).
+    pub ask: Option<String>,
 }
 
 impl State {
@@ -153,6 +155,10 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             false,
         );
         return;
+    }
+    if let Some(id) = app.tasks.ask.take() {
+        app.tasks.selected = BTreeSet::from([id]);
+        open_confirm(app);
     }
     let n = app.tasks.selected.len();
     // The actions stay in reach at the bottom, like every other page's.

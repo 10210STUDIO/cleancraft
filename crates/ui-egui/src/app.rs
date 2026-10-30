@@ -314,6 +314,7 @@ impl CleanApp {
                 Page::Feature(FeatureId::Uninstaller)
             }
             AppRoute::BatterySettings => self.page,
+            AppRoute::Task(_) => Page::Feature(FeatureId::Maintenance),
         };
         match r {
             AppRoute::History => self.history.reload(&self.env),
@@ -340,6 +341,7 @@ impl CleanApp {
                 self.fda_dismissed = false;
                 self.settings_page.focus_fda = true;
             }
+            AppRoute::Task(id) => self.tasks.ask = Some(id.clone()),
             AppRoute::ConnectAi => pages::welcome::refresh(self),
             AppRoute::Health => pages::health::refresh_if_old(self),
             _ => {}
