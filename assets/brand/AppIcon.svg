@@ -1,48 +1,41 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- CleanCraft app icon, Deep Ocean. 1024 canvas, 824 tile with a 100 margin (Apple's macOS
-     icon grid). Rendered to assets/AppIcon.png by scripts/render-icon.sh. See docs/design/BRAND.md. -->
+<!-- CleanCraft app icon, Graphite Lime. 1024 canvas, 824 tile with a 100 margin (Apple's
+     macOS icon grid). Rendered to assets/AppIcon.png by scripts/render-icon.sh.
+     See docs/design/BRAND.md. -->
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <defs>
     <path id="tile" d="M375.2 100.0 H648.8 C728.1 100.0 767.7 100.0 810.3 113.5 C856.9 130.4 893.6 167.1 910.5 213.7 C924.0 256.3 924.0 295.9 924.0 375.2 V648.8 C924.0 728.1 924.0 767.7 910.5 810.3 C893.6 856.9 856.9 893.6 810.3 910.5 C767.7 924.0 728.1 924.0 648.8 924.0 H375.2 C295.9 924.0 256.3 924.0 213.7 910.5 C167.1 893.6 130.4 856.9 113.5 810.3 C100.0 767.7 100.0 728.1 100.0 648.8 V375.2 C100.0 295.9 100.0 256.3 113.5 213.7 C130.4 167.1 167.1 130.4 213.7 113.5 C256.3 100.0 295.9 100.0 375.2 100.0Z"/>
-    <path id="drop" d="M50 10 C50 10 22 42 22 60 A28 28 0 0 0 78 60 C78 42 50 10 50 10 Z"/>
+    <!-- The mark: two nested "C" arcs (a CC monogram) and a small sky dot, 100 unit grid. -->
+    <path id="arcOuter" d="M74 24 A36 36 0 1 0 74 76"/>
+    <path id="arcInner" d="M64 36 A19 19 0 1 0 64 64"/>
     <clipPath id="tileClip"><use href="#tile"/></clipPath>
-    <clipPath id="dropClip"><use href="#drop"/></clipPath>
 
-    <!-- Tile: blue #2F7BFF at the top to #1546B8 at the bottom, at 160 degrees. -->
+    <!-- Tile: graphite #26292D at the top to #141618 at the bottom, at 160 degrees. -->
     <linearGradient id="tileFill" gradientUnits="userSpaceOnUse" x1="371" y1="125" x2="653" y2="899">
-      <stop offset="0" stop-color="#3A86FF"/>
-      <stop offset="0.12" stop-color="#2F7BFF"/>
-      <stop offset="1" stop-color="#1546B8"/>
+      <stop offset="0" stop-color="#2E3135"/>
+      <stop offset="0.12" stop-color="#26292D"/>
+      <stop offset="1" stop-color="#141618"/>
     </linearGradient>
     <!-- Soft light from above, inside the tile. -->
     <radialGradient id="tileGlow" gradientUnits="userSpaceOnUse" cx="512" cy="150" r="560">
-      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.16"/>
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.10"/>
       <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
     </radialGradient>
-    <!-- Deeper water towards the bottom edge. -->
+    <!-- Deeper shade towards the bottom edge. -->
     <linearGradient id="tileDeep" gradientUnits="userSpaceOnUse" x1="0" y1="600" x2="0" y2="924">
-      <stop offset="0" stop-color="#071C55" stop-opacity="0"/>
-      <stop offset="1" stop-color="#071C55" stop-opacity="0.22"/>
+      <stop offset="0" stop-color="#05060A" stop-opacity="0"/>
+      <stop offset="1" stop-color="#05060A" stop-opacity="0.30"/>
     </linearGradient>
     <!-- Top inner highlight: a hairline that fades out down the sides. -->
     <linearGradient id="rim" gradientUnits="userSpaceOnUse" x1="0" y1="100" x2="0" y2="420">
-      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.55"/>
-      <stop offset="0.25" stop-color="#FFFFFF" stop-opacity="0.12"/>
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.35"/>
+      <stop offset="0.25" stop-color="#FFFFFF" stop-opacity="0.08"/>
       <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
     </linearGradient>
 
-    <!-- Drop body: white with a cool, soft shade on the lower right. -->
-    <linearGradient id="dropFill" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#FFFFFF"/>
-      <stop offset="1" stop-color="#EEF4FF"/>
-    </linearGradient>
-    <radialGradient id="dropShade" gradientUnits="userSpaceOnUse" cx="42" cy="50" r="44">
-      <stop offset="0.55" stop-color="#9DB9EC" stop-opacity="0"/>
-      <stop offset="1" stop-color="#9DB9EC" stop-opacity="0.55"/>
-    </radialGradient>
-    <linearGradient id="sweepFill" gradientUnits="userSpaceOnUse" x1="36" y1="0" x2="62" y2="0">
-      <stop offset="0" stop-color="#2F7BFF"/>
-      <stop offset="1" stop-color="#2468F0"/>
+    <linearGradient id="outerFill" gradientUnits="userSpaceOnUse" x1="38" y1="24" x2="98" y2="76">
+      <stop offset="0" stop-color="#D6FF5C"/>
+      <stop offset="1" stop-color="#C6F432"/>
     </linearGradient>
 
     <filter id="tileShadow" x="-20%" y="-20%" width="140%" height="140%">
@@ -54,13 +47,10 @@
     <filter id="soft1" x="-50%" y="-50%" width="200%" height="200%">
       <feGaussianBlur stdDeviation="0.9"/>
     </filter>
-    <filter id="soft06" x="-50%" y="-50%" width="200%" height="200%">
-      <feGaussianBlur stdDeviation="0.6"/>
-    </filter>
   </defs>
 
   <!-- Shadow of the tile in the margin, like a macOS app icon. -->
-  <use href="#tile" fill="#000000" fill-opacity="0.32" transform="translate(0 10)" filter="url(#tileShadow)"/>
+  <use href="#tile" fill="#000000" fill-opacity="0.34" transform="translate(0 10)" filter="url(#tileShadow)"/>
 
   <!-- Tile. -->
   <use href="#tile" fill="url(#tileFill)"/>
@@ -70,32 +60,24 @@
   </g>
   <use href="#tile" fill="none" stroke="url(#rim)" stroke-width="5" clip-path="url(#tileClip)"/>
 
-  <!-- The mark, 100 unit grid, centred on the tile (drop box 22..78 x 10..88). -->
-  <g transform="translate(217 213) scale(5.9)">
-    <!-- Contact shadow under the drop and a soft cast shadow of the drop itself. -->
-    <ellipse cx="50" cy="89" rx="22" ry="3" fill="#051B5C" fill-opacity="0.32" filter="url(#soft4)"/>
-    <use href="#drop" fill="#06205F" fill-opacity="0.38" transform="translate(0 2.6)" filter="url(#soft4)"/>
+  <!-- The mark, 100 unit grid, centred on the tile. -->
+  <g transform="translate(296.22 283.66) scale(4.5667)">
+    <!-- Soft cast shadow under the mark. -->
+    <use href="#arcOuter" fill="none" stroke="#000000" stroke-opacity="0.30" stroke-width="13" stroke-linecap="round" transform="translate(0 2.4)" filter="url(#soft4)"/>
+    <use href="#arcInner" fill="none" stroke="#000000" stroke-opacity="0.22" stroke-width="13" stroke-linecap="round" transform="translate(0 2.0)" filter="url(#soft4)"/>
 
-    <!-- Drop body with its inner shading. -->
-    <use href="#drop" fill="url(#dropFill)"/>
-    <g clip-path="url(#dropClip)">
-      <use href="#drop" fill="url(#dropShade)"/>
-      <!-- A faint inner rim along the lower edge. -->
-      <use href="#drop" fill="none" stroke="#7FA2E0" stroke-opacity="0.35" stroke-width="2.4" transform="translate(0 -0.8)" filter="url(#soft1)"/>
-    </g>
+    <!-- Outer arc: lime. -->
+    <use href="#arcOuter" fill="none" stroke="url(#outerFill)" stroke-width="13" stroke-linecap="round"/>
+    <!-- A faint top-edge highlight along the outer arc. -->
+    <use href="#arcOuter" fill="none" stroke="#FFFFFF" stroke-opacity="0.35" stroke-width="2" stroke-linecap="round" transform="translate(0 -1.1)" filter="url(#soft1)"/>
 
-    <!-- Sweep and its tiny lift. -->
-    <path d="M36 62 Q46 74 62 60" fill="none" stroke="#0F3C9E" stroke-opacity="0.18" stroke-width="7.6" stroke-linecap="round" transform="translate(0 0.9)" filter="url(#soft06)"/>
-    <path d="M36 62 Q46 74 62 60" fill="none" stroke="url(#sweepFill)" stroke-width="7" stroke-linecap="round"/>
+    <!-- Inner arc: white. -->
+    <use href="#arcInner" fill="none" stroke="#F1F3F4" stroke-width="13" stroke-linecap="round"/>
+    <use href="#arcInner" fill="none" stroke="#FFFFFF" stroke-opacity="0.45" stroke-width="2" stroke-linecap="round" transform="translate(0 -1.0)" filter="url(#soft1)"/>
 
-    <!-- Cyan dot. -->
-    <circle cx="66" cy="44.6" r="4" fill="#1E8FD0" fill-opacity="0.22" filter="url(#soft06)"/>
-    <circle cx="66" cy="44" r="4" fill="#39D5FF"/>
-    <circle cx="64.9" cy="42.8" r="1.2" fill="#FFFFFF" fill-opacity="0.75" filter="url(#soft06)"/>
-
-    <!-- Specular highlight on the upper left of the drop. -->
-    <g clip-path="url(#dropClip)">
-      <path d="M33 50 C35 40 42 30 47 23" fill="none" stroke="#FFFFFF" stroke-width="3.2" stroke-linecap="round" filter="url(#soft1)"/>
-    </g>
+    <!-- Sky dot, with a small lift and specular. -->
+    <circle cx="80" cy="50.8" r="7" fill="#000000" fill-opacity="0.22" filter="url(#soft1)"/>
+    <circle cx="80" cy="50" r="7" fill="#5AC8FA"/>
+    <circle cx="78.4" cy="48.2" r="2" fill="#FFFFFF" fill-opacity="0.65" filter="url(#soft1)"/>
   </g>
 </svg>

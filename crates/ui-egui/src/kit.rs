@@ -144,11 +144,11 @@ pub fn dialog_width(ctx: &egui::Context) -> f32 {
     (ctx.content_rect().width() - 160.0).clamp(420.0, 860.0)
 }
 
-/// A dialog's fill (navy, a step above the card).
-pub const DIALOG_FILL: Color32 = Color32::from_rgb(0x12, 0x20, 0x36);
+/// A dialog's fill (graphite, a step above the card).
+pub const DIALOG_FILL: Color32 = Color32::from_rgb(0x17, 0x1A, 0x1C);
 
 /// The colour of a well inside a dialog, for [`scroll_fade`].
-pub const DIALOG_WELL: Color32 = Color32::from_rgb(0x0E, 0x18, 0x29);
+pub const DIALOG_WELL: Color32 = Color32::from_rgb(0x08, 0x09, 0x0A);
 
 /// Under a list in a dialog that scrolls: the list fades at its cut edge and one line says
 /// how many items it holds, so nobody takes the visible rows for all of them.
@@ -375,8 +375,8 @@ pub fn pill(ui: &mut Ui, t: &Tokens, label: &str, kind: Kind, icon: Option<Icon>
                     0.45,
                 );
             }
-            // The brand's call to action on every page: cyan with navy ink (BRAND.md).
-            let a = icons::lerp(theme::BRAND_CYAN_LIGHT, Color32::WHITE, 0.12 * hov);
+            // The brand's call to action on every page: lime with near-black ink (BRAND.md).
+            let a = icons::lerp(theme::ACCENT_LIME_LIGHT, Color32::WHITE, 0.12 * hov);
             let b = icons::lerp(t.accent, Color32::WHITE, 0.12 * hov);
             icons::gradient_tile(&p, r, round, a, b);
             top_sheen(&p, r, round);
@@ -1695,7 +1695,7 @@ pub fn round_action(ui: &mut Ui, t: &Tokens, label: &str, d: f32) -> Response {
         corner,
         Color32::from_black_alpha(80),
     );
-    let a = icons::lerp(theme::BRAND_CYAN_LIGHT, Color32::WHITE, 0.10 * hov);
+    let a = icons::lerp(theme::ACCENT_LIME_LIGHT, Color32::WHITE, 0.10 * hov);
     let b = icons::lerp(t.accent, Color32::WHITE, 0.10 * hov);
     if round {
         icons::gradient_disc(p, c, r.width() / 2.0, a, b);
@@ -1795,8 +1795,8 @@ pub fn progress_bar(ui: &mut Ui, t: &Tokens, meter: &Progress, width: f32) -> Re
                     t.accent.gamma_multiply(0.35),
                     0.6,
                 );
-                // Brand blue into cyan on every page (BRAND.md).
-                icons::gradient_tile(&p, fr, round, theme::BRAND_BLUE, t.accent);
+                // Deep lime into bright lime on every page (BRAND.md).
+                icons::gradient_tile(&p, fr, round, theme::BRAND_LIME_DEEP, t.accent);
                 // A gentle sheen sliding over the filled part while the work goes on.
                 if !meter.is_finished() {
                     let ph = motion::looped(time, 2.4);
@@ -1832,7 +1832,7 @@ pub fn progress_bar(ui: &mut Ui, t: &Tokens, meter: &Progress, width: f32) -> Re
                     &p,
                     band,
                     round,
-                    theme::BRAND_BLUE.gamma_multiply(0.8),
+                    theme::BRAND_LIME_DEEP.gamma_multiply(0.8),
                     t.accent.gamma_multiply(0.8),
                 );
             }
@@ -1948,7 +1948,8 @@ pub fn progress_ring(p: &egui::Painter, c: Pos2, d: f32, t: &Tokens, time: f64) 
         let f1 = (i + 1) as f32 / seg as f32;
         let a0 = (head - len + len * f0).to_radians();
         let a1 = (head - len + len * f1).to_radians();
-        let col = icons::lerp(theme::BRAND_BLUE, t.accent, f1).gamma_multiply(0.25 + 0.75 * f1);
+        let col =
+            icons::lerp(theme::BRAND_LIME_DEEP, t.accent, f1).gamma_multiply(0.25 + 0.75 * f1);
         p.line_segment(
             [
                 c + vec2(a0.cos(), a0.sin()) * r,

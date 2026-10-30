@@ -848,9 +848,9 @@ impl CleanApp {
             ui.add_space(4.0);
             crate::logo::show(ui, crate::logo::SIDEBAR_PT);
             ui.add_space(6.0);
-            // The wordmark: "Clean" in text white, "Craft" in the wordmark blue (BRAND.md).
+            // The wordmark: "Clean" in text white, "Craft" in the wordmark lime (BRAND.md).
             let mut job = egui::text::LayoutJob::default();
-            for (part, color) in [("Clean", t.text), ("Craft", theme::WORDMARK_BLUE)] {
+            for (part, color) in [("Clean", t.text), ("Craft", theme::WORDMARK_LIME)] {
                 job.append(
                     part,
                     0.0,
