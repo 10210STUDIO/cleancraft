@@ -1,5 +1,5 @@
-//! CleanCraft's own look ("Deep Ocean", docs/design/BRAND.md): navy surfaces, an electric
-//! blue brand with a cyan highlight, per-section colour fields, glass cards and Inter type
+//! CleanCraft's own look ("Graphite Lime", docs/design/BRAND.md): graphite surfaces, a lime
+//! brand with a sky highlight, per-section colour fields, glass cards and Inter type
 //! (SIL OFL). Every design token lives here: colours, spacing, radii,
 //! shadows, type sizes and motion timings. Pages and `kit` read them, never their own numbers.
 
@@ -191,9 +191,9 @@ impl Section {
     /// (main colour, second colour) of the section's gradient.
     pub fn colors(self) -> (Color32, Color32) {
         match self {
-            // The brand: cyan into electric blue (Quick Sweep).
+            // The brand: lime into sky (Quick Sweep), the logo's own two colours.
             // Ends chosen so the dark ink label reads at 4.5:1 or more on both (WCAG).
-            Section::Overview => (BRAND_CYAN, rgb(0x3A, 0x84, 0xFF)),
+            Section::Overview => (ACCENT_LIME, ACCENT_SKY),
             // Aqua into sea blue.
             Section::Clean => (rgb(0x4C, 0xE0, 0xD2), rgb(0x2A, 0x9F, 0xD0)),
             // Brand coral into ember.
@@ -211,17 +211,19 @@ impl Section {
     }
 }
 
-/// Brand electric blue: the app icon tile, the progress bar start, graphics. Never text on
-/// navy (4.1:1 on a card).
-pub const BRAND_BLUE: Color32 = rgb(0x2F, 0x7B, 0xFF);
-/// The deep end of the app icon tile's gradient.
-pub const BRAND_DEEP: Color32 = rgb(0x15, 0x46, 0xB8);
-/// Brand cyan: the highlight and the primary button fill (with `on_accent` ink).
-pub const BRAND_CYAN: Color32 = rgb(0x39, 0xD5, 0xFF);
-/// The lighter cyan at the top of a primary button.
-pub const BRAND_CYAN_LIGHT: Color32 = rgb(0x6A, 0xE0, 0xFF);
-/// "Craft" in the wordmark, and links on navy (7.4:1 on a card).
-pub const WORDMARK_BLUE: Color32 = rgb(0x5F, 0xB8, 0xFF);
+/// A deeper, muted lime: the progress bar start, graphics. Never text on graphite.
+pub const BRAND_LIME_DEEP: Color32 = rgb(0x8F, 0xBF, 0x1E);
+/// The deep graphite end of the app icon tile's gradient (docs only; the icon is a PNG).
+pub const BRAND_GRAPHITE_DEEP: Color32 = rgb(0x14, 0x16, 0x18);
+/// Brand lime: the highlight and the primary button fill (with `on_accent` ink), the logo's
+/// outer arc.
+pub const ACCENT_LIME: Color32 = rgb(0xC6, 0xF4, 0x32);
+/// The lighter lime at the top of a primary button.
+pub const ACCENT_LIME_LIGHT: Color32 = rgb(0xDF, 0xFF, 0x66);
+/// Sky: the logo's dot, and the second colour of the brand section gradient.
+pub const ACCENT_SKY: Color32 = rgb(0x5A, 0xC8, 0xFA);
+/// "Craft" in the wordmark, and links on graphite (reads at 4.5:1 or more; see SYSTEM.md).
+pub const WORDMARK_LIME: Color32 = ACCENT_LIME;
 
 const fn rgb(r: u8, g: u8, b: u8) -> Color32 {
     Color32::from_rgb(r, g, b)
@@ -288,7 +290,7 @@ impl Tokens {
     /// The glass card colour as it looks over the backdrop (opaque), for things that must
     /// hide what is under them inside a card.
     pub fn glass_solid(&self) -> Color32 {
-        Color32::from_rgb(0x14, 0x22, 0x38)
+        Color32::from_rgb(0x1D, 0x20, 0x23)
     }
 
     /// Text colour that reads well on the section gradient.
@@ -315,8 +317,8 @@ fn icons_mid(a: Color32, b: Color32) -> Color32 {
     )
 }
 
-/// Dark navy ink for text on colour fills.
-pub const INK: Color32 = Color32::from_rgb(0x06, 0x1A, 0x2E);
+/// Near-black ink for text on colour fills.
+pub const INK: Color32 = Color32::from_rgb(0x10, 0x13, 0x0E);
 
 /// WCAG relative luminance of a colour (0 black, 1 white).
 pub fn luminance(c: Color32) -> f32 {
@@ -351,27 +353,27 @@ pub fn on_color(c: Color32) -> Color32 {
 impl Tokens {
     pub fn dark() -> Tokens {
         Tokens {
-            // Deep Ocean (docs/design/BRAND.md): navy, a darker sidebar, card #142238.
-            bg: Color32::from_rgb(0x0A, 0x14, 0x24),
-            sidebar: Color32::from_rgb(0x08, 0x10, 0x20),
-            card: Color32::from_rgb(0x14, 0x22, 0x38),
-            card_hover: Color32::from_rgb(0x1B, 0x2C, 0x47),
+            // Graphite Lime (docs/design/BRAND.md): graphite, a darker sidebar, card #1D2023.
+            bg: Color32::from_rgb(0x11, 0x13, 0x15),
+            sidebar: Color32::from_rgb(0x0C, 0x0E, 0x10),
+            card: Color32::from_rgb(0x1D, 0x20, 0x23),
+            card_hover: Color32::from_rgb(0x26, 0x2A, 0x2E),
             border: Color32::from_rgba_unmultiplied(255, 255, 255, 22),
-            well: Color32::from_rgb(0x07, 0x0F, 0x1C),
-            // WCAG contrast on glass (#142238): text 14.2, dim 8.8, faint 6.7.
-            text: Color32::from_rgb(0xED, 0xF2, 0xFA),
-            text_dim: Color32::from_rgb(0xB5, 0xC1, 0xD3),
-            text_faint: Color32::from_rgb(0x9B, 0xA9, 0xBE),
-            accent: BRAND_CYAN,
-            accent_dim: Color32::from_rgba_unmultiplied(0x39, 0xD5, 0xFF, 40),
-            on_accent: Color32::from_rgb(0x04, 0x20, 0x3A),
-            danger: Color32::from_rgb(0xFF, 0x7A, 0x59),
+            well: Color32::from_rgb(0x0A, 0x0B, 0x0D),
+            // WCAG contrast on glass (#1D2023): see docs/design/SYSTEM.md for the full table.
+            text: Color32::from_rgb(0xF1, 0xF3, 0xF4),
+            text_dim: Color32::from_rgb(0xBF, 0xC5, 0xCA),
+            text_faint: Color32::from_rgb(0xA1, 0xA7, 0xAD),
+            accent: ACCENT_LIME,
+            accent_dim: Color32::from_rgba_unmultiplied(0xC6, 0xF4, 0x32, 40),
+            on_accent: Color32::from_rgb(0x10, 0x14, 0x06),
+            danger: Color32::from_rgb(0xFF, 0x8A, 0x65),
             warning: Color32::from_rgb(0xFF, 0xB5, 0x47),
-            success: Color32::from_rgb(0x3D, 0xDC, 0x97),
-            overlay: Color32::from_rgba_unmultiplied(2, 6, 14, 150),
-            // Composite over `bg`: #142238 (the card) and #1B2C47 (the card hover).
-            glass: Color32::from_rgba_unmultiplied(0x1B, 0x2C, 0x46, 150),
-            glass_hover: Color32::from_rgba_unmultiplied(0x23, 0x37, 0x57, 175),
+            success: Color32::from_rgb(0x34, 0xD3, 0x99),
+            overlay: Color32::from_rgba_unmultiplied(4, 5, 6, 150),
+            // Composite over `bg`: #1D2023 (the card) and #262A2E (the card hover).
+            glass: Color32::from_rgba_unmultiplied(0x1D, 0x20, 0x23, 150),
+            glass_hover: Color32::from_rgba_unmultiplied(0x26, 0x2A, 0x2E, 175),
             glass_stroke: Color32::from_rgba_unmultiplied(255, 255, 255, 20),
             glass_edge: Color32::from_rgba_unmultiplied(255, 255, 255, 34),
             sec_a: Section::Overview.colors().0,
