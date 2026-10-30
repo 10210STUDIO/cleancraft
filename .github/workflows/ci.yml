@@ -50,7 +50,7 @@ jobs:
   # on APFS.
   macos-check:
     if: ${{ github.event_name == 'pull_request' }}
-    runs-on: macos-14
+    runs-on: macos-latest
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
@@ -67,7 +67,7 @@ jobs:
 
   macos-build:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.full }}
-    runs-on: macos-14
+    runs-on: macos-latest
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
