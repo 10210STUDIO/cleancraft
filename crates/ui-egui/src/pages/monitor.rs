@@ -489,9 +489,9 @@ fn storage_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
                         kit::Kind::Secondary,
                         None,
                     )
-                    .on_hover_text(
+                    .on_hover_text(crate::tr(
                         "Shows how to let CleanCraft read the Trash and other protected places",
-                    )
+                    ))
                     .clicked()
                 {
                     fda = true;
