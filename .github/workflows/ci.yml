@@ -1,7 +1,8 @@
 name: CI
 
 # Every push to main and every pull request: formatting, lints and the core tests on Linux
-# (cheap minutes). Pull requests also get a macOS `cargo check` and clippy of the app crate.
+# (cheap minutes). Pull requests also get a macOS `cargo check`, clippy of the app crate and
+# the core tests.
 # The full UI suite and the macOS release build run on demand (Actions > CI > Run workflow)
 # because macOS minutes cost 10x on a private repo.
 on:
@@ -45,8 +46,8 @@ jobs:
         run: cargo test --workspace --no-fail-fast
 
   # Every pull request: the macOS-only code (menu bar status item, panel, notifications) is
-  # compiled and linted on a Mac, so API mistakes surface on the PR. Check only, no build
-  # artifacts or tests (cheap macOS minutes).
+  # compiled and linted on a Mac, so API mistakes surface on the PR, and the core tests run
+  # on APFS.
   macos-check:
     if: ${{ github.event_name == 'pull_request' }}
     runs-on: macos-14
@@ -59,6 +60,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo check -p cleancraft --all-targets
       - run: cargo clippy -p cleancraft --all-targets -- -D warnings
+      # APFS and macOS tools differ from Linux (case-insensitive names, no non-UTF-8 names,
+      # allocated sizes): the core runs its tests on a Mac too.
+      - name: Core and MCP tests on macOS
+        run: cargo test -p cleancraft-core -p cleancraft-mcp --no-fail-fast
 
   macos-build:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.full }}

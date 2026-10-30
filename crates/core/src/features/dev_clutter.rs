@@ -294,7 +294,7 @@ pub fn code_roots(env: &Env, settings: &Settings) -> (Vec<PathBuf>, Vec<String>)
     for d in DEFAULT_ROOTS {
         let p = env.home_path(d);
         match std::fs::symlink_metadata(&p) {
-            Ok(m) if m.is_dir() => roots.push(p),
+            Ok(m) if m.is_dir() => roots.push(on_disk_spelling(&p)),
             Ok(m) if m.file_type().is_symlink() => notes.push(link_note(&p)),
             _ => {}
         }
@@ -332,6 +332,25 @@ pub fn code_roots(env: &Env, settings: &Settings) -> (Vec<PathBuf>, Vec<String>)
         }
     }
     (out, notes)
+}
+
+/// The name as the folder spells it: on a case-insensitive disk (APFS) `~/work` finds
+/// `~/Work`, and paths shown and moved must read `~/Work/...`.
+fn on_disk_spelling(p: &Path) -> PathBuf {
+    let (Some(parent), Some(name)) = (p.parent(), p.file_name()) else {
+        return p.to_path_buf();
+    };
+    let names: Vec<std::ffi::OsString> = std::fs::read_dir(parent)
+        .map(|rd| rd.flatten().map(|e| e.file_name()).collect())
+        .unwrap_or_default();
+    if names.iter().any(|n| n == name) {
+        return p.to_path_buf();
+    }
+    let want = name.to_string_lossy();
+    names
+        .into_iter()
+        .find(|n| n.to_string_lossy().eq_ignore_ascii_case(&want))
+        .map_or_else(|| p.to_path_buf(), |n| parent.join(n))
 }
 
 /// Whether a project is in use: the age in days of its newest file (build folders, `.git`
