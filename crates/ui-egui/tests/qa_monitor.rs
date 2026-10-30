@@ -139,6 +139,9 @@ fn trash_without_full_disk_access_says_so() {
     let h = open(&m);
     assert!(has(&h, "Unknown"));
     assert!(has(&h, "The Trash size needs Full Disk Access"));
+    let mut h = h;
+    click(&mut h, "Allow Full Disk Access...");
+    assert_eq!(h.state().page, Page::Settings);
 }
 
 #[test]
