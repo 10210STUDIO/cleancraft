@@ -474,3 +474,71 @@ fn reviews_keep_the_newest_three() {
         .collect();
     assert_eq!(texts, ["Review: n4", "Review: n3", "Review: n2"]);
 }
+
+#[test]
+fn memory_alert_after_five_minutes_of_pressure_once_a_day() {
+    use cleancraft_core::monitor::Pressure;
+    let m = FakeMac::new();
+    m.env.fake_sys().expect("fake").answer("osascript", "");
+    let s = Settings::default();
+    assert!(s.memory_alert);
+    let mut a = Agent::new(&m.env, sweep_sources());
+    let mut high = snapshot(&m, 50.0);
+    high.memory.as_mut().expect("memory").pressure = Some(Pressure::Warning);
+    let mut normal = high.clone();
+    normal.memory.as_mut().expect("memory").pressure = Some(Pressure::Normal);
+
+    a.check(&m.env, &s, Some(&high), at("2026-10-20 09:00"));
+    a.check(&m.env, &s, Some(&high), at("2026-10-20 09:04"));
+    assert!(osascripts(&m.env).is_empty(), "under 5 minutes");
+    // A normal reading in between starts the count again.
+    a.check(&m.env, &s, Some(&normal), at("2026-10-20 09:05"));
+    a.check(&m.env, &s, Some(&high), at("2026-10-20 09:06"));
+    a.check(&m.env, &s, Some(&high), at("2026-10-20 09:10"));
+    assert!(osascripts(&m.env).is_empty());
+    let r = a.check(&m.env, &s, Some(&high), at("2026-10-20 09:11"));
+    assert_eq!(r.shown.len(), 1);
+    assert_eq!(r.shown[0].title, "Your Mac is short of memory");
+    assert_eq!(r.shown[0].route.as_deref(), Some("monitor"));
+    // Once a day; off means never.
+    a.check(&m.env, &s, Some(&high), at("2026-10-20 18:00"));
+    assert_eq!(osascripts(&m.env).len(), 1);
+    let off = Settings {
+        memory_alert: false,
+        ..Settings::default()
+    };
+    a.check(&m.env, &off, Some(&high), at("2026-10-21 09:00"));
+    a.check(&m.env, &off, Some(&high), at("2026-10-21 10:00"));
+    assert_eq!(osascripts(&m.env).len(), 1);
+    assert!(history(&m.env).is_empty());
+}
+
+#[test]
+fn trash_alert_over_5_gb_once_a_week() {
+    let m = FakeMac::new();
+    m.env.fake_sys().expect("fake").answer("osascript", "");
+    let s = Settings::default();
+    let mut a = Agent::new(&m.env, sweep_sources());
+    let mut big = snapshot(&m, 50.0);
+    big.storage.trash = Some(6_000_000_000);
+    let mut small = big.clone();
+    small.storage.trash = Some(4_000_000_000);
+
+    a.check(&m.env, &s, Some(&small), at("2026-10-20 09:00"));
+    assert!(osascripts(&m.env).is_empty());
+    let r = a.check(&m.env, &s, Some(&big), at("2026-10-20 10:00"));
+    assert_eq!(r.shown.len(), 1);
+    assert_eq!(r.shown[0].title, "Your Trash is getting big");
+    assert_eq!(r.shown[0].route.as_deref(), Some("scan:trash_bins"));
+    a.check(&m.env, &s, Some(&big), at("2026-10-26 10:00"));
+    assert_eq!(osascripts(&m.env).len(), 1, "within a week");
+    a.check(&m.env, &s, Some(&big), at("2026-10-27 10:00"));
+    assert_eq!(osascripts(&m.env).len(), 2);
+    let off = Settings {
+        trash_alert: false,
+        ..Settings::default()
+    };
+    a.check(&m.env, &off, Some(&big), at("2026-11-10 10:00"));
+    assert_eq!(osascripts(&m.env).len(), 2);
+    assert!(history(&m.env).is_empty());
+}

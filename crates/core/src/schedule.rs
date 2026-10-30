@@ -184,9 +184,20 @@ pub struct AgentState {
     pub last_found: Option<u64>,
     /// The day of the last "disk almost full" notification, "2026-10-20".
     pub disk_alert_day: Option<String>,
+    /// Since when memory pressure has been Warning or Critical without a break.
+    pub pressed_since: Option<i64>,
+    /// The day of the last "memory under pressure" notification.
+    pub memory_alert_day: Option<String>,
+    /// The day of the last "the Trash is big" notification.
+    pub trash_alert_day: Option<String>,
     /// What the menu offers to open, newest last (at most [`REVIEWS_MAX`]).
     pub reviews: Vec<Review>,
 }
+
+/// Memory pressure must stay Warning or Critical this long before it is notified.
+pub const MEMORY_ALERT_AFTER: i64 = 5 * 60;
+/// Days between two "the Trash is big" notifications.
+pub const TRASH_ALERT_DAYS: i64 = 7;
 
 /// Menu items kept for findings.
 pub const REVIEWS_MAX: usize = 3;
@@ -441,10 +452,100 @@ impl Agent {
                 );
             }
         }
+        self.memory_alert(env, settings, snap, now, &mut rep);
+        self.trash_alert(env, settings, snap, now, &mut rep);
         // Free-space history for Mac Health (at most one sample an hour).
         let _ = crate::space_history::record(env);
         let _ = self.state.save(env);
         rep
+    }
+
+    /// Memory pressure Warning or Critical for [`MEMORY_ALERT_AFTER`] without a break: one
+    /// notification a day that opens the Live Monitor (top apps, Free Up RAM).
+    fn memory_alert(
+        &mut self,
+        env: &Env,
+        settings: &Settings,
+        snap: Option<&Snapshot>,
+        now: NaiveDateTime,
+        rep: &mut CheckReport,
+    ) {
+        let pressed = snap.and_then(|s| s.memory.as_ref()).is_some_and(|m| {
+            matches!(
+                m.pressure,
+                Some(monitor::Pressure::Warning | monitor::Pressure::Critical)
+            )
+        });
+        if !pressed || !settings.memory_alert {
+            self.state.pressed_since = None;
+            return;
+        }
+        let since = *self.state.pressed_since.get_or_insert(secs(now));
+        let today = now.date().format("%Y-%m-%d").to_string();
+        if secs(now) - since < MEMORY_ALERT_AFTER
+            || self.state.memory_alert_day.as_deref() == Some(today.as_str())
+        {
+            return;
+        }
+        self.state.memory_alert_day = Some(today);
+        self.state.push_review(Review {
+            text: "Review: memory under pressure".into(),
+            route: "monitor".into(),
+        });
+        self.show(
+            env,
+            settings,
+            Notification {
+                title: "Your Mac is short of memory".into(),
+                subtitle: None,
+                body: "Memory pressure has been high for 5 minutes. Live Monitor shows which apps use the most and can free up RAM.".into(),
+                route: Some("monitor".into()),
+            },
+            rep,
+        );
+    }
+
+    /// The Trash over [`monitor::LARGE_TRASH_BYTES`]: one notification a week that opens
+    /// Trash Bins (scanning, which only looks).
+    fn trash_alert(
+        &mut self,
+        env: &Env,
+        settings: &Settings,
+        snap: Option<&Snapshot>,
+        now: NaiveDateTime,
+        rep: &mut CheckReport,
+    ) {
+        let Some(size) = snap.and_then(|s| s.storage.trash) else {
+            return;
+        };
+        let recent = self
+            .state
+            .trash_alert_day
+            .as_deref()
+            .and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+            .is_some_and(|d| (now.date() - d).num_days() < TRASH_ALERT_DAYS);
+        if !settings.trash_alert || size <= monitor::LARGE_TRASH_BYTES || recent {
+            return;
+        }
+        self.state.trash_alert_day = Some(now.date().format("%Y-%m-%d").to_string());
+        let size = human_size(size);
+        self.state.push_review(Review {
+            text: format!("Review: the Trash holds {size}"),
+            route: "scan:trash_bins".into(),
+        });
+        self.show(
+            env,
+            settings,
+            Notification {
+                title: "Your Trash is getting big".into(),
+                subtitle: None,
+                body: format!(
+                    "It holds {size}. Trash Bins shows what is in it before you empty it."
+                ),
+                route: Some("scan:trash_bins".into()),
+            },
+            rep,
+        );
     }
 
     /// A notice from a watcher: shown (unless paused) and kept as a menu item.
