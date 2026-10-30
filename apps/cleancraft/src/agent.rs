@@ -308,6 +308,16 @@ mod tests {
             Some("quick_sweep"),
             "{QUICK_SWEEP} opens Quick Sweep"
         );
+        // The panel's quick actions open the app on their page, and nothing more.
+        let (quit, _) = w.act(MenuAction::Route("scan:trash_bins"));
+        assert!(!quit);
+        assert_eq!(
+            inbox
+                .poll(&m.env, chrono::Utc::now().timestamp())
+                .as_deref(),
+            Some("scan:trash_bins")
+        );
+        assert!(cleancraft_core::executor::history(&m.env).is_empty());
         let (_, model) = w.act(MenuAction::TogglePause);
         assert!(model.paused);
         assert!(Settings::load(&m.env).notifications_paused);

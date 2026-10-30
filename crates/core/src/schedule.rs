@@ -270,6 +270,8 @@ impl MenuModel {
 pub enum MenuAction {
     /// Open the n-th review (index in [`MenuModel::reviews`]).
     Review(usize),
+    /// Open the app on a fixed route (the panel's quick actions).
+    Route(&'static str),
     Open,
     QuickSweep,
     TogglePause,
@@ -587,6 +589,9 @@ impl Agent {
             }
             MenuAction::QuickSweep => {
                 notify::request_open(env, "quick_sweep")?;
+            }
+            MenuAction::Route(r) => {
+                notify::request_open(env, r)?;
             }
             MenuAction::Review(i) => {
                 // Newest first in the menu, newest last in the state.

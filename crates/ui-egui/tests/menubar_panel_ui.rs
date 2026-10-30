@@ -68,7 +68,7 @@ fn mac() -> FakeMac {
     m
 }
 
-/// Every control and reading lies inside the 340 x 460 panel (the process list scrolls).
+/// Every control and reading lies inside the 340 x 520 panel (the process list scrolls).
 fn all_inside(h: &H) {
     for n in h.root().children_recursive() {
         let a = n.accesskit_node();
@@ -235,6 +235,25 @@ fn quick_sweep_and_open_ask_the_agent_and_close_the_panel() {
         steps(&mut h);
         assert_eq!(h.state_mut().take_commands(), [cmd]);
         assert!(h.state().wants_close(), "{label}");
+    }
+}
+
+#[test]
+fn quick_actions_open_the_app_on_their_page_and_close_the_panel() {
+    for (i, (name, _, route)) in menubar::QUICK_ACTIONS.iter().enumerate() {
+        let m = mac();
+        let mut h = harness(&m);
+        all_inside(&h);
+        h.get_by_label(name).click();
+        steps(&mut h);
+        assert_eq!(h.state_mut().take_commands(), [PanelCmd::Quick(i)]);
+        assert!(h.state().wants_close(), "{name}");
+        assert_eq!(
+            PanelCmd::Quick(i).action(),
+            schedule::MenuAction::Route(route)
+        );
+        // Looking only: the person confirms in the app.
+        assert!(cleancraft_core::executor::history(&m.env).is_empty());
     }
 }
 

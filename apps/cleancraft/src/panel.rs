@@ -174,7 +174,7 @@ mod tests {
     fn the_window_is_a_borderless_panel_where_the_agent_says() {
         let v = viewport((845.0, 30.0));
         assert_eq!(v.position, Some(egui::pos2(845.0, 30.0)));
-        assert_eq!(v.inner_size, Some(egui::vec2(340.0, 460.0)));
+        assert_eq!(v.inner_size, Some(egui::vec2(340.0, 520.0)));
         assert_eq!(v.decorations, Some(false));
         assert_eq!(v.transparent, Some(true));
         assert_eq!(v.resizable, Some(false));

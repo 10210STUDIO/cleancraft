@@ -21,7 +21,7 @@ use crate::settings::Settings;
 
 /// The panel's size in points.
 pub const PANEL_W: f64 = 340.0;
-pub const PANEL_H: f64 = 460.0;
+pub const PANEL_H: f64 = 520.0;
 /// Space between the menu bar item and the panel's top edge, in points.
 pub const GAP: f64 = 6.0;
 /// The panel stays this far from the screen's left and right edges, in points.
@@ -174,10 +174,23 @@ impl PanelToggle {
 // ---------------------------------------------------------------------------------------------
 // What the panel sends back: one line per command on its standard output.
 
+/// The panel's quick actions: a name, the word under its icon (a quarter of the panel fits
+/// about 9 letters) and the app page it opens ([`crate::route::AppRoute`]).
+/// A scan route only looks, and Free Up RAM waits for its button on the Live Monitor, so the
+/// person still confirms everything in the app and the panel never cleans.
+pub const QUICK_ACTIONS: [(&str, &str, &str); 4] = [
+    ("Free Up RAM", "Free RAM", "monitor"),
+    ("Empty Trash", "Trash", "scan:trash_bins"),
+    ("Threat Check", "Threats", "scan:malware"),
+    ("App Updates", "Updates", "scan:updater"),
+];
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PanelCmd {
     /// Open the n-th waiting item (newest first, as the panel lists them).
     Review(usize),
+    /// The n-th of [`QUICK_ACTIONS`].
+    Quick(usize),
     Open,
     QuickSweep,
     TogglePause,
@@ -188,6 +201,7 @@ impl PanelCmd {
     pub fn line(&self) -> String {
         match self {
             PanelCmd::Review(i) => format!("review {i}"),
+            PanelCmd::Quick(i) => format!("quick {i}"),
             PanelCmd::Open => "open".into(),
             PanelCmd::QuickSweep => "sweep".into(),
             PanelCmd::TogglePause => "pause".into(),
@@ -199,6 +213,10 @@ impl PanelCmd {
         let l = line.trim();
         if let Some(n) = l.strip_prefix("review ") {
             return n.trim().parse().ok().map(PanelCmd::Review);
+        }
+        if let Some(n) = l.strip_prefix("quick ") {
+            let i: usize = n.trim().parse().ok()?;
+            return (i < QUICK_ACTIONS.len()).then_some(PanelCmd::Quick(i));
         }
         match l {
             "open" => Some(PanelCmd::Open),
@@ -213,6 +231,7 @@ impl PanelCmd {
     pub fn action(&self) -> MenuAction {
         match self {
             PanelCmd::Review(i) => MenuAction::Review(*i),
+            PanelCmd::Quick(i) => MenuAction::Route(QUICK_ACTIONS[*i].2),
             PanelCmd::Open => MenuAction::Open,
             PanelCmd::QuickSweep => MenuAction::QuickSweep,
             PanelCmd::TogglePause => MenuAction::TogglePause,
@@ -584,7 +603,7 @@ mod tests {
                 x: 0.0,
                 y: 0.0,
                 w: 800.0,
-                h: 400.0,
+                h: PANEL_H - 60.0,
             },
             scale: 1.0,
         };
@@ -592,13 +611,13 @@ mod tests {
         assert_eq!(y, 0.0, "never above the display's top");
         let taller = Screen {
             rect: PhysRect {
-                h: 480.0,
+                h: PANEL_H + 20.0,
                 ..small.rect
             },
             ..small
         };
         let (_, y) = panel_origin(icon_at(400.0, 1.0), &[taller], PANEL_W, PANEL_H);
-        assert_eq!(y, 480.0 - EDGE - PANEL_H);
+        assert_eq!(y, 20.0 - EDGE);
     }
 
     #[test]
@@ -634,6 +653,7 @@ mod tests {
     fn commands_round_trip_as_lines() {
         for c in [
             PanelCmd::Review(2),
+            PanelCmd::Quick(3),
             PanelCmd::Open,
             PanelCmd::QuickSweep,
             PanelCmd::TogglePause,
@@ -642,6 +662,14 @@ mod tests {
             assert_eq!(PanelCmd::parse(&c.line()), Some(c.clone()));
         }
         assert_eq!(PanelCmd::parse("review x"), None);
+        assert_eq!(PanelCmd::parse("quick 4"), None, "only the listed actions");
+        assert_eq!(
+            PanelCmd::Quick(1).action(),
+            MenuAction::Route("scan:trash_bins")
+        );
+        for (_, _, r) in QUICK_ACTIONS {
+            assert!(crate::route::AppRoute::parse(r).is_some(), "{r}");
+        }
         assert_eq!(PanelCmd::parse("rm -rf"), None);
         assert_eq!(PanelCmd::QuitAgent.action(), MenuAction::Quit);
         assert_eq!(PanelCmd::Review(1).action(), MenuAction::Review(1));
