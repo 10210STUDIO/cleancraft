@@ -555,7 +555,9 @@ fn non_utf8_name_is_never_lost() {
     let m = FakeMac::new();
     let name = std::ffi::OsStr::from_bytes(b"bad\xff\xfename.log");
     let p = m.env.home_path("Library/Logs").join(name);
-    fs::write(&p, vec![7u8; 30_000]).unwrap();
+    if fs::write(&p, vec![7u8; 30_000]).is_err() {
+        return; // APFS refuses names that are not UTF-8 (EILSEQ): nothing to lose on a Mac
+    }
     let plan = junk_plan(&m);
     let Some(item) = plan.items.iter().find(|i| i.path == p) else {
         return; // not proposed at all: fine
