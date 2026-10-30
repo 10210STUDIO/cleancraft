@@ -395,8 +395,9 @@ fn quick_actions(ui: &mut Ui, t: &Tokens, cmds: &mut Vec<PanelCmd>) {
     ui.horizontal(|ui| {
         for (i, ((name, short, _), icon)) in menubar::QUICK_ACTIONS.iter().zip(ICONS).enumerate() {
             let (r, resp) = ui.allocate_exact_size(vec2(w, QUICK_H), Sense::click());
-            let resp = resp.on_hover_text(*name);
-            resp.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, *name));
+            let name = crate::tr(*name);
+            let resp = resp.on_hover_text(&name);
+            resp.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &name));
             let f = kit::feel(ui, &resp);
             let p = ui.painter();
             p.rect(
@@ -412,7 +413,12 @@ fn quick_actions(ui: &mut Ui, t: &Tokens, cmds: &mut Vec<PanelCmd>) {
             p.text(
                 pos2(r.center().x, r.min.y + 38.0),
                 Align2::CENTER_CENTER,
-                kit::truncate_end(ui.ctx(), short, &nf, r.width() - space::XS * 2.0),
+                kit::truncate_end(
+                    ui.ctx(),
+                    &crate::tr(*short),
+                    &nf,
+                    r.width() - space::XS * 2.0,
+                ),
                 nf,
                 t.text,
             );
