@@ -52,6 +52,10 @@ pub struct Settings {
     /// The menu bar agent warns (at most once a day) when the startup disk has less than this
     /// percent free. 0: never.
     pub disk_low_percent: u8,
+    /// The menu bar agent warns (at most once a day) when memory pressure stays high.
+    pub memory_alert: bool,
+    /// The menu bar agent warns (at most once a week) when the Trash holds over 5 GB.
+    pub trash_alert: bool,
     /// The menu bar agent shows no notifications while this is on.
     pub notifications_paused: bool,
     /// Menu bar agent: offer to remove an app's leftovers when it is dragged to the Trash.
@@ -109,6 +113,8 @@ impl Default for Settings {
             scan_hour: DEFAULT_SCAN_HOUR,
             scan_weekday: 1,
             disk_low_percent: DEFAULT_DISK_LOW_PERCENT,
+            memory_alert: true,
+            trash_alert: true,
             notifications_paused: false,
             watch_trash_offer: false,
             watch_new_items: false,

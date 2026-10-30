@@ -975,6 +975,8 @@ fn add_dev_root(app: &mut CleanApp, p: std::path::PathBuf) -> bool {
 /// The menu bar switch, also its accessible name.
 pub const MENU_BAR_SWITCH: &str = "Show CleanCraft in the menu bar";
 pub const DISK_ALERT_SWITCH: &str = "Warn when the startup disk is almost full";
+pub const MEMORY_ALERT_SWITCH: &str = "Warn when memory stays under pressure";
+pub const TRASH_ALERT_SWITCH: &str = "Warn when the Trash holds over 5 GB";
 pub const PAUSE_SWITCH: &str = "Pause scheduled scans and notifications";
 pub const TRASH_OFFER_SWITCH: &str = "Offer to clean up after an app goes to the Trash";
 pub const NEW_ITEMS_SWITCH: &str = "Check new apps and startup items";
@@ -1109,6 +1111,16 @@ fn menu_bar_card(app: &mut CleanApp, ui: &mut Ui) -> bool {
                 }
                 note(ui, &t, "At most one alert a day.");
             }
+            if switch_row(ui, &t, on && app.settings.memory_alert, MEMORY_ALERT_SWITCH, "Memory alert") {
+                app.settings.memory_alert = !app.settings.memory_alert;
+                changed = true;
+            }
+            note(ui, &t, "After 5 minutes of high memory pressure, at most once a day. It opens Live Monitor.");
+            if switch_row(ui, &t, on && app.settings.trash_alert, TRASH_ALERT_SWITCH, "Trash alert") {
+                app.settings.trash_alert = !app.settings.trash_alert;
+                changed = true;
+            }
+            note(ui, &t, "At most once a week. It opens Trash Bins, which only looks until you confirm.");
             // watch6's watchers, run by the agent.
             if switch_row(ui, &t, on && app.settings.watch_trash_offer, TRASH_OFFER_SWITCH, "App in the Trash") {
                 app.settings.watch_trash_offer = !app.settings.watch_trash_offer;

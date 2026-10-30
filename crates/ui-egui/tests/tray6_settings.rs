@@ -14,8 +14,8 @@ use cleancraft_core::testkit::FakeMac;
 use cleancraft_core::{Fault, FeatureId, Settings};
 use cleancraft_ui_egui::Page;
 use cleancraft_ui_egui::pages::settings::{
-    DISK_ALERT_SWITCH, MENU_BAR_SWITCH, NEW_ITEMS_SWITCH, NOTIFY_NOTE, PAUSE_SWITCH,
-    TRASH_OFFER_SWITCH,
+    DISK_ALERT_SWITCH, MEMORY_ALERT_SWITCH, MENU_BAR_SWITCH, NEW_ITEMS_SWITCH, NOTIFY_NOTE,
+    PAUSE_SWITCH, TRASH_ALERT_SWITCH, TRASH_OFFER_SWITCH,
 };
 use common::*;
 use egui::accesskit::Role;
@@ -122,6 +122,8 @@ fn schedule_disk_alert_and_pause_are_saved_and_need_the_menu_bar() {
         "Every day",
         "Every week",
         DISK_ALERT_SWITCH,
+        MEMORY_ALERT_SWITCH,
+        TRASH_ALERT_SWITCH,
         PAUSE_SWITCH,
         TRASH_OFFER_SWITCH,
         NEW_ITEMS_SWITCH,
@@ -168,6 +170,10 @@ fn schedule_disk_alert_and_pause_are_saved_and_need_the_menu_bar() {
     assert!(!has_text(&h, "When free space is under"));
     reach(&mut h, DISK_ALERT_SWITCH);
     assert_eq!(Settings::load(&m.env).disk_low_percent, 10);
+    reach(&mut h, MEMORY_ALERT_SWITCH);
+    assert!(!Settings::load(&m.env).memory_alert);
+    reach(&mut h, TRASH_ALERT_SWITCH);
+    assert!(!Settings::load(&m.env).trash_alert);
 
     // Pause notifications (the same setting as the menu bar menu's Pause).
     reach(&mut h, PAUSE_SWITCH);
