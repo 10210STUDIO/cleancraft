@@ -1,0 +1,66 @@
+name: Auto Release
+
+# After CI succeeds on a push to main, bump the patch version, commit it, and push a v* tag.
+# That tag push is what Release (release.yml) already listens for, so this is the only piece
+# that turns "merged to main" into "released" without a person running the tag by hand.
+#
+# Skipped when the last commit on main is itself a version bump (so this cannot loop) or its
+# message contains "[no release]" (for a push that should not ship on its own, docs-only work,
+# a revert waiting on a follow-up, etc).
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  bump-and-tag:
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Decide whether to release this commit
+        id: gate
+        run: |
+          msg="$(git log -1 --pretty=%s)"
+          if [[ "$msg" == Version\ * || "$msg" == *"[no release]"* ]]; then
+            echo "Skipping: $msg"
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: dtolnay/rust-toolchain@1.97.0
+        if: steps.gate.outputs.go == 'true'
+
+      - name: Bump the patch version
+        if: steps.gate.outputs.go == 'true'
+        id: bump
+        run: |
+          current="$(grep -m1 '^version = ' Cargo.toml | sed -E 's/version = "(.*)"/\1/')"
+          IFS=. read -r major minor patch <<< "$current"
+          next="$major.$minor.$((patch + 1))"
+          sed -i "0,/^version = \"$current\"/s//version = \"$next\"/" Cargo.toml
+          # Regenerates Cargo.lock from the new Cargo.toml; only the workspace crates' own
+          # version lines should move.
+          cargo metadata --format-version 1 -q > /dev/null
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and tag
+        if: steps.gate.outputs.go == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock
+          git commit -m "Version ${{ steps.bump.outputs.version }}"
+          git tag -a "v${{ steps.bump.outputs.version }}" -m "v${{ steps.bump.outputs.version }}"
+          git push origin main
+          git push origin "v${{ steps.bump.outputs.version }}"
