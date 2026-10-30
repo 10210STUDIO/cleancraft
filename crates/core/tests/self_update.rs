@@ -297,9 +297,14 @@ fn install_swaps_the_app_and_the_old_one_goes_to_the_trash_with_undo() {
                 && c.contains(".CleanCraft-0.1.3-update.app"))
     );
     let uid = cleancraft_core::features::trash::uid(&m.env);
+    let plist = cleancraft_core::login_agent::plist_path(&m.env);
     assert!(calls.contains(&format!(
-        "/bin/launchctl kickstart -k gui/{uid}/{}",
+        "/bin/launchctl bootout gui/{uid}/{}",
         cleancraft_core::login_agent::LABEL
+    )));
+    assert!(calls.contains(&format!(
+        "/bin/launchctl bootstrap gui/{uid} {}",
+        plist.display()
     )));
 
     // History: one line with Undo; Undo runs a command that puts the old version back.
