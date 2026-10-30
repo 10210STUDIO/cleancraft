@@ -1,8 +1,10 @@
 name: Auto Release
 
-# After CI succeeds on a push to main, bump the patch version, commit it, and push a v* tag.
-# That tag push is what Release (release.yml) already listens for, so this is the only piece
-# that turns "merged to main" into "released" without a person running the tag by hand.
+# After CI succeeds on a push to main, bump the patch version, commit it, push a v* tag, and
+# trigger Release (release.yml) by hand for that tag. A tag pushed with the default
+# GITHUB_TOKEN does not itself trigger other workflows (GitHub's anti-recursion rule), so a
+# plain `git push` of the tag would leave the release unbuilt; the explicit workflow_dispatch
+# call below is what actually starts it.
 #
 # Skipped when the last commit on main is itself a version bump (so this cannot loop) or its
 # message contains "[no release]" (for a push that should not ship on its own, docs-only work,
@@ -15,6 +17,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   bump-and-tag:
@@ -64,3 +67,9 @@ jobs:
           git tag -a "v${{ steps.bump.outputs.version }}" -m "v${{ steps.bump.outputs.version }}"
           git push origin main
           git push origin "v${{ steps.bump.outputs.version }}"
+
+      - name: Start the release build
+        if: steps.gate.outputs.go == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run release.yml --ref "v${{ steps.bump.outputs.version }}"
