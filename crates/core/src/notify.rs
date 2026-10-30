@@ -57,17 +57,35 @@ pub const MENU_HINT: &str = "Open the CleanCraft menu bar item to review.";
 /// The body as shown: for a notification with a route, cut so [`MENU_HINT`] always fits, then
 /// the hint (once).
 pub fn shown_body(n: &Notification) -> String {
+    let hint = crate::i18n::tr(MENU_HINT);
     let body = n.body.trim();
-    if n.route.is_none() || body.ends_with(MENU_HINT) {
+    if n.route.is_none() || body.ends_with(&*hint) {
         return clean_text(body);
     }
-    let room = TEXT_MAX - MENU_HINT.chars().count() - 1;
+    let room = TEXT_MAX - hint.chars().count() - 1;
     let cut = clean_text(body);
     let cut: String = cut.chars().take(room).collect();
     if cut.is_empty() {
-        MENU_HINT.to_string()
+        hint.into_owned()
     } else {
-        format!("{} {MENU_HINT}", cut.trim_end())
+        format!("{} {hint}", cut.trim_end())
+    }
+}
+
+/// `n` in the interface language. The menu hint is left out of the body: [`shown_body`] adds
+/// it back, translated.
+fn localized(n: &Notification) -> Notification {
+    let tr = |s: &str| crate::i18n::tr(s).into_owned();
+    let body = n.body.trim();
+    let body = match (&n.route, body.strip_suffix(MENU_HINT)) {
+        (Some(_), Some(cut)) => cut.trim_end(),
+        _ => body,
+    };
+    Notification {
+        title: tr(&n.title),
+        subtitle: n.subtitle.as_deref().map(tr),
+        body: tr(body),
+        route: n.route.clone(),
     }
 }
 
@@ -123,6 +141,7 @@ pub fn osascript_args(n: &Notification) -> Vec<String> {
 /// Show `n`: with the native sender when one is installed (never on a fake Mac), else, or
 /// when it fails, through `osascript`. No shell is involved and the texts are arguments.
 pub fn send(env: &Env, n: &Notification) -> io::Result<()> {
+    let n = &localized(n);
     if !env.is_fake()
         && let Some(native) = NATIVE.get()
     {

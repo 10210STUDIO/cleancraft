@@ -10,7 +10,7 @@ use cleancraft_core::{FeatureId, Plan};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use egui::{Color32, Rect, RichText, Sense, Ui, pos2, vec2};
+use egui::{Color32, Rect, Sense, Ui, pos2, vec2};
 
 use crate::app::{CleanApp, Page};
 use crate::icons::{self, Icon};
@@ -448,7 +448,7 @@ fn results(app: &mut CleanApp, ui: &mut Ui) {
         ui.vertical(|ui| {
             ui.add_space(kit::baseline_offset(size::DISPLAY, size::TITLE3));
             ui.label(
-                RichText::new("ready to clean")
+                crate::rich("ready to clean")
                     .font(font(size::TITLE3, Weight::Medium))
                     .color(t.text_dim),
             );
@@ -589,7 +589,7 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile, w: f32, tile_h: 
             ui.add_space(space::XS);
             ui.add(
                 egui::Label::new(
-                    RichText::new(sweep::tile_title(tile.id))
+                    crate::rich(sweep::tile_title(tile.id))
                         .font(font(size::TITLE3, Weight::SemiBold))
                         .color(t.text),
                 )
@@ -688,7 +688,7 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile, w: f32, tile_h: 
                 icons::paint(ui.painter(), r, Icon::Check, t.success);
             }
             ui.label(
-                RichText::new(big)
+                crate::rich(big)
                     .font(font(
                         if failed || empty {
                             size::TITLE2
@@ -702,7 +702,7 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile, w: f32, tile_h: 
         });
         ui.add(
             egui::Label::new(
-                RichText::new(small)
+                crate::rich(small)
                     .font(font(size::CALLOUT, Weight::Regular))
                     .color(t.text_dim),
             )
@@ -737,7 +737,7 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile, w: f32, tile_h: 
                     egui::WidgetInfo::labeled(
                         egui::WidgetType::Button,
                         !refreshing,
-                        format!("Scan {} again", sweep::tile_title(tile.id)),
+                        crate::tr(format!("Scan {} again", sweep::tile_title(tile.id))),
                     )
                 });
                 if r.clicked() && !refreshing {
@@ -749,7 +749,11 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile, w: f32, tile_h: 
             let title = sweep::tile_title(tile.id);
             let r = kit::secondary_resp(ui, &t, "Review");
             r.widget_info(|| {
-                egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Review {title}"))
+                egui::WidgetInfo::labeled(
+                    egui::WidgetType::Button,
+                    true,
+                    crate::tr(format!("Review {title}")),
+                )
             });
             if r.clicked() {
                 review = true;
@@ -764,7 +768,7 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile, w: f32, tile_h: 
                         egui::WidgetType::Checkbox,
                         true,
                         on,
-                        format!("Include {title}"),
+                        crate::tr(format!("Include {title}")),
                     )
                 });
             }
@@ -779,7 +783,7 @@ fn tile_ui(app: &mut CleanApp, ui: &mut Ui, tile: &sweep::Tile, w: f32, tile_h: 
                     egui::WidgetInfo::labeled(
                         egui::WidgetType::Button,
                         true,
-                        format!("Scan {} again", sweep::tile_title(tile.id)),
+                        crate::tr(format!("Scan {} again", sweep::tile_title(tile.id))),
                     )
                 });
                 if r.clicked() {
@@ -882,7 +886,7 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
                         ui.horizontal(|ui| {
                             kit::badge(ui, color, icon, 24.0);
                             ui.label(
-                                RichText::new(format!(
+                                crate::rich(format!(
                                     "{}: {}, {}",
                                     sweep::tile_title(fid),
                                     cleancraft_core::fsutil::items(p.selected_count()),
@@ -983,7 +987,7 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
                 kit::done_hero(ui, &t, FeatureId::SmartCare, d, started);
                 ui.add_space(space::M);
                 ui.label(
-                    RichText::new(headline)
+                    crate::rich(headline)
                         .font(font(size::LARGE_TITLE, Weight::Bold))
                         .color(t.text),
                 );
@@ -1043,14 +1047,14 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
                                         kit::badge(ui, color, icon, isz::CARD);
                                         ui.add_space(space::XS);
                                         ui.label(
-                                            RichText::new(sweep::tile_title(r.id))
+                                            crate::rich(sweep::tile_title(r.id))
                                                 .font(font(size::TITLE3, Weight::SemiBold))
                                                 .color(t.text),
                                         );
                                         match &r.result {
                                             Ok(rep) => {
                                                 ui.label(
-                                                    RichText::new(if rep.skipped.is_empty() {
+                                                    crate::rich(if rep.skipped.is_empty() {
                                                         format!(
                                                             "{} moved, {}",
                                                             rep.moved.len(),
@@ -1091,7 +1095,7 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
                                                 );
                                             }
                                             Err(e) => {
-                                                ui.label(RichText::new(e).color(t.danger));
+                                                ui.label(crate::rich(e).color(t.danger));
                                             }
                                         }
                                     });
@@ -1102,15 +1106,15 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
                                             ui.horizontal_wrapped(|ui| {
                                                 ui.add_space(44.0);
                                                 ui.label(
-                                                    RichText::new(app.env.display(p))
+                                                    crate::rich(app.env.display(p))
                                                         .color(t.text_dim),
                                                 );
                                                 ui.label(
-                                                    RichText::new(why.to_string()).color(t.warning),
+                                                    crate::rich(why.to_string()).color(t.warning),
                                                 );
                                                 if let Some(h) = plan_page::skip_hint(why) {
                                                     ui.label(
-                                                        RichText::new(h)
+                                                        crate::rich(h)
                                                             .font(font(
                                                                 size::FOOTNOTE,
                                                                 Weight::Regular,
@@ -1130,7 +1134,7 @@ fn done(app: &mut CleanApp, ui: &mut Ui) {
                                                     egui::WidgetInfo::labeled(
                                                         egui::WidgetType::Button,
                                                         true,
-                                                        format!("Try Again {title}"),
+                                                        crate::tr(format!("Try Again {title}")),
                                                     )
                                                 });
                                                 if b.clicked() {

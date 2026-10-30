@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 
 use cleancraft_core::self_update::{self, Auto, AutoCtx, Found, Installed, Release, UpdateState};
-use egui::{CornerRadius, RichText, Stroke, Ui};
+use egui::{CornerRadius, Stroke, Ui};
 
 use crate::app::CleanApp;
 use crate::icons::{self, Icon};
@@ -315,7 +315,7 @@ pub fn card(app: &mut CleanApp, ui: &mut Ui) -> bool {
         ui.horizontal(|ui| {
             label_cell(ui, &t, "Version");
             ui.label(
-                RichText::new(format!("CleanCraft {current}"))
+                crate::rich(format!("CleanCraft {current}"))
                     .font(font(size::CALLOUT, Weight::Medium))
                     .color(t.text),
             );
@@ -323,7 +323,7 @@ pub fn card(app: &mut CleanApp, ui: &mut Ui) -> bool {
         ui.horizontal(|ui| {
             label_cell(ui, &t, "Last checked");
             ui.label(
-                RichText::new(self_update::last_check_text(last))
+                crate::rich(self_update::last_check_text(last))
                     .font(font(size::CALLOUT, Weight::Medium))
                     .color(t.text),
             );
@@ -362,7 +362,7 @@ pub fn card(app: &mut CleanApp, ui: &mut Ui) -> bool {
                 label_cell(ui, &t, "");
                 ui.add(
                     egui::Label::new(
-                        RichText::new(text)
+                        crate::rich(text)
                             .font(font(size::FOOTNOTE, Weight::Regular))
                             .color(if err { t.warning } else { t.text_dim }),
                     )
@@ -391,7 +391,7 @@ pub fn banner(app: &mut CleanApp, ui: &mut Ui) {
                 );
                 icons::paint(ui.painter(), r, Icon::Updates, t.accent);
                 ui.label(
-                    RichText::new(format!("Installing CleanCraft {version}"))
+                    crate::rich(format!("Installing CleanCraft {version}"))
                         .font(font(size::CALLOUT, Weight::SemiBold))
                         .color(t.text),
                 );
@@ -425,7 +425,7 @@ pub fn banner(app: &mut CleanApp, ui: &mut Ui) {
             );
             icons::paint(ui.painter(), r, Icon::Updates, t.accent);
             ui.label(
-                RichText::new(format!(
+                crate::rich(format!(
                     "Update available: CleanCraft {} (you have {current}).",
                     rel.version
                 ))
@@ -451,7 +451,7 @@ pub fn banner(app: &mut CleanApp, ui: &mut Ui) {
                 .show(ui, |ui| {
                     ui.add(
                         egui::Label::new(
-                            RichText::new(&rel.notes)
+                            crate::rich(&rel.notes)
                                 .font(font(size::FOOTNOTE, Weight::Regular))
                                 .color(t.text_dim),
                         )
@@ -460,7 +460,7 @@ pub fn banner(app: &mut CleanApp, ui: &mut Ui) {
                 });
         }
         ui.label(
-            RichText::new(
+            crate::rich(
                 "The previous version goes to the Trash, and CleanCraft restarts when the update is in place.",
             )
             .font(font(size::FOOTNOTE, Weight::Regular))
@@ -492,12 +492,12 @@ fn steps_row(ui: &mut Ui, t: &theme::Tokens, fraction: f32) {
                 (s.to_string(), t.text_faint)
             };
             ui.label(
-                RichText::new(text)
+                crate::rich(text)
                     .font(font(size::FOOTNOTE, Weight::SemiBold))
                     .color(color),
             );
             if i + 1 < n {
-                ui.label(RichText::new(">").color(t.text_faint));
+                ui.label(crate::rich(">").color(t.text_faint));
             }
         }
     });

@@ -12,7 +12,7 @@ use cleancraft_core::monitor::{
     uptime_text,
 };
 use cleancraft_core::proc_names;
-use egui::{Color32, RichText, Sense, Ui, vec2};
+use egui::{Color32, Sense, Ui, vec2};
 
 use crate::app::{CleanApp, Page};
 use crate::icons::Icon;
@@ -230,7 +230,7 @@ fn extra_id() -> egui::Id {
 fn big(app: &CleanApp, ui: &mut Ui, text: &str) {
     ui.add(
         egui::Label::new(
-            RichText::new(text)
+            crate::rich(text)
                 .font(font(size::TITLE, Weight::Bold))
                 .color(app.t.text),
         )
@@ -249,7 +249,7 @@ fn gauge_big(app: &CleanApp, ui: &mut Ui, frac: f32, color: Color32, text: &str)
     ui.put(
         tr,
         egui::Label::new(
-            RichText::new(text)
+            crate::rich(text)
                 .font(font(size::TITLE, Weight::Bold))
                 .color(app.t.text),
         )
@@ -262,7 +262,7 @@ fn row(app: &CleanApp, ui: &mut Ui, name: &str, value: &str) {
     ui.horizontal(|ui| {
         ui.add(
             egui::Label::new(
-                RichText::new(name)
+                crate::rich(name)
                     .font(font(size::CALLOUT, Weight::Regular))
                     .color(app.t.text_dim),
             )
@@ -270,7 +270,7 @@ fn row(app: &CleanApp, ui: &mut Ui, name: &str, value: &str) {
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(
-                RichText::new(value)
+                crate::rich(value)
                     .font(font(size::CALLOUT, Weight::Medium))
                     .color(app.t.text),
             );
@@ -371,7 +371,7 @@ fn memory_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
                     ui.painter().text(
                         r2.left_bottom() - vec2(0.0, 6.0),
                         egui::Align2::LEFT_BOTTOM,
-                        rest,
+                        crate::tr(rest),
                         font(size::CALLOUT, Weight::Medium),
                         t.text_dim,
                     );
@@ -406,7 +406,7 @@ fn memory_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
                 let time = ui.input(|i| i.time);
                 kit::progress_ring(ui.painter(), r.center(), 14.0, &t, time);
                 ui.label(
-                    RichText::new("Freeing memory...")
+                    crate::rich("Freeing memory...")
                         .font(font(size::CALLOUT, Weight::Medium))
                         .color(t.text),
                 );
@@ -418,7 +418,7 @@ fn memory_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
             ui.horizontal(|ui| {
                 if kit::pill(ui, &t, "Free Up RAM", kit::Kind::Secondary, None)
                     .on_hover_text(
-                        "Clear memory macOS keeps as disk cache (asks for your password). The same as the Free up RAM task in Tune-up, and logged in History the same way.",
+                        crate::tr("Clear memory macOS keeps as disk cache (asks for your password). The same as the Free up RAM task in Tune-up, and logged in History the same way."),
                     )
                     .clicked()
                 {
@@ -471,7 +471,7 @@ fn storage_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
             // Two buttons wrap to two rows in a narrow column (1060 pt window).
             ui.horizontal_wrapped(|ui| {
                 if kit::pill(ui, &t, "Free Up Space", kit::Kind::Secondary, None)
-                    .on_hover_text("Open Quick Sweep to find what you can remove")
+                    .on_hover_text(crate::tr("Open Quick Sweep to find what you can remove"))
                     .clicked()
                 {
                     go = true;
@@ -550,7 +550,7 @@ fn network_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
                 let time = ui.input(|i| i.time);
                 kit::progress_ring(ui.painter(), r.center(), 14.0, &app.t, time);
                 ui.label(
-                    RichText::new("Measuring speed...")
+                    crate::rich("Measuring speed...")
                         .font(font(size::CALLOUT, Weight::Medium))
                         .color(app.t.text_dim),
                 );
@@ -759,12 +759,16 @@ fn proc_rows(
                     let (r, resp) =
                         ui.allocate_exact_size(vec2(ui.available_width(), 16.0), Sense::hover());
                     resp.widget_info(|| {
-                        egui::WidgetInfo::labeled(egui::WidgetType::Label, true, w.as_str())
+                        egui::WidgetInfo::labeled(
+                            egui::WidgetType::Label,
+                            true,
+                            crate::tr(w.as_str()),
+                        )
                     });
                     ui.painter().text(
                         r.left_center(),
                         egui::Align2::LEFT_CENTER,
-                        short,
+                        crate::tr(short),
                         fid,
                         t.text_faint,
                     );

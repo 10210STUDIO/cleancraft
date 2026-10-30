@@ -120,7 +120,7 @@ pub fn show(ui: &mut Ui, size_pt: f32) -> Response {
     if ui.is_rect_visible(rect) {
         paint(ui, rect);
     }
-    resp.on_hover_text("CleanCraft")
+    resp.on_hover_text(crate::tr("CleanCraft"))
 }
 
 #[cfg(test)]

@@ -44,6 +44,8 @@ pub struct Worker {
     events: Receiver<WatchEvent>,
     /// The update check is running on its own thread.
     updating: Arc<AtomicBool>,
+    /// The language setting last applied (menu and notifications follow a change).
+    language: Option<String>,
 }
 
 impl Worker {
@@ -60,6 +62,7 @@ impl Worker {
             events_tx,
             events,
             updating: Arc::default(),
+            language: None,
         }
     }
 
@@ -98,6 +101,10 @@ impl Worker {
     /// Settings are read again each round, so changes in the app apply within seconds.
     pub fn round(&mut self, mono: Instant, local: NaiveDateTime) -> (MenuModel, CheckReport) {
         let settings = Settings::load(&self.env);
+        if self.language.as_ref() != Some(&settings.language) {
+            cleancraft_core::i18n::apply(&self.env, &settings);
+            self.language = Some(settings.language.clone());
+        }
         self.snap = Some(self.sampler.sample(&self.env, monitor::now_secs()));
         let mut rep = CheckReport::default();
         self.follow_watch_settings(&settings);

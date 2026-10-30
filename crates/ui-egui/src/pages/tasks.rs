@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use cleancraft_core::fsutil::human_size;
 use cleancraft_core::tasks::{self, Outcome, Prepared, RunResult, TASKS};
 use cleancraft_core::{Env, FeatureId};
-use egui::{RichText, Ui};
+use egui::Ui;
 
 use crate::app::CleanApp;
 use crate::jobs::{Job, Progress};
@@ -161,7 +161,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             ui.spacing_mut().item_spacing.y = 1.0;
             ui.add_space(2.0);
             ui.label(
-                RichText::new(match n {
+                crate::rich(match n {
                     0 => "Nothing selected".to_string(),
                     1 => "1 task selected".to_string(),
                     n => format!("{n} tasks selected"),
@@ -195,13 +195,13 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                     )
                 })
                 .inner
-                .on_disabled_hover_text("Tick a task first.");
+                .on_disabled_hover_text(crate::tr("Tick a task first."));
             if run.clicked() && n > 0 {
                 app.act();
                 open_confirm(app);
             }
             if kit::pill(ui, &t, "Scan Again", kit::Kind::Secondary, None)
-                .on_hover_text("Check again which tasks can run on this Mac")
+                .on_hover_text(crate::tr("Check again which tasks can run on this Mac"))
                 .clicked()
             {
                 app.act();
@@ -289,7 +289,7 @@ fn task_card(app: &mut CleanApp, ui: &mut Ui, info: &tasks::TaskInfo) {
             let describe = |ui: &mut Ui| {
                 ui.add(
                     egui::Label::new(
-                        RichText::new(info.description)
+                        crate::rich(info.description)
                             .font(font(size::CALLOUT, Weight::Regular))
                             .color(t.text_dim),
                     )
@@ -303,7 +303,7 @@ fn task_card(app: &mut CleanApp, ui: &mut Ui, info: &tasks::TaskInfo) {
                         ui.set_width(ui.available_width());
                         ui.add(
                             egui::Label::new(
-                                RichText::new(&command)
+                                crate::rich(&command)
                                     .font(crate::theme::mono(size::FOOTNOTE))
                                     .color(t.text),
                             )
@@ -345,12 +345,12 @@ fn task_card(app: &mut CleanApp, ui: &mut Ui, info: &tasks::TaskInfo) {
                     if let Some(Err(why)) = &ready {
                         // A plain sentence; the tool's own words in the tooltip (REVIEW-C D4).
                         let r = ui.label(
-                            RichText::new(plain_reason(why))
+                            crate::rich(plain_reason(why))
                                 .font(font(size::FOOTNOTE, Weight::Medium))
                                 .color(t.warning),
                         );
                         if plain_reason(why) != *why {
-                            r.on_hover_text(why);
+                            r.on_hover_text(crate::tr(why));
                         }
                     }
                     // Same rule as Quick Sweep's tune-up count.
@@ -361,7 +361,7 @@ fn task_card(app: &mut CleanApp, ui: &mut Ui, info: &tasks::TaskInfo) {
                         chrono::Utc::now().timestamp(),
                     ) {
                         ui.label(
-                            RichText::new(why)
+                            crate::rich(why)
                                 .font(font(size::FOOTNOTE, Weight::Medium))
                                 .color(t.sec_a),
                         );
@@ -383,7 +383,7 @@ fn task_result(app: &mut CleanApp, ui: &mut Ui, info: &tasks::TaskInfo, r: &RunR
         Outcome::Cancelled => t.warning,
     };
     ui.label(
-        RichText::new(&r.message)
+        crate::rich(&r.message)
             .font(font(size::CALLOUT, Weight::SemiBold))
             .color(color),
     );
@@ -428,7 +428,7 @@ fn task_result(app: &mut CleanApp, ui: &mut Ui, info: &tasks::TaskInfo, r: &RunR
             kit::well(&t).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.label(
-                    RichText::new(&r.output)
+                    crate::rich(&r.output)
                         .font(font(size::FOOTNOTE, Weight::Medium))
                         .color(t.text_dim),
                 );
@@ -483,27 +483,25 @@ fn confirm(app: &mut CleanApp, ui: &mut Ui) {
                         continue;
                     };
                     ui.add_space(4.0);
-                    ui.label(RichText::new(info.title).font(font(size::BODY, Weight::SemiBold)));
-                    ui.label(RichText::new(info.description).color(t.text_dim));
+                    ui.label(crate::rich(info.title).font(font(size::BODY, Weight::SemiBold)));
+                    ui.label(crate::rich(info.description).color(t.text_dim));
                     for c in p.commands() {
                         ui.label(
-                            RichText::new(c)
+                            crate::rich(c)
                                 .font(crate::theme::mono(size::FOOTNOTE))
                                 .color(t.text),
                         );
                     }
                     if p.needs_admin() {
                         ui.label(
-                            RichText::new("macOS will ask for the administrator password.")
+                            crate::rich("macOS will ask for the administrator password.")
                                 .color(t.warning),
                         );
                     }
                 }
                 for (title, why) in &not {
                     ui.add_space(4.0);
-                    ui.label(
-                        RichText::new(format!("{title} will not run: {why}")).color(t.warning),
-                    );
+                    ui.label(crate::rich(format!("{title} will not run: {why}")).color(t.warning));
                 }
             });
         ui.add_space(14.0);

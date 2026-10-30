@@ -11,7 +11,7 @@ use cleancraft_core::executor;
 use cleancraft_core::mcp_setup::{self, Answer, Client, ClientKind, ClientState, ConnectError};
 use cleancraft_core::permissions::{self, Access};
 use cleancraft_core::route::AppRoute;
-use egui::{RichText, Ui};
+use egui::Ui;
 
 use crate::app::CleanApp;
 use crate::icons::Icon;
@@ -98,7 +98,7 @@ fn steps_row(app: &CleanApp, ui: &mut Ui, current: usize) {
                     .circle_stroke(r.center(), 4.0, egui::Stroke::new(1.5, color));
             }
             ui.label(
-                RichText::new(format!("{} {name}", i + 1))
+                crate::rich(format!("{} {name}", i + 1))
                     .font(font(size::FOOTNOTE, Weight::Medium))
                     .color(if i == current { t.text } else { t.text_dim }),
             );
@@ -111,7 +111,7 @@ fn steps_row(app: &CleanApp, ui: &mut Ui, current: usize) {
 fn para(app: &CleanApp, ui: &mut Ui, text: &str) {
     ui.add(
         egui::Label::new(
-            RichText::new(text)
+            crate::rich(text)
                 .font(font(size::BODY_L, Weight::Regular))
                 .color(app.t.text_dim),
         )
@@ -325,7 +325,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
             ui.add_space(space::XS);
             ui.add(
                 egui::Label::new(
-                    RichText::new(
+                    crate::rich(
                         "AI apps such as Claude can ask CleanCraft to scan your Mac and show you what it would clean. Connected, they can look and preview. They cannot move anything unless you also allow it below.",
                     )
                     .font(font(size::BODY_L, Weight::Regular))
@@ -370,14 +370,14 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                     }
                     ui.add_space(space::S);
                     ui.label(
-                        RichText::new(CLEAN_SWITCH)
+                        crate::rich(CLEAN_SWITCH)
                             .font(font(size::BODY, Weight::Medium))
                             .color(t.text),
                     );
                 });
                 ui.add(
                     egui::Label::new(
-                        RichText::new(if app.settings.agents_may_clean {
+                        crate::rich(if app.settings.agents_may_clean {
                             "On: an agent can move the items of a list it showed you, checked by the list's digest. Everything goes to the Trash or quarantine, with Undo in History."
                         } else {
                             "Off (the default): agents can scan and preview only. Nothing moves unless you clean in CleanCraft."
@@ -453,13 +453,13 @@ fn client_row(app: &mut CleanApp, ui: &mut Ui, c: &Client) {
             |ui| {
                 ui.set_max_width(text_w);
                 ui.label(
-                    RichText::new(c.kind.title())
+                    crate::rich(c.kind.title())
                         .font(font(size::BODY, Weight::SemiBold))
                         .color(t.text),
                 );
                 ui.add(
                     egui::Label::new(
-                        RichText::new(status_line(c))
+                        crate::rich(status_line(c))
                             .font(font(size::CALLOUT, Weight::Regular))
                             .color(t.text_dim),
                     )
@@ -481,7 +481,7 @@ fn client_row(app: &mut CleanApp, ui: &mut Ui, c: &Client) {
                     let r = r.inner;
                     let name = format!("{label} for {}", c.kind.title());
                     r.widget_info(|| {
-                        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name)
+                        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, crate::tr(&name))
                     });
                     if r.clicked() {
                         app.act();
@@ -498,7 +498,7 @@ fn client_row(app: &mut CleanApp, ui: &mut Ui, c: &Client) {
                 {
                     ui.add(
                         egui::Label::new(
-                            RichText::new(change)
+                            crate::rich(change)
                                 .font(crate::theme::mono(size::FOOTNOTE))
                                 .color(t.text_faint),
                         )

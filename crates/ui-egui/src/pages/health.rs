@@ -11,7 +11,7 @@ use cleancraft_core::fsutil::{count, human_size};
 use cleancraft_core::health::{self, Card, Facts, Growth, Level, MapSummary, State as Verdict};
 use cleancraft_core::monitor::BatteryReading;
 use cleancraft_core::space_history::{self, History};
-use egui::{Color32, RichText, Ui, vec2};
+use egui::{Color32, Ui, vec2};
 
 use crate::app::CleanApp;
 use crate::icons::{self, Icon};
@@ -229,7 +229,7 @@ fn summary(app: &mut CleanApp, ui: &mut Ui) {
                 |ui| {
                     ui.set_max_width(text_w);
                     ui.label(
-                        RichText::new(verdict.label())
+                        crate::rich(verdict.label())
                             .font(font(size::TITLE, Weight::Bold))
                             .color(t.text),
                     );
@@ -249,7 +249,7 @@ fn summary(app: &mut CleanApp, ui: &mut Ui) {
                         for w in why.iter().take(4) {
                             ui.add(
                                 egui::Label::new(
-                                    RichText::new(format!("\u{2022}  {w}"))
+                                    crate::rich(format!("\u{2022}  {w}"))
                                         .font(font(size::CALLOUT, Weight::Regular))
                                         .color(t.text_dim),
                                 )
@@ -304,7 +304,7 @@ fn summary(app: &mut CleanApp, ui: &mut Ui) {
                     });
                     ui.add(
                         egui::Label::new(
-                            RichText::new(r.text)
+                            crate::rich(r.text)
                                 .font(font(size::CALLOUT, Weight::Regular))
                                 .color(t.text_dim),
                         )
@@ -364,7 +364,7 @@ fn rec_row(app: &mut CleanApp, ui: &mut Ui, c: &Card, i: usize) {
                 ui.spacing_mut().item_spacing.y = 2.0;
                 ui.horizontal_wrapped(|ui| {
                     ui.label(
-                        RichText::new(&c.headline)
+                        crate::rich(&c.headline)
                             .font(font(size::BODY, Weight::SemiBold))
                             .color(t.text),
                     );
@@ -372,7 +372,7 @@ fn rec_row(app: &mut CleanApp, ui: &mut Ui, c: &Card, i: usize) {
                 });
                 ui.add(
                     egui::Label::new(
-                        RichText::new(&c.detail)
+                        crate::rich(&c.detail)
                             .font(font(size::CALLOUT, Weight::Regular))
                             .color(t.text_dim),
                     )
@@ -524,7 +524,7 @@ fn facts_card(app: &mut CleanApp, ui: &mut Ui) {
                     |ui| {
                         ui.set_width(lw);
                         ui.label(
-                            RichText::new(k)
+                            crate::rich(k)
                                 .font(font(size::CALLOUT, Weight::Regular))
                                 .color(t.text_dim),
                         );
@@ -532,7 +532,7 @@ fn facts_card(app: &mut CleanApp, ui: &mut Ui) {
                 );
                 ui.add(
                     egui::Label::new(
-                        RichText::new(v)
+                        crate::rich(v)
                             .font(font(size::CALLOUT, Weight::Medium))
                             .color(t.text),
                     )
@@ -685,12 +685,12 @@ fn grew_card(app: &mut CleanApp, ui: &mut Ui) {
                         let r = ui.push_id(("grew", i), |ui| {
                             kit::link(ui, &t, &kit::truncate_middle(ui.ctx(), &shown, &fid, w))
                         });
-                        let r = r.inner.on_hover_text(format!("Open {shown} in Disk Map"));
+                        let r = r.inner.on_hover_text(crate::tr(format!("Open {shown} in Disk Map")));
                         r.widget_info(|| {
                             egui::WidgetInfo::labeled(
                                 egui::WidgetType::Button,
                                 true,
-                                format!("Open {shown} in Disk Map"),
+                                crate::tr(format!("Open {shown} in Disk Map")),
                             )
                         });
                         if r.clicked() {
@@ -702,7 +702,7 @@ fn grew_card(app: &mut CleanApp, ui: &mut Ui) {
                         }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.label(
-                                RichText::new(format!("+{}", human_size(x.after - x.before)))
+                                crate::rich(format!("+{}", human_size(x.after - x.before)))
                                     .font(font(size::CALLOUT, Weight::SemiBold))
                                     .color(t.warning),
                             );

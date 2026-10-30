@@ -10,7 +10,7 @@ use cleancraft_core::fsutil::human_size;
 use cleancraft_core::startup::{self, ChangeError, Domain, LaunchItem, LoginItem, Proc};
 use cleancraft_core::tasks;
 use cleancraft_core::{Env, FeatureId, Plan};
-use egui::{RichText, Ui};
+use egui::Ui;
 
 use crate::app::CleanApp;
 use crate::jobs::Job;
@@ -327,8 +327,10 @@ fn row_button_resp(ui: &mut Ui, text: &str, name: String, tip: &str) -> egui::Re
     let t = crate::theme::Tokens::dark();
     let icon = (text == "Remove").then_some(crate::icons::Icon::Trash);
     let r = kit::ghost(ui, &t, text, icon);
-    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name.clone()));
-    r.on_hover_text(tip)
+    r.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, crate::tr(name.clone()))
+    });
+    r.on_hover_text(crate::tr(tip))
 }
 
 /// A small button whose accessible name says which item it acts on.
@@ -336,8 +338,10 @@ fn row_button(ui: &mut Ui, text: &str, name: String, tip: &str) -> bool {
     let t = crate::theme::Tokens::dark();
     let icon = (text == "Remove").then_some(crate::icons::Icon::Trash);
     let r = kit::ghost(ui, &t, text, icon);
-    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name.clone()));
-    r.on_hover_text(tip).clicked()
+    r.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, crate::tr(name.clone()))
+    });
+    r.on_hover_text(crate::tr(tip)).clicked()
 }
 
 /// On or Off as one switch; its accessible name is the action a click takes ("Turn Off
@@ -345,11 +349,11 @@ fn row_button(ui: &mut Ui, text: &str, name: String, tip: &str) -> bool {
 fn state_switch(ui: &mut Ui, t: &crate::theme::Tokens, on: bool, name: &str) -> bool {
     let action = if on { "Turn Off" } else { "Turn On" };
     kit::switch(ui, t, on, &format!("{action} {name}"))
-        .on_hover_text(if on {
+        .on_hover_text(crate::tr(if on {
             "On: starts with your Mac. Click to turn off."
         } else {
             "Off. Click to turn on."
-        })
+        }))
         .clicked()
 }
 
@@ -365,7 +369,7 @@ fn split_row(ui: &mut Ui, left: impl FnOnce(&mut Ui), right: impl FnOnce(&mut Ui
 }
 
 fn short(ui: &mut Ui, text: &str, size: f32, w: Weight, color: egui::Color32) {
-    ui.add(egui::Label::new(RichText::new(text).font(font(size, w)).color(color)).truncate());
+    ui.add(egui::Label::new(crate::rich(text).font(font(size, w)).color(color)).truncate());
 }
 
 /// A path line shortened in the middle, so the executable's name at the end stays readable
@@ -375,13 +379,15 @@ fn path_line(ui: &mut Ui, text: &str, color: egui::Color32) {
     let fid = font(size::FOOTNOTE, Weight::Regular);
     let shown = kit::truncate_middle(ui.ctx(), text, &fid, ui.available_width().max(40.0));
     let r = ui.add(
-        egui::Label::new(RichText::new(shown).font(fid).color(color))
+        egui::Label::new(crate::rich(shown).font(fid).color(color))
             .truncate()
             .selectable(false),
     );
     let full = text.to_string();
-    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, full.clone()));
-    r.on_hover_text(text);
+    r.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Label, true, crate::tr(full.clone()))
+    });
+    r.on_hover_text(crate::tr(text));
 }
 
 pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
@@ -421,7 +427,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             let time = ui.input(|i| i.time);
             kit::progress_ring(ui.painter(), r.center(), 16.0, &t, time);
             ui.label(
-                RichText::new("Working... macOS may ask for your password.")
+                crate::rich("Working... macOS may ask for your password.")
                     .font(font(size::CALLOUT, Weight::Medium))
                     .color(t.text),
             );
@@ -433,7 +439,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         let n_on = data.launch.iter().filter(|i| i.enabled).count()
             + data.login.as_ref().map(|l| l.len()).unwrap_or(0);
         ui.label(
-            RichText::new(format!("{n_on} items start automatically"))
+            crate::rich(format!("{n_on} items start automatically"))
                 .font(font(size::TITLE2, Weight::Bold))
                 .color(t.text),
         );
@@ -443,7 +449,10 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                     kit::pill(ui, &t, "Scan Again", kit::Kind::Secondary, None)
                 })
                 .inner;
-            if r.on_hover_text("Read the startup items again").clicked() && !busy {
+            if r.on_hover_text(crate::tr("Read the startup items again"))
+                .clicked()
+                && !busy
+            {
                 app.act();
                 reload(app);
             }
@@ -557,7 +566,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
 fn section(ui: &mut Ui, t: &crate::theme::Tokens, title: &str, desc: &str) {
     ui.add_space(14.0);
     ui.label(
-        RichText::new(title)
+        crate::rich(title)
             .font(font(size::TITLE3, Weight::Bold))
             .color(t.text),
     );
@@ -922,12 +931,9 @@ fn heavy_section(app: &mut CleanApp, ui: &mut Ui, data: &Snapshot) {
                                 }
                                 short(ui, &p.name, size::BODY, Weight::SemiBold, t.text);
                                 ui.label(
-                                    RichText::new(format!(
-                                        "CPU {:.1}%  Memory {:.1}%",
-                                        p.cpu, p.mem
-                                    ))
-                                    .font(font(size::FOOTNOTE, Weight::Medium))
-                                    .color(t.warning),
+                                    crate::rich(format!("CPU {:.1}%  Memory {:.1}%", p.cpu, p.mem))
+                                        .font(font(size::FOOTNOTE, Weight::Medium))
+                                        .color(t.warning),
                                 );
                                 kit::dim(ui, &t, &format!("pid {}", p.pid));
                             },
@@ -981,7 +987,7 @@ fn confirm_quit(app: &mut CleanApp, ui: &mut Ui) {
             ui.set_width(ui.available_width());
             kit::eyebrow(ui, &t, "Command");
             ui.label(
-                RichText::new(cmd)
+                crate::rich(cmd)
                     .font(font(size::FOOTNOTE, Weight::Medium))
                     .color(t.text),
             );
@@ -1032,12 +1038,12 @@ fn confirm_remove(app: &mut CleanApp, ui: &mut Ui) {
             ui.set_width(ui.available_width());
             for it in plan.selected() {
                 ui.label(
-                    RichText::new(app.env.display(&it.path))
+                    crate::rich(app.env.display(&it.path))
                         .font(font(size::CALLOUT, Weight::Medium))
                         .color(t.text),
                 );
                 ui.label(
-                    RichText::new(format!("{}  {}", human_size(it.size), it.reason))
+                    crate::rich(format!("{}  {}", human_size(it.size), it.reason))
                         .color(t.text_dim),
                 );
             }

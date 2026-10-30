@@ -98,12 +98,12 @@ pub fn erase_list(ui: &mut Ui, t: &crate::theme::Tokens, rows: &[(String, String
                 for (name, detail, size) in &rows[range] {
                     ui.horizontal(|ui| {
                         ui.set_min_height(ROW_H as f32);
-                        ui.label(egui::RichText::new(name).color(t.text));
+                        ui.label(crate::rich(name).color(t.text));
                         if !detail.is_empty() {
-                            ui.label(egui::RichText::new(detail).color(t.text_dim));
+                            ui.label(crate::rich(detail).color(t.text_dim));
                         }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(egui::RichText::new(human_size(*size)).color(t.text_dim));
+                            ui.label(crate::rich(human_size(*size)).color(t.text_dim));
                         });
                     });
                 }
@@ -241,13 +241,14 @@ pub fn erase_button(app: &mut CleanApp, ui: &mut Ui, group: &str) {
         .and_then(|p| trash::mail_group(&env, p, group))
         .is_some_and(|g| g.0.is_some());
     if !named {
-        let r = kit::secondary_resp(ui, &t, OPEN_MAIL_BUTTON)
-            .on_hover_text("In Mail: Mailbox > Erase Deleted Items, then the account");
+        let r = kit::secondary_resp(ui, &t, OPEN_MAIL_BUTTON).on_hover_text(crate::tr(
+            "In Mail: Mailbox > Erase Deleted Items, then the account",
+        ));
         r.widget_info(|| {
             egui::WidgetInfo::labeled(
                 egui::WidgetType::Button,
                 true,
-                format!("{OPEN_MAIL_BUTTON} {group}"),
+                crate::tr(format!("{OPEN_MAIL_BUTTON} {group}")),
             )
         });
         if r.clicked() {
@@ -261,13 +262,14 @@ pub fn erase_button(app: &mut CleanApp, ui: &mut Ui, group: &str) {
         }
         return;
     }
-    let r = kit::secondary_resp(ui, &t, ERASE_BUTTON)
-        .on_hover_text("Mail erases this account's deleted messages for good");
+    let r = kit::secondary_resp(ui, &t, ERASE_BUTTON).on_hover_text(crate::tr(
+        "Mail erases this account's deleted messages for good",
+    ));
     r.widget_info(|| {
         egui::WidgetInfo::labeled(
             egui::WidgetType::Button,
             true,
-            format!("{ERASE_BUTTON} {group}"),
+            crate::tr(format!("{ERASE_BUTTON} {group}")),
         )
     });
     if r.clicked() {
@@ -425,7 +427,7 @@ pub fn trash_frame(app: &mut CleanApp, ui: &mut Ui) {
                 .collect();
             erase_list(ui, &t, &rows);
             ui.add_space(8.0);
-            ui.label(egui::RichText::new(ERASE_NOTE).color(t.danger));
+            ui.label(crate::rich(ERASE_NOTE).color(t.danger));
             ui.add_space(12.0);
             let (ok, no) = kit::dialog_actions(ui, &t, ERASE_CONFIRM, kit::Kind::Danger);
             go |= ok;
@@ -477,7 +479,7 @@ pub fn empty_trash(app: &mut CleanApp, ui: &mut Ui, label: &str) {
                 let (r, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
                 let time = ui.input(|i| i.time);
                 kit::progress_ring(ui.painter(), r.center(), 14.0, &t, time);
-                ui.label("Finder is emptying the Trash...");
+                ui.label(crate::tr("Finder is emptying the Trash..."));
                 ui.ctx()
                     .request_repaint_after(std::time::Duration::from_millis(200));
                 store(ui, st);
@@ -486,7 +488,7 @@ pub fn empty_trash(app: &mut CleanApp, ui: &mut Ui, label: &str) {
         }
     }
     if kit::secondary_resp(ui, &t, label)
-        .on_hover_text("Finder removes what is in the Trash for good")
+        .on_hover_text(crate::tr("Finder removes what is in the Trash for good"))
         .clicked()
     {
         app.act();
@@ -518,9 +520,9 @@ pub fn empty_trash(app: &mut CleanApp, ui: &mut Ui, label: &str) {
                 .collect();
             erase_list(ui, &t, &rows);
             ui.add_space(8.0);
-            ui.label(egui::RichText::new(ERASE_NOTE).color(t.danger));
+            ui.label(crate::rich(ERASE_NOTE).color(t.danger));
             if changed {
-                ui.label(egui::RichText::new(CHANGED_NOTE).color(t.warning));
+                ui.label(crate::rich(CHANGED_NOTE).color(t.warning));
             }
             ui.add_space(12.0);
             let (ok, no) = kit::dialog_actions(ui, &t, EMPTY_CONFIRM, kit::Kind::Danger);
@@ -577,7 +579,9 @@ fn privacy_toolbar(app: &mut CleanApp, ui: &mut Ui) {
     let mut st = load(ui);
     if plan_has(app, FeatureId::Privacy, &["wifi"])
         && kit::secondary_resp(ui, &t, WIFI_BUTTON)
-            .on_hover_text("Open System Settings at Wi-Fi to remove known networks")
+            .on_hover_text(crate::tr(
+                "Open System Settings at Wi-Fi to remove known networks",
+            ))
             .clicked()
     {
         app.act();
@@ -590,7 +594,7 @@ fn privacy_toolbar(app: &mut CleanApp, ui: &mut Ui) {
     }
     if plan_has(app, FeatureId::Privacy, &["permissions"])
         && kit::secondary_resp(ui, &t, RESET_BUTTON)
-            .on_hover_text("Take back access you gave to apps")
+            .on_hover_text(crate::tr("Take back access you gave to apps"))
             .clicked()
     {
         app.act();

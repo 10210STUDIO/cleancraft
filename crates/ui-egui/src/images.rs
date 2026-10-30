@@ -468,7 +468,7 @@ pub fn dialog_head_app(
     sub: &str,
 ) {
     use crate::theme::{Weight, font};
-    use egui::RichText;
+
     ui.horizontal(|ui| {
         app_icon(ui, app_path, 48.0);
         ui.add_space(6.0);
@@ -476,7 +476,7 @@ pub fn dialog_head_app(
             ui.spacing_mut().item_spacing.y = 3.0;
             ui.add(
                 egui::Label::new(
-                    RichText::new(headline)
+                    crate::rich(headline)
                         .font(font(18.0, Weight::Bold))
                         .color(t.text),
                 )
@@ -485,7 +485,7 @@ pub fn dialog_head_app(
             if !sub.is_empty() {
                 ui.add(
                     egui::Label::new(
-                        RichText::new(sub)
+                        crate::rich(sub)
                             .font(font(12.5, Weight::Regular))
                             .color(t.text_dim),
                     )
