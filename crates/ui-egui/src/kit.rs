@@ -1948,7 +1948,8 @@ pub fn progress_ring(p: &egui::Painter, c: Pos2, d: f32, t: &Tokens, time: f64) 
         let f1 = (i + 1) as f32 / seg as f32;
         let a0 = (head - len + len * f0).to_radians();
         let a1 = (head - len + len * f1).to_radians();
-        let col = icons::lerp(theme::BRAND_LIME_DEEP, t.accent, f1).gamma_multiply(0.25 + 0.75 * f1);
+        let col =
+            icons::lerp(theme::BRAND_LIME_DEEP, t.accent, f1).gamma_multiply(0.25 + 0.75 * f1);
         p.line_segment(
             [
                 c + vec2(a0.cos(), a0.sin()) * r,
