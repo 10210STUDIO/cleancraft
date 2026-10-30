@@ -20,8 +20,8 @@ use std::collections::BTreeMap;
 use cleancraft_core::Settings;
 use cleancraft_core::settings::ListPrefs;
 use egui::{
-    Align, Align2, Color32, Key, Layout, Modifiers, PopupCloseBehavior, Rect, Response, RichText,
-    Sense, Stroke, Ui, Vec2, WidgetInfo, WidgetType, pos2, vec2,
+    Align, Align2, Color32, Key, Layout, Modifiers, PopupCloseBehavior, Rect, Response, Sense,
+    Stroke, Ui, Vec2, WidgetInfo, WidgetType, pos2, vec2,
 };
 
 use crate::icons::{self, Icon};
@@ -231,7 +231,7 @@ pub fn search(
 ) -> (Response, bool) {
     let r = kit::search_field(ui, t, text, hint, width);
     let label = name.to_string();
-    r.widget_info(|| WidgetInfo::labeled(WidgetType::TextEdit, true, &label));
+    r.widget_info(|| WidgetInfo::labeled(WidgetType::TextEdit, true, crate::tr(&label)));
     let mut changed = r.changed();
     // Cmd+F, as in every Mac app with a search field.
     if ui.ctx().memory(|m| m.top_modal_layer()).is_none()
@@ -277,7 +277,7 @@ pub fn filter_menu(
             .join(", ")
     };
     resp.widget_info(|| {
-        let mut i = WidgetInfo::labeled(WidgetType::Button, true, "Filter");
+        let mut i = WidgetInfo::labeled(WidgetType::Button, true, crate::tr("Filter"));
         i.current_text_value = Some(value.clone());
         i
     });
@@ -378,7 +378,7 @@ pub fn sort_menu(ui: &mut Ui, id: &str, sorts: &[SortKey], p: &mut ListPrefs) ->
         ui.spacing_mut().interact_size.y = hit::FIELD;
         ui.spacing_mut().button_padding = vec2(14.0, 7.0);
         let r = egui::ComboBox::from_id_salt(("list-sort", id))
-            .selected_text(RichText::new(cur.label).font(font(size::CALLOUT, Weight::Medium)))
+            .selected_text(crate::rich(cur.label).font(font(size::CALLOUT, Weight::Medium)))
             .icon(move |ui, rect, visuals, _open| {
                 let r = Rect::from_center_size(rect.center(), Vec2::splat(13.0));
                 arrow(ui.painter(), r, down, visuals.fg_stroke.color);
@@ -409,7 +409,7 @@ pub fn sort_menu(ui: &mut Ui, id: &str, sorts: &[SortKey], p: &mut ListPrefs) ->
             .response;
         kit::pointer(&r);
         r.widget_info(|| {
-            let mut i = WidgetInfo::labeled(WidgetType::ComboBox, true, "Sort");
+            let mut i = WidgetInfo::labeled(WidgetType::ComboBox, true, crate::tr("Sort"));
             i.current_text_value = Some(value.clone());
             i
         });
@@ -493,7 +493,7 @@ pub fn status(
         |ui| {
             ui.spacing_mut().item_spacing.x = space::S;
             ui.label(
-                RichText::new(&line)
+                crate::rich(&line)
                     .font(font(size::CALLOUT, Weight::Medium))
                     .color(if shown == 0 { t.warning } else { t.text_dim }),
             );
@@ -612,7 +612,7 @@ fn filter_entry(ui: &mut Ui, t: &Tokens, f: &Filter, is_on: bool) -> bool {
     let w = ui.available_width();
     let (r, resp) = ui.allocate_exact_size(vec2(w, 28.0), Sense::click());
     let name = f.entry_name();
-    resp.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, is_on, &name));
+    resp.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, is_on, crate::tr(&name)));
     let feel = kit::feel(ui, &resp);
     let p = ui.painter();
     if feel.hov > 0.0 {
@@ -637,14 +637,14 @@ fn filter_entry(ui: &mut Ui, t: &Tokens, f: &Filter, is_on: bool) -> bool {
     p.text(
         pos2(r.left() + 32.0, r.center().y),
         Align2::LEFT_CENTER,
-        &f.label,
+        crate::tr(&f.label),
         fid.clone(),
         t.text,
     );
     p.text(
         pos2(r.right() - 12.0, r.center().y),
         Align2::RIGHT_CENTER,
-        f.count.to_string(),
+        crate::tr(f.count.to_string()),
         fid,
         if f.count == 0 {
             t.text_faint
@@ -659,7 +659,7 @@ fn clear_entry(ui: &mut Ui, t: &Tokens) -> Response {
     let fid = font(size::CALLOUT, Weight::Medium);
     let w = ui.available_width();
     let (r, resp) = ui.allocate_exact_size(vec2(w, 28.0), Sense::click());
-    resp.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, "Clear Filters"));
+    resp.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, crate::tr("Clear Filters")));
     let feel = kit::feel(ui, &resp);
     let p = ui.painter();
     if feel.hov > 0.0 {
@@ -672,7 +672,7 @@ fn clear_entry(ui: &mut Ui, t: &Tokens) -> Response {
     p.text(
         pos2(r.left() + 32.0, r.center().y),
         Align2::LEFT_CENTER,
-        "Clear Filters",
+        crate::tr("Clear Filters"),
         fid,
         t.text,
     );
@@ -686,7 +686,7 @@ fn chip(ui: &mut Ui, t: &Tokens, label: &str) -> Response {
     let g = kit::galley(ui, label, fid, t.text);
     let (r, resp) = ui.allocate_exact_size(vec2(g.size().x + 12.0 + 24.0, 24.0), Sense::click());
     let name = format!("Remove filter {label}");
-    resp.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &name));
+    resp.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, crate::tr(&name)));
     let f = kit::feel(ui, &resp);
     let p = ui.painter();
     p.rect_filled(

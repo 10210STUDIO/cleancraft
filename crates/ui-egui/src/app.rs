@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use cleancraft_core::permissions::{self, Access};
 use cleancraft_core::route::AppRoute;
 use cleancraft_core::{Env, FeatureId, Settings};
-use egui::{Color32, CornerRadius, RichText, Sense, Stroke, Ui, vec2};
+use egui::{Color32, CornerRadius, Sense, Stroke, Ui, vec2};
 
 use crate::icons::{self, Icon};
 use crate::kit;
@@ -200,6 +200,7 @@ const NAV_ROW: f32 = 44.0;
 impl CleanApp {
     pub fn new(env: Env) -> CleanApp {
         let (settings, settings_warning) = Settings::load_checked(&env);
+        cleancraft_core::i18n::apply(&env, &settings);
         let fda = permissions::full_disk_access(&env);
         CleanApp {
             env,
@@ -916,7 +917,7 @@ impl CleanApp {
         let color = icon.section().colors().0;
         let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), NAV_ROW), Sense::click());
         resp.widget_info(|| {
-            egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, label)
+            egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, crate::tr(label))
         });
         let feel = kit::feel_ring(ui, &t, &resp, r, f32::from(theme::radius::M));
         let hov = feel.hov;
@@ -956,7 +957,7 @@ impl CleanApp {
         p.text(
             egui::pos2(tile.right() + 12.0, r.center().y),
             egui::Align2::LEFT_CENTER,
-            label,
+            crate::tr(label),
             // One weight in both states, so the label does not jump when selected.
             font(size::BODY, Weight::Medium),
             if active {
@@ -999,7 +1000,7 @@ impl CleanApp {
                         let (r, _) = ui.allocate_exact_size(egui::Vec2::splat(isz::SIDEBAR), Sense::hover());
                         icons::paint(ui.painter(), r, Icon::Warning, t.warning);
                         ui.label(
-                            RichText::new(
+                            crate::rich(
                                 "CleanCraft cannot see Mail, Safari and Trash data. Turn on Full Disk Access for CleanCraft to include them.",
                             )
                             .font(font(size::CALLOUT, Weight::Regular))
@@ -1063,7 +1064,11 @@ impl CleanApp {
                                     Some(Icon::Undo),
                                 );
                                 r.widget_info(|| {
-                                    egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name)
+                                    egui::WidgetInfo::labeled(
+                                        egui::WidgetType::Button,
+                                        true,
+                                        crate::tr(&name),
+                                    )
                                 });
                                 if r.clicked() {
                                     self.act();
@@ -1078,7 +1083,7 @@ impl CleanApp {
                                 |ui| {
                                     ui.add(
                                         egui::Label::new(
-                                            RichText::new(&msg)
+                                            crate::rich(&msg)
                                                 .font(font(size::CALLOUT, Weight::Regular))
                                                 .color(t.text),
                                         )

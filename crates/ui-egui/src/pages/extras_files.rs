@@ -10,7 +10,7 @@ use cleancraft_core::features::large_old::{
     self, GroupBy, Location, ScanOptions, grouped_by, is_by_source, parse_folder, regroup,
 };
 use cleancraft_core::fsutil::human_size;
-use egui::{Id, RichText, Ui};
+use egui::{Id, Ui};
 
 use crate::app::CleanApp;
 use crate::kit;
@@ -84,7 +84,7 @@ fn location_picker(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         // pushed the start screen's object out at 680 pt and wrapped raggedly).
         ui.horizontal(|ui| {
             ui.label(
-                RichText::new("Where to look")
+                crate::rich("Where to look")
                     .font(crate::theme::font(crate::theme::size::BODY, crate::theme::Weight::SemiBold))
                     .color(t.text),
             );
@@ -116,7 +116,7 @@ fn location_picker(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             ui.horizontal(|ui| {
                 let r = kit::text_field(ui, &t, &mut p.text, "~/Projects", 300.0);
                 r.widget_info(|| {
-                    egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Folder path")
+                    egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, crate::tr("Folder path"))
                 });
                 if p.other && !r.has_focus() && p.text.is_empty() && p.error.is_none() {
                     r.request_focus();
@@ -158,7 +158,7 @@ fn location_picker(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                 }
             }
             if let Some(e) = &p.error {
-                ui.label(RichText::new(e).color(t.danger));
+                ui.label(crate::rich(e).color(t.danger));
             }
         }
         let now = ScanOptions::load(&app.env).location(f).clone();

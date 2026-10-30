@@ -27,7 +27,7 @@ use cleancraft_core::space::{
     self, DiskUse, MapLocation, Node, Tree, Volume, lock_reason_deep, node_lock_reason, outermost,
 };
 use cleancraft_core::space_snapshots;
-use egui::{Align, Color32, CornerRadius, Layout, RichText, Sense, Stroke, Ui, vec2};
+use egui::{Align, Color32, CornerRadius, Layout, Sense, Stroke, Ui, vec2};
 
 use crate::app::CleanApp;
 use crate::icons::{self, Icon};
@@ -606,7 +606,7 @@ fn storage_bar(app: &mut CleanApp, ui: &mut Ui) {
             };
             ui.horizontal(|ui| {
                 ui.label(
-                    RichText::new(text)
+                    crate::rich(text)
                         .font(font(size::BODY, Weight::SemiBold))
                         .color(t.text),
                 );
@@ -615,7 +615,7 @@ fn storage_bar(app: &mut CleanApp, ui: &mut Ui) {
                 if sel > 0 {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.label(
-                            RichText::new(format!("Selected: {}", human_size(sel)))
+                            crate::rich(format!("Selected: {}", human_size(sel)))
                                 .font(font(size::CALLOUT, Weight::Medium))
                                 .color(t.warning),
                         );
@@ -683,7 +683,11 @@ fn idle(app: &mut CleanApp, ui: &mut Ui) {
                 let r =
                     kit::text_field(ui, &t, &mut app.disk_map.folder_text, "~/Projects", field_w);
                 r.widget_info(|| {
-                    egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Folder to map")
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::TextEdit,
+                        true,
+                        crate::tr("Folder to map"),
+                    )
                 });
                 if r.changed() {
                     app.act();
@@ -719,7 +723,7 @@ fn idle(app: &mut CleanApp, ui: &mut Ui) {
                     })
                     .inner;
                 if ch
-                    .on_hover_text("Pick the folder to map in the macOS file dialog")
+                    .on_hover_text(crate::tr("Pick the folder to map in the macOS file dialog"))
                     .clicked()
                     && !picking
                 {
@@ -792,7 +796,7 @@ fn location_picker(app: &mut CleanApp, ui: &mut Ui, vols: &[Volume]) {
     let mut picked = None;
     kit::centered_row(ui, egui::Id::new("disk-map-where"), |ui| {
         ui.label(
-            RichText::new("Where to look")
+            crate::rich("Where to look")
                 .font(font(size::BODY, Weight::SemiBold))
                 .color(t.text),
         );
@@ -959,7 +963,11 @@ fn map(app: &mut CleanApp, ui: &mut Ui) {
             };
             let r = kit::pill(ui, &t, &label, kind, None);
             r.widget_info(|| {
-                egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Go to {label}"))
+                egui::WidgetInfo::labeled(
+                    egui::WidgetType::Button,
+                    true,
+                    crate::tr(format!("Go to {label}")),
+                )
             });
             if r.clicked() {
                 open_folder(app, c.clone());
@@ -981,12 +989,12 @@ fn map(app: &mut CleanApp, ui: &mut Ui) {
     });
     ui.horizontal(|ui| {
         ui.label(
-            RichText::new(human_size(node.size))
+            crate::rich(human_size(node.size))
                 .font(font(size::LARGE_TITLE, Weight::Bold))
                 .color(icons::lerp(t.sec_a, Color32::WHITE, 0.15)),
         );
         ui.label(
-            RichText::new(format!(
+            crate::rich(format!(
                 "in {} ({} files)",
                 node_label(app, &node),
                 node.files
@@ -1174,7 +1182,7 @@ fn treemap(app: &mut CleanApp, ui: &mut Ui, node: &Node, area: egui::Rect) {
         values.push(rest as f64);
     }
     if values.is_empty() {
-        ui.label(RichText::new("This folder is empty.").color(t.text_dim));
+        ui.label(crate::rich("This folder is empty.").color(t.text_dim));
         return;
     }
     // Keep "biggest first" for the layout.
@@ -1211,7 +1219,9 @@ fn treemap(app: &mut CleanApp, ui: &mut Ui, node: &Node, area: egui::Rect) {
         let id = ui.id().with(("block", &label));
         let resp = ui.interact(rect, id, Sense::click());
         let name = format!("Block {label}");
-        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
+        resp.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Button, true, crate::tr(&name))
+        });
         let p = ui.painter();
         let round = (rect.width().min(rect.height()) * 0.18).clamp(2.0, 8.0);
         let feel = kit::feel_ring(ui, &t, &resp, rect, round);
@@ -1276,9 +1286,11 @@ fn treemap(app: &mut CleanApp, ui: &mut Ui, node: &Node, area: egui::Rect) {
             );
         }
         let resp = match &target {
-            Some((path, true)) => resp.on_hover_text(format!("Open {}", app.env.display(path))),
-            Some((path, false)) => resp.on_hover_text(app.env.display(path)),
-            None => resp.on_hover_text("Smaller items, listed on the right"),
+            Some((path, true)) => {
+                resp.on_hover_text(crate::tr(format!("Open {}", app.env.display(path))))
+            }
+            Some((path, false)) => resp.on_hover_text(crate::tr(app.env.display(path))),
+            None => resp.on_hover_text(crate::tr("Smaller items, listed on the right")),
         };
         if resp.clicked() {
             match &target {
@@ -1452,7 +1464,11 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                             kit::feel_ring(ui, &t, &resp, name_rect, 4.0);
                             // A folder name opens it: a link, for VoiceOver and tests.
                             resp.widget_info(|| {
-                                egui::WidgetInfo::labeled(egui::WidgetType::Link, true, &c.name)
+                                egui::WidgetInfo::labeled(
+                                    egui::WidgetType::Link,
+                                    true,
+                                    crate::tr(&c.name),
+                                )
                             });
                             let col = if resp.hovered() {
                                 icons::lerp(t.sec_a, Color32::WHITE, 0.3)
@@ -1462,11 +1478,11 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                             ui.painter().text(
                                 name_rect.left_center(),
                                 egui::Align2::LEFT_CENTER,
-                                &name_s,
+                                crate::tr(&name_s),
                                 nf,
                                 col,
                             );
-                            let resp = resp.on_hover_text("Open this folder");
+                            let resp = resp.on_hover_text(crate::tr("Open this folder"));
                             if resp.clicked() {
                                 open_folder(app, c.path.clone());
                             }
@@ -1521,7 +1537,7 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                                     egui::WidgetInfo::labeled(
                                         egui::WidgetType::Link,
                                         true,
-                                        format!("Open {label}"),
+                                        crate::tr(format!("Open {label}")),
                                     )
                                 });
                                 let col = if resp.hovered() {
@@ -1532,7 +1548,7 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                                 ui.painter().text(
                                     lr.left_center(),
                                     egui::Align2::LEFT_CENTER,
-                                    label,
+                                    crate::tr(label),
                                     lf.clone(),
                                     col,
                                 );
@@ -1586,7 +1602,7 @@ fn list(app: &mut CleanApp, ui: &mut Ui, node: &Node, h: f32) {
                                 kit::truncate_end(ui.ctx(), &short, &lf, line.width())
                             };
                             kit::text_at(ui, line, &s, &text, lf, t.text_dim, Align::Min)
-                                .on_hover_text(format!("Locked: {why}"));
+                                .on_hover_text(crate::tr(format!("Locked: {why}")));
                         } else if c.unreadable {
                             let lf = font(size::FOOTNOTE, Weight::Regular);
                             let s = "Could not be read. Full Disk Access may help.";

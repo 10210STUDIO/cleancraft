@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use cleancraft_core::FeatureId;
 use cleancraft_core::features::dev_clutter::{self as dev, ToolReport, ToolState};
 use cleancraft_core::fsutil::human_size;
-use egui::{Id, RichText, Ui};
+use egui::{Id, Ui};
 
 use crate::app::CleanApp;
 use crate::icons::Icon;
@@ -124,7 +124,7 @@ pub fn empty_extra(app: &mut CleanApp, ui: &mut Ui) {
         ui.set_max_width(560.0);
         ui.add(
             egui::Label::new(
-                RichText::new(line)
+                crate::rich(line)
                     .font(font(size::CALLOUT, Weight::Regular))
                     .color(t.text_dim),
             )
@@ -289,14 +289,14 @@ fn tool_card(ui: &mut Ui, t: &crate::theme::Tokens, r: &ToolReport) -> bool {
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
             ui.label(
-                RichText::new(r.id.title())
+                crate::rich(r.id.title())
                     .font(font(size::BODY, Weight::SemiBold))
                     .color(t.text),
             );
             if r.ready() {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(
-                        RichText::new(human_size(r.size))
+                        crate::rich(human_size(r.size))
                             .font(font(size::BODY, Weight::SemiBold))
                             .color(t.text),
                     );
@@ -311,7 +311,7 @@ fn tool_card(ui: &mut Ui, t: &crate::theme::Tokens, r: &ToolReport) -> bool {
                     ui.horizontal(|ui| {
                         ui.add(
                             egui::Label::new(
-                                RichText::new(format!("{}: {}", e.label, e.detail))
+                                crate::rich(format!("{}: {}", e.label, e.detail))
                                     .font(font(size::FOOTNOTE, Weight::Regular))
                                     .color(t.text_dim),
                             )
@@ -319,7 +319,7 @@ fn tool_card(ui: &mut Ui, t: &crate::theme::Tokens, r: &ToolReport) -> bool {
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.label(
-                                RichText::new(human_size(e.size))
+                                crate::rich(human_size(e.size))
                                     .font(font(size::FOOTNOTE, Weight::Medium))
                                     .color(t.text),
                             );
@@ -334,12 +334,12 @@ fn tool_card(ui: &mut Ui, t: &crate::theme::Tokens, r: &ToolReport) -> bool {
                 ui.add_space(space::XS);
                 ui.horizontal(|ui| {
                     ui.label(
-                        RichText::new("Command:")
+                        crate::rich("Command:")
                             .font(font(size::FOOTNOTE, Weight::Medium))
                             .color(t.text_dim),
                     );
                     ui.label(
-                        RichText::new(&r.command)
+                        crate::rich(&r.command)
                             .font(mono(size::CALLOUT))
                             .color(t.text),
                     );

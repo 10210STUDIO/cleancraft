@@ -12,7 +12,7 @@ use cleancraft_core::{FeatureId, Plan};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use egui::{Align, Color32, Layout, Rect, RichText, Sense, Ui, pos2, vec2};
+use egui::{Align, Color32, Layout, Rect, Sense, Ui, pos2, vec2};
 
 use crate::app::CleanApp;
 use crate::icons::{self, Icon};
@@ -681,13 +681,13 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
             kit::done_hero(ui, &t, f, 150.0, started);
             ui.add_space(space::M);
             ui.label(
-                RichText::new("Nothing to clean here")
+                crate::rich("Nothing to clean here")
                     .font(font(size::TITLE2, Weight::SemiBold))
                     .color(t.text),
             );
             ui.add_space(space::XS);
             ui.label(
-                RichText::new("Your Mac has nothing this module would clean right now.")
+                crate::rich("Your Mac has nothing this module would clean right now.")
                     .font(font(size::CALLOUT, Weight::Regular))
                     .color(t.text_dim),
             );
@@ -709,7 +709,7 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
                     ui.add_space(space::XS);
                     for note in &plan.notes {
                         ui.label(
-                            RichText::new(sentence(note))
+                            crate::rich(sentence(note))
                                 .font(font(size::FOOTNOTE, Weight::Regular))
                                 .color(t.text_dim),
                         );
@@ -751,7 +751,7 @@ fn results(app: &mut CleanApp, ui: &mut Ui, f: FeatureId) {
         ui.vertical(|ui| {
             ui.add_space(kit::baseline_offset(size::DISPLAY, size::TITLE3));
             ui.label(
-                RichText::new(line)
+                crate::rich(line)
                     .font(font(size::TITLE3, Weight::Medium))
                     .color(t.text_dim),
             );
@@ -1142,7 +1142,7 @@ fn categories(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan) {
                 )
             }),
         );
-        r.row.on_hover_text(&c.description);
+        r.row.on_hover_text(crate::tr(&c.description));
         if let Some(on) = r.check_changed {
             app.act();
             if let Some(p) = app.plan_state(f).plan.as_mut() {
@@ -1187,7 +1187,12 @@ pub fn category_row(
     };
     let (r, resp) = ui.allocate_exact_size(vec2(w, hit::CATEGORY), sense);
     resp.widget_info(|| {
-        egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, current, label)
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            true,
+            current,
+            crate::tr(label),
+        )
     });
     let feel = kit::feel_ring(ui, t, &resp, r, 12.0);
     let hov = feel.hov;
@@ -1266,7 +1271,7 @@ pub fn category_row(
     p.text(
         pos2(x, r.top() + 17.0),
         egui::Align2::LEFT_CENTER,
-        title_s,
+        crate::tr(title_s),
         name_font,
         if current {
             t.text
@@ -1634,7 +1639,7 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
     p.text(
         pos2(x0, r.top() + 20.0),
         egui::Align2::LEFT_CENTER,
-        name_s,
+        crate::tr(name_s),
         name_font,
         if locked { t.text_dim } else { t.text },
     );
@@ -1820,7 +1825,7 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
         let mut focused = false;
         if keeps_a_copy(f) && !locked && it.group.is_some() && !kept {
             let r = kit::ghost(ui, &t, "Keep This One", None)
-                .on_hover_text("Keep this copy and select the others in its set");
+                .on_hover_text(crate::tr("Keep this copy and select the others in its set"));
             focused |= r.has_focus();
             if r.clicked() {
                 app.act();
@@ -1836,7 +1841,7 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
         }
         if !trash && ignored {
             let r = kit::ghost(ui, &t, "Stop Ignoring", None)
-                .on_hover_text("Propose this again in scans");
+                .on_hover_text(crate::tr("Propose this again in scans"));
             focused |= r.has_focus();
             if r.clicked() {
                 app.act();
@@ -1848,8 +1853,9 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
                 app.tell(format!("{name} is no longer ignored."));
             }
         } else if !trash {
-            let ig = kit::ghost(ui, &t, "Ignore", None)
-                .on_hover_text("Never propose this again (Settings > Ignore list)");
+            let ig = kit::ghost(ui, &t, "Ignore", None).on_hover_text(crate::tr(
+                "Never propose this again (Settings > Ignore list)",
+            ));
             focused |= ig.has_focus();
             if ig.clicked() {
                 app.act();
@@ -1883,7 +1889,8 @@ fn item_row(app: &mut CleanApp, ui: &mut Ui, f: FeatureId, plan: &Plan, id: usiz
         // Only files and folders on disk can be shown in Finder (Wi-Fi networks and
         // permissions are listed under a label, not a file).
         let reveal = (on_disk && !trash).then(|| {
-            kit::ghost(ui, &t, "Reveal", Some(Icon::Reveal)).on_hover_text("Show in Finder")
+            kit::ghost(ui, &t, "Reveal", Some(Icon::Reveal))
+                .on_hover_text(crate::tr("Show in Finder"))
         });
         focused |= reveal.as_ref().is_some_and(|r| r.has_focus());
         ui.data_mut(|d| d.insert_temp(actions_focus_id, focused));
@@ -2166,7 +2173,7 @@ pub fn skipped_card(
             let (r, _) = ui.allocate_exact_size(egui::Vec2::splat(isz::INLINE), Sense::hover());
             icons::paint(ui.painter(), r, Icon::Warning, t.warning);
             ui.label(
-                RichText::new(format!(
+                crate::rich(format!(
                     "Not moved: {}",
                     cleancraft_core::fsutil::items(skipped.len())
                 ))
@@ -2193,19 +2200,19 @@ pub fn skipped_card(
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing.y = 1.0;
                         ui.label(
-                            RichText::new(app.env.display(p))
+                            crate::rich(app.env.display(p))
                                 .font(font(size::CALLOUT, Weight::Medium))
                                 .color(t.text),
                         );
                         ui.horizontal_wrapped(|ui| {
                             ui.label(
-                                RichText::new(why.to_string())
+                                crate::rich(why.to_string())
                                     .font(font(size::FOOTNOTE, Weight::Medium))
                                     .color(t.warning),
                             );
                             if let Some(h) = skip_hint(why) {
                                 ui.label(
-                                    RichText::new(h)
+                                    crate::rich(h)
                                         .font(font(size::FOOTNOTE, Weight::Regular))
                                         .color(t.text_dim),
                                 );
@@ -2271,13 +2278,13 @@ pub fn done_view_with(
         kit::done_hero(ui, &t, feature, d, started);
         ui.add_space(space::L);
         ui.label(
-            RichText::new(features::moved_text([rep]))
+            crate::rich(features::moved_text([rep]))
                 .font(font(size::LARGE_TITLE, Weight::Bold))
                 .color(t.text),
         );
         ui.add_space(space::XS);
         ui.label(
-            RichText::new(summary)
+            crate::rich(summary)
                 .font(font(size::BODY_L, Weight::Regular))
                 .color(t.text_dim),
         );

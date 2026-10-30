@@ -74,6 +74,9 @@ pub struct Settings {
     /// Install a new CleanCraft by itself. Off: the person is told and installs from the
     /// "Update available" banner.
     pub update_install_auto: bool,
+    /// The interface language ("en", "it"). Empty: the first of the Mac's preferred languages
+    /// CleanCraft speaks, else English (see `i18n`).
+    pub language: String,
 }
 
 fn on() -> bool {
@@ -121,6 +124,7 @@ impl Default for Settings {
             setup_done: false,
             update_check_auto: true,
             update_install_auto: false,
+            language: String::new(),
         }
     }
 }

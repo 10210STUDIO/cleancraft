@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use egui::{
     Align2, Color32, CornerRadius, CursorIcon, FontId, Frame, Galley, Margin, Pos2, Rect, Response,
-    RichText, Sense, Shape, Stroke, Ui, Vec2, WidgetInfo, WidgetType, pos2, vec2,
+    Sense, Shape, Stroke, Ui, Vec2, WidgetInfo, WidgetType, pos2, vec2,
 };
 
 use crate::icons::{self, Icon};
@@ -134,7 +134,7 @@ pub fn row_tip(resp: &Response, row: Rect, text: &str) {
         .align_alternatives(&[egui::RectAlign::TOP_START])
         .gap(4.0);
     tip.show(|ui| {
-        ui.label(text);
+        ui.label(crate::tr(text));
     });
 }
 
@@ -188,14 +188,14 @@ pub fn empty_state(ui: &mut Ui, t: &Tokens, icon: Icon, headline: &str, line: &s
         );
         ui.add_space(space::M);
         ui.label(
-            RichText::new(headline)
+            crate::rich(headline)
                 .font(font(size::TITLE3, Weight::SemiBold))
                 .color(t.text),
         );
         if !line.is_empty() {
             ui.add_space(space::XS);
             ui.label(
-                RichText::new(line)
+                crate::rich(line)
                     .font(font(size::CALLOUT, Weight::Regular))
                     .color(t.text_dim),
             );
@@ -223,7 +223,7 @@ pub fn slider(ui: &mut Ui, s: egui::Slider<'_>) -> Response {
 
 /// An item in a pop-up menu (Select Copies): egui's menu button, with the pointing hand.
 pub fn menu_item(ui: &mut Ui, label: &str) -> Response {
-    let r = ui.button(RichText::new(label).font(font(size::CALLOUT, Weight::Medium)));
+    let r = ui.button(crate::rich(label).font(font(size::CALLOUT, Weight::Medium)));
     pointer(&r);
     r
 }
@@ -320,12 +320,12 @@ pub fn pill(ui: &mut Ui, t: &Tokens, label: &str, kind: Kind, icon: Option<Icon>
     let fid = font(fs, weight);
     let galley = ui
         .painter()
-        .layout_no_wrap(label.to_string(), fid, Color32::WHITE);
+        .layout_no_wrap(crate::tr(label.to_string()), fid, Color32::WHITE);
     let icon_w = if icon.is_some() { fs + 6.0 } else { 0.0 };
     let w = (galley.size().x + icon_w + pad * 2.0).max(min_w);
     let (rect, resp) = ui.allocate_exact_size(vec2(w, h), Sense::click());
     let enabled = ui.is_enabled();
-    resp.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, label));
+    resp.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, crate::tr(label)));
     if !ui.is_rect_visible(rect) {
         return resp;
     }
@@ -360,7 +360,7 @@ pub fn pill(ui: &mut Ui, t: &Tokens, label: &str, kind: Kind, icon: Option<Icon>
         }
         let g = ui
             .painter()
-            .layout_no_wrap(label.to_string(), font(fs, weight), color);
+            .layout_no_wrap(crate::tr(label.to_string()), font(fs, weight), color);
         p.galley(pos2(x, r.center().y - g.size().y / 2.0), g, color);
         return resp;
     }
@@ -425,9 +425,9 @@ pub fn pill(ui: &mut Ui, t: &Tokens, label: &str, kind: Kind, icon: Option<Icon>
     }
     // The label keeps its size while pressed (only the fill shrinks): re-laying text at a
     // scaled size makes the glyphs shimmer.
-    let galley = ui
-        .painter()
-        .layout_no_wrap(label.to_string(), font(fs, weight), text_color);
+    let galley =
+        ui.painter()
+            .layout_no_wrap(crate::tr(label.to_string()), font(fs, weight), text_color);
     p.galley(
         pos2(x, r.center().y - galley.size().y / 2.0),
         galley,
@@ -578,7 +578,7 @@ pub fn title_announced(ui: &mut Ui, t: &Tokens, text: &str) {
     let fid = font(size::TITLE, Weight::Bold);
     let g = galley(ui, text, fid, t.text);
     let (r, resp) = ui.allocate_exact_size(g.size(), Sense::hover());
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, text));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, crate::tr(text)));
     ui.painter().galley(r.min, g, t.text);
 }
 
@@ -639,7 +639,9 @@ pub fn segmented(
         let on = i == selected;
         // Announced as one of a group of radio buttons: one tool of the section is chosen
         // (REVIEW-C C33).
-        resp.widget_info(|| WidgetInfo::selected(WidgetType::RadioButton, true, on, *name));
+        resp.widget_info(|| {
+            WidgetInfo::selected(WidgetType::RadioButton, true, on, crate::tr(*name))
+        });
         let f = feel(ui, &resp);
         let hov = f.hov;
         let k = anim(ui.ctx(), id.with("on"), on, motion::HOVER * 1.5);
@@ -674,7 +676,7 @@ pub fn segmented(
         p.text(
             pos2(ir.right() + 8.0, r.center().y),
             Align2::LEFT_CENTER,
-            *name,
+            crate::tr(*name),
             fid.clone(),
             color,
         );
@@ -687,7 +689,7 @@ pub fn segmented(
 
 pub fn subtitle(ui: &mut Ui, t: &Tokens, text: &str) {
     ui.label(
-        RichText::new(text)
+        crate::rich(text)
             .font(font(size::CALLOUT, Weight::Regular))
             .color(t.text_dim),
     );
@@ -695,7 +697,7 @@ pub fn subtitle(ui: &mut Ui, t: &Tokens, text: &str) {
 
 pub fn dim(ui: &mut Ui, t: &Tokens, text: &str) {
     ui.label(
-        RichText::new(text)
+        crate::rich(text)
             .color(t.text_faint)
             .font(font(size::FOOTNOTE, Weight::Regular)),
     );
@@ -704,7 +706,7 @@ pub fn dim(ui: &mut Ui, t: &Tokens, text: &str) {
 /// A small upper-case label above a group of controls.
 pub fn eyebrow(ui: &mut Ui, t: &Tokens, text: &str) {
     ui.label(
-        RichText::new(text.to_uppercase())
+        crate::rich(text.to_uppercase())
             .font(font(size::CAPTION, Weight::SemiBold))
             .extra_letter_spacing(0.6)
             .color(t.text_faint),
@@ -714,7 +716,7 @@ pub fn eyebrow(ui: &mut Ui, t: &Tokens, text: &str) {
 /// A big number (display size) in the section colour.
 pub fn display(ui: &mut Ui, t: &Tokens, text: &str) -> Response {
     ui.label(
-        RichText::new(text)
+        crate::rich(text)
             .font(font(size::DISPLAY, Weight::Bold))
             .color(icons::lerp(t.sec_a, Color32::WHITE, 0.15)),
     )
@@ -741,7 +743,7 @@ pub fn display_count(
     let full = cleancraft_core::fsutil::human_size(bytes);
     let shown = cleancraft_core::fsutil::human_size(v.round() as u64);
     let r = display(ui, t, &shown);
-    r.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, full.clone()));
+    r.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, crate::tr(full.clone())));
     r
 }
 
@@ -962,10 +964,12 @@ pub fn path_label(ui: &mut Ui, t: &Tokens, text: &str) -> Response {
 /// A rounded tag (a file's reason, a state).
 pub fn tag(ui: &mut Ui, text: &str, color: Color32) -> Response {
     let fid = font(size::FOOTNOTE, Weight::Medium);
-    let galley = ui.painter().layout_no_wrap(text.to_string(), fid, color);
+    let galley = ui
+        .painter()
+        .layout_no_wrap(crate::tr(text.to_string()), fid, color);
     let size = galley.size() + vec2(16.0, 6.0);
     let (r, resp) = ui.allocate_exact_size(size, Sense::hover());
-    resp.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, text));
+    resp.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, crate::tr(text)));
     let p = ui.painter();
     p.rect_filled(r, r.height() / 2.0, color.gamma_multiply(0.16));
     p.galley(r.center() - galley.size() / 2.0, galley, color);
@@ -1011,7 +1015,7 @@ pub fn initial_tile(p: &egui::Painter, r: Rect, name: &str, color: Color32) {
     p.text(
         r.center(),
         Align2::CENTER_CENTER,
-        letter,
+        crate::tr(letter),
         font(theme::snap(r.height() * 0.48), Weight::Bold),
         theme::on_color(icons::lerp(color, Color32::BLACK, 0.12)),
     );
@@ -1091,7 +1095,9 @@ pub fn chip_toggles(
             let sel = on.get(*i).copied().unwrap_or(true);
             let r = Rect::from_min_size(pos2(x, y), vec2(widths[*i], h));
             let resp = ui.interact(r, ui.id().with(("chip-toggle", *i)), Sense::click());
-            resp.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, sel, name));
+            resp.widget_info(|| {
+                WidgetInfo::selected(WidgetType::Checkbox, true, sel, crate::tr(name))
+            });
             pointer(&resp);
             if resp.clicked() {
                 clicked = Some(*i);
@@ -1133,7 +1139,7 @@ pub fn chip_toggles(
             p.text(
                 pos2(tr.right() + 8.0, r.center().y),
                 Align2::LEFT_CENTER,
-                name,
+                crate::tr(name),
                 fid.clone(),
                 if sel { t.text } else { t.text_faint },
             );
@@ -1249,7 +1255,7 @@ pub fn chips_with_state(
             p.text(
                 pos2(tr.right() + 8.0, r.center().y),
                 Align2::LEFT_CENTER,
-                name,
+                crate::tr(name),
                 fid.clone(),
                 if state.is_some_and(|s| s != ChipState::Waiting) {
                     t.text
@@ -1291,7 +1297,9 @@ pub fn chips_with_state(
                 };
                 let label = format!("{name}: {word}");
                 let resp = ui.interact(r, ui.id().with(("chip", *i)), Sense::hover());
-                resp.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, label.clone()));
+                resp.widget_info(|| {
+                    WidgetInfo::labeled(WidgetType::Label, true, crate::tr(label.clone()))
+                });
             }
             x += widths[*i] + gap;
         }
@@ -1374,7 +1382,7 @@ pub fn header(ui: &mut Ui, t: &Tokens, icon: Icon, title_text: &str, sub: &str) 
                 ui.set_max_width(ui.available_width().min(space::MEASURE + 160.0));
                 ui.add(
                     egui::Label::new(
-                        RichText::new(sub)
+                        crate::rich(sub)
                             .font(font(size::CALLOUT, Weight::Regular))
                             .color(t.text_dim),
                     )
@@ -1392,7 +1400,7 @@ pub fn card_head(ui: &mut Ui, t: &Tokens, icon: Icon, color: Color32, title_text
         badge(ui, color, icon, 28.0);
         ui.add_space(space::XXS);
         ui.label(
-            RichText::new(title_text)
+            crate::rich(title_text)
                 .font(font(size::TITLE3, Weight::SemiBold))
                 .color(t.text),
         );
@@ -1497,7 +1505,7 @@ pub fn hero(
             };
             let bw = no_widow_width(ui, text.desc, &fid, bw);
             ui.set_max_width(bw);
-            ui.label(RichText::new(text.desc).font(fid).color(t.text_dim));
+            ui.label(crate::rich(text.desc).font(fid).color(t.text_dim));
         });
         if covers && !text.covers.is_empty() {
             ui.add_space(space::L);
@@ -1514,7 +1522,7 @@ pub fn hero(
                     );
                     ui.add_space(space::XS);
                     ui.label(
-                        RichText::new(*c)
+                        crate::rich(*c)
                             .font(font(size::BODY, Weight::Regular))
                             .color(t.text),
                     );
@@ -1651,7 +1659,7 @@ pub fn round_action(ui: &mut Ui, t: &Tokens, label: &str, d: f32) -> Response {
     };
     let resp = ui.interact(rect, ui.id().with(("round", label)), Sense::click());
     let enabled = ui.is_enabled();
-    resp.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, label));
+    resp.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, crate::tr(label)));
     let f = feel(ui, &resp);
     let (hov, down) = (f.hov, f.down);
     let time = ui.input(|i| i.time);
@@ -1717,7 +1725,7 @@ pub fn round_action(ui: &mut Ui, t: &Tokens, label: &str, d: f32) -> Response {
     p.text(
         c,
         Align2::CENTER_CENTER,
-        label,
+        crate::tr(label),
         font(size::TITLE2, Weight::Bold),
         t.on_accent,
     );
@@ -1750,7 +1758,13 @@ pub fn progress_bar(ui: &mut Ui, t: &Tokens, meter: &Progress, width: f32) -> Re
     let h = 10.0;
     let (r, resp) = ui.allocate_exact_size(vec2(width, h), Sense::hover());
     let label = progress_label(meter);
-    resp.widget_info(|| WidgetInfo::labeled(WidgetType::ProgressIndicator, true, label.clone()));
+    resp.widget_info(|| {
+        WidgetInfo::labeled(
+            WidgetType::ProgressIndicator,
+            true,
+            crate::tr(label.clone()),
+        )
+    });
     let p = ui.painter_at(r.expand(8.0));
     let round = h / 2.0;
     // Track: a dark well with a hairline.
@@ -1838,11 +1852,11 @@ pub fn progress_block(ui: &mut Ui, t: &Tokens, meter: &Progress, step: &str) {
     if let Some(pct) = meter.percent() {
         let txt = format!("{pct}%");
         let r = ui.label(
-            RichText::new(&txt)
+            crate::rich(&txt)
                 .font(font(size::TITLE2, Weight::SemiBold))
                 .color(t.text),
         );
-        r.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, txt.clone()));
+        r.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, crate::tr(txt.clone())));
         ui.add_space(space::XS);
     }
     progress_bar(ui, t, meter, w);
@@ -1850,11 +1864,11 @@ pub fn progress_block(ui: &mut Ui, t: &Tokens, meter: &Progress, step: &str) {
     let fid = font(size::CALLOUT, Weight::Regular);
     if !step.is_empty() {
         let shown = truncate_middle(ui.ctx(), step, &fid, w);
-        ui.label(RichText::new(shown).font(fid.clone()).color(t.text_faint));
+        ui.label(crate::rich(shown).font(fid.clone()).color(t.text_faint));
     }
     if let Some(left) = meter.eta_secs() {
         ui.label(
-            RichText::new(cleancraft_core::progress::eta_text(left))
+            crate::rich(cleancraft_core::progress::eta_text(left))
                 .font(font(size::FOOTNOTE, Weight::Regular))
                 .color(t.text_faint),
         );
@@ -1903,7 +1917,7 @@ pub fn progress_with(
         );
         ui.add_space(space::S);
         ui.label(
-            RichText::new(headline)
+            crate::rich(headline)
                 .font(font(size::TITLE2, Weight::SemiBold))
                 .color(t.text),
         );
@@ -2103,7 +2117,7 @@ pub fn sparkline(p: &egui::Painter, r: Rect, values: &[f64], slots: usize, color
         p.text(
             r.center() - vec2(0.0, 3.0),
             Align2::CENTER_CENTER,
-            "Collecting",
+            crate::tr("Collecting"),
             font(size::FOOTNOTE, Weight::Medium),
             Color32::from_rgb(0x9B, 0xA9, 0xBE),
         );
@@ -2208,7 +2222,8 @@ pub fn feature_look(_t: &Tokens, f: cleancraft_core::FeatureId) -> (Icon, Color3
 
 /// Galley helper for painting a single line.
 pub fn galley(ui: &Ui, text: &str, fid: FontId, color: Color32) -> Arc<Galley> {
-    ui.painter().layout_no_wrap(text.to_string(), fid, color)
+    ui.painter()
+        .layout_no_wrap(crate::tr(text.to_string()), fid, color)
 }
 
 /// Center a horizontal row: remembers the row's last width under `id`.
@@ -2235,7 +2250,7 @@ pub fn centered_row<R>(ui: &mut Ui, id: egui::Id, add: impl FnOnce(&mut Ui) -> R
 pub fn switch(ui: &mut Ui, t: &Tokens, on: bool, name: &str) -> Response {
     let (outer, resp) = ui.allocate_exact_size(vec2(44.0, hit::MIN), Sense::click());
     let enabled = ui.is_enabled();
-    resp.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, enabled, on, name));
+    resp.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, enabled, on, crate::tr(name)));
     // VoiceOver says "switch", not "checkbox" (REVIEW-C C33).
     ui.ctx()
         .accesskit_node_builder(resp.id, |b| b.set_role(egui::accesskit::Role::Switch));
@@ -2355,7 +2370,9 @@ impl Dialog {
                     Vec2::splat(hit::MIN),
                 );
                 let b = ui.interact(x, self.id.with("close-x"), Sense::click());
-                b.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, "Close dialog"));
+                b.widget_info(|| {
+                    WidgetInfo::labeled(WidgetType::Button, true, crate::tr("Close dialog"))
+                });
                 let rad = hit::MIN / 2.0 - 2.0;
                 let disc = Rect::from_center_size(x.center(), Vec2::splat(rad * 2.0));
                 let f = feel_ring(ui, &t, &b, disc, rad);
@@ -2401,7 +2418,7 @@ pub fn dialog_head(ui: &mut Ui, t: &Tokens, icon: Icon, color: Color32, headline
             ui.spacing_mut().item_spacing.y = space::XS;
             ui.add(
                 egui::Label::new(
-                    RichText::new(headline)
+                    crate::rich(headline)
                         .font(font(size::TITLE2, Weight::Bold))
                         .color(t.text),
                 )
@@ -2410,7 +2427,7 @@ pub fn dialog_head(ui: &mut Ui, t: &Tokens, icon: Icon, color: Color32, headline
             if !sub.is_empty() {
                 ui.add(
                     egui::Label::new(
-                        RichText::new(sub)
+                        crate::rich(sub)
                             .font(font(size::CALLOUT, Weight::Regular))
                             .color(t.text_dim),
                     )
@@ -2436,7 +2453,7 @@ pub fn strip(ui: &mut Ui, icon: Icon, color: Color32, text: &str) {
                 ui.add_space(space::XS);
                 ui.add(
                     egui::Label::new(
-                        RichText::new(text)
+                        crate::rich(text)
                             .font(font(size::CALLOUT, Weight::Regular))
                             .color(icons::lerp(color, Color32::WHITE, 0.55)),
                     )
@@ -2483,7 +2500,7 @@ pub fn banner(
                         ui.set_max_width(text_w);
                         ui.add(
                             egui::Label::new(
-                                RichText::new(text)
+                                crate::rich(text)
                                     .font(font(size::CALLOUT, Weight::Regular))
                                     .color(icons::lerp(color, Color32::WHITE, 0.55)),
                             )
@@ -2513,13 +2530,13 @@ pub fn text_at(
     let layout = egui::Layout::left_to_right(egui::Align::Center).with_main_align(align);
     let resp = place_with(ui, r, layout, |ui| {
         ui.add(
-            egui::Label::new(RichText::new(shown).font(fid).color(color))
+            egui::Label::new(crate::rich(shown).font(fid).color(color))
                 .selectable(false)
                 .truncate(),
         )
     });
     let full = full.to_string();
-    resp.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, full.clone()));
+    resp.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, crate::tr(full.clone())));
     resp
 }
 
@@ -2539,7 +2556,7 @@ pub fn link(ui: &mut Ui, t: &Tokens, text: &str) -> Response {
     let color = icons::lerp(t.sec_a, Color32::WHITE, 0.25);
     let g = galley(ui, text, fid.clone(), color);
     let (r, resp) = ui.allocate_exact_size(vec2(g.size().x + 2.0, 20.0), Sense::click());
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, text));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, crate::tr(text)));
     pointer(&resp);
     let pos = egui::pos2(r.left(), r.center().y - g.size().y / 2.0);
     let p = ui.painter();
@@ -2631,7 +2648,9 @@ pub fn check(ui: &mut Ui, t: &Tokens, on: &mut bool, name: &str) -> Response {
         note_tap(ui.ctx());
     }
     let state = *on;
-    resp.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, enabled, state, name));
+    resp.widget_info(|| {
+        WidgetInfo::selected(WidgetType::Checkbox, enabled, state, crate::tr(name))
+    });
     paint_check(ui, t, r, &resp, state, enabled);
     resp
 }
@@ -2676,7 +2695,9 @@ pub fn check_mixed(ui: &mut Ui, t: &Tokens, on: &mut bool, mixed: bool, name: &s
         note_tap(ui.ctx());
     }
     let state = *on;
-    resp.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, enabled, state, name));
+    resp.widget_info(|| {
+        WidgetInfo::selected(WidgetType::Checkbox, enabled, state, crate::tr(name))
+    });
     paint_box(ui, t, r, &resp, state, mixed && !state, enabled);
     resp
 }
@@ -2755,7 +2776,9 @@ pub fn check_text_font(
         note_tap(ui.ctx());
     }
     let state = *on;
-    resp.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, enabled, state, text));
+    resp.widget_info(|| {
+        WidgetInfo::selected(WidgetType::Checkbox, enabled, state, crate::tr(text))
+    });
     let br = Rect::from_min_size(pos2(r.min.x, r.center().y - 11.0), Vec2::splat(22.0));
     paint_check(ui, t, br, &resp, state, enabled);
     let color = if resp.hovered() || strong {
@@ -2776,7 +2799,7 @@ pub fn check_text_font(
 /// ("27 items selected") at 13 pt, announced as `full`.
 pub fn bar_figure(ui: &mut Ui, t: &Tokens, figure: &str, line: &str, full: &str, dim: bool) {
     ui.label(
-        RichText::new(figure)
+        crate::rich(figure)
             .font(font(size::NUMBER_S, Weight::Bold))
             .color(if dim { t.text_dim } else { t.text }),
     );
@@ -2793,9 +2816,9 @@ pub fn bar_hint(ui: &mut Ui, t: &Tokens, hint: &str) -> Response {
         return ui.allocate_response(Vec2::ZERO, Sense::hover());
     }
     let shown = truncate_end(ui.ctx(), hint, &fid, room);
-    let r = ui.label(RichText::new(&shown).font(fid).color(t.text_faint));
+    let r = ui.label(crate::rich(&shown).font(fid).color(t.text_faint));
     if shown != hint {
-        r.on_hover_text(hint)
+        r.on_hover_text(crate::tr(hint))
     } else {
         r
     }
@@ -2842,7 +2865,9 @@ pub fn radio(ui: &mut Ui, t: &Tokens, on: bool, text: &str) -> Response {
     let g = galley(ui, text, fid, t.text_dim);
     let (r, resp) = ui.allocate_exact_size(vec2(28.0 + g.size().x, hit::MIN), Sense::click());
     let enabled = ui.is_enabled();
-    resp.widget_info(|| WidgetInfo::selected(WidgetType::RadioButton, enabled, on, text));
+    resp.widget_info(|| {
+        WidgetInfo::selected(WidgetType::RadioButton, enabled, on, crate::tr(text))
+    });
     let ctx = ui.ctx();
     let k = anim(ctx, resp.id.with("on"), on, motion::HOVER);
     let f = feel(ui, &resp);
@@ -2928,7 +2953,7 @@ pub fn search_field(
             out = Some(
                 ui.add(
                     egui::TextEdit::singleline(text)
-                        .hint_text(RichText::new(hint).color(t.text_faint))
+                        .hint_text(crate::rich(hint).color(t.text_faint))
                         .font(font(size::CALLOUT, Weight::Regular))
                         .frame(egui::Frame::NONE)
                         .background_color(Color32::TRANSPARENT)
@@ -2971,7 +2996,7 @@ pub fn sort_menu<T: Copy + PartialEq>(ui: &mut Ui, id: &str, value: &mut T, choi
         ui.spacing_mut().interact_size.y = hit::FIELD;
         ui.spacing_mut().button_padding = vec2(14.0, 7.0);
         let r = egui::ComboBox::from_id_salt(id)
-            .selected_text(RichText::new(current).font(font(size::CALLOUT, Weight::Medium)))
+            .selected_text(crate::rich(current).font(font(size::CALLOUT, Weight::Medium)))
             .icon(|ui, rect, visuals, _open| {
                 let r = Rect::from_center_size(rect.center(), Vec2::splat(13.0));
                 icons::paint(ui.painter(), r, Icon::UpDown, visuals.fg_stroke.color);
@@ -2986,7 +3011,7 @@ pub fn sort_menu<T: Copy + PartialEq>(ui: &mut Ui, id: &str, value: &mut T, choi
             })
             .response;
         pointer(&r);
-        r.widget_info(|| WidgetInfo::labeled(WidgetType::ComboBox, true, "Sort"));
+        r.widget_info(|| WidgetInfo::labeled(WidgetType::ComboBox, true, crate::tr("Sort")));
     });
 }
 
@@ -3010,7 +3035,9 @@ pub fn menu_choice(ui: &mut Ui, full: &str, current: bool) -> bool {
         .max(galley(ui, &shown, fid.clone(), t.text).size().x + 48.0)
         .max(140.0);
     let (r, resp) = ui.allocate_exact_size(vec2(w, 28.0), Sense::click());
-    resp.widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, true, current, full));
+    resp.widget_info(|| {
+        WidgetInfo::selected(WidgetType::SelectableLabel, true, current, crate::tr(full))
+    });
     let f = feel(ui, &resp);
     let p = ui.painter();
     if f.hov > 0.0 {
@@ -3032,7 +3059,7 @@ pub fn menu_choice(ui: &mut Ui, full: &str, current: bool) -> bool {
     p.text(
         pos2(r.left() + 32.0, r.center().y),
         Align2::LEFT_CENTER,
-        shown,
+        crate::tr(shown),
         fid,
         t.text,
     );
@@ -3056,7 +3083,7 @@ pub fn menu_pill<R>(
         ui.spacing_mut().interact_size.y = hit::FIELD;
         ui.spacing_mut().button_padding = vec2(16.0, 7.0);
         let r = ui.menu_button(
-            RichText::new(label).font(font(size::CALLOUT, Weight::Medium)),
+            crate::rich(label).font(font(size::CALLOUT, Weight::Medium)),
             add,
         );
         pointer(&r.response);
@@ -3076,7 +3103,7 @@ pub fn text_field(ui: &mut Ui, t: &Tokens, text: &mut String, hint: &str, width:
         }
         ui.add(
             egui::TextEdit::singleline(text)
-                .hint_text(RichText::new(hint).color(t.text_faint))
+                .hint_text(crate::rich(hint).color(t.text_faint))
                 .font(font(size::CALLOUT, Weight::Regular))
                 .desired_width(width)
                 .min_size(vec2(width, hit::FIELD))
@@ -3135,7 +3162,9 @@ pub fn choice_pills(ui: &mut Ui, t: &Tokens, items: &[&str], selected: usize) ->
         let id = ui.id().with(("choice", *name));
         let resp = ui.interact(r, id, Sense::click());
         let on = i == selected;
-        resp.widget_info(|| WidgetInfo::selected(WidgetType::RadioButton, true, on, *name));
+        resp.widget_info(|| {
+            WidgetInfo::selected(WidgetType::RadioButton, true, on, crate::tr(*name))
+        });
         let f = feel(ui, &resp);
         if on {
             p.rect_filled(
@@ -3156,7 +3185,7 @@ pub fn choice_pills(ui: &mut Ui, t: &Tokens, items: &[&str], selected: usize) ->
         p.text(
             r.center(),
             Align2::CENTER_CENTER,
-            *name,
+            crate::tr(*name),
             fid.clone(),
             if on {
                 t.text
@@ -3215,7 +3244,7 @@ pub fn time_chart(
         ),
         _ => "No readings yet".into(),
     };
-    resp.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, &summary));
+    resp.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, crate::tr(&summary)));
     if points.len() < 2 {
         let y = plot.bottom() - 8.0;
         p.add(Shape::dashed_line(
@@ -3227,7 +3256,9 @@ pub fn time_chart(
         p.text(
             plot.center(),
             Align2::CENTER_CENTER,
-            "Collecting: one reading per hour while CleanCraft or its menu bar agent runs",
+            crate::tr(
+                "Collecting: one reading per hour while CleanCraft or its menu bar agent runs",
+            ),
             small.clone(),
             t.text_dim,
         );
@@ -3259,7 +3290,7 @@ pub fn time_chart(
         p.text(
             pos2(plot.left() - 8.0, y),
             Align2::RIGHT_CENTER,
-            fmt_y(v),
+            crate::tr(fmt_y(v)),
             small.clone(),
             t.text_faint,
         );
@@ -3267,14 +3298,14 @@ pub fn time_chart(
     p.text(
         pos2(plot.left(), plot.bottom() + 5.0),
         Align2::LEFT_TOP,
-        fmt_x(x_range.0),
+        crate::tr(fmt_x(x_range.0)),
         small.clone(),
         t.text_faint,
     );
     p.text(
         pos2(plot.right(), plot.bottom() + 5.0),
         Align2::RIGHT_TOP,
-        fmt_x(x_range.1),
+        crate::tr(fmt_x(x_range.1)),
         small.clone(),
         t.text_faint,
     );
@@ -3289,7 +3320,7 @@ pub fn time_chart(
         p.text(
             pos2(plot.right() - 6.0, y - 3.0),
             Align2::RIGHT_BOTTOM,
-            g.label,
+            crate::tr(g.label),
             small.clone(),
             g.color,
         );
@@ -3324,7 +3355,11 @@ pub fn time_chart(
         );
         p.circle_filled(*q, 4.0, color);
         let text = format!("{}  {}", fmt_x(points[i].0), fmt_y(points[i].1));
-        let g = p.layout_no_wrap(text, font(size::FOOTNOTE, Weight::Medium), t.text);
+        let g = p.layout_no_wrap(
+            crate::tr(text),
+            font(size::FOOTNOTE, Weight::Medium),
+            t.text,
+        );
         let w = g.size().x + 14.0;
         let x = (q.x - w / 2.0).clamp(plot.left(), plot.right() - w);
         let r = Rect::from_min_size(pos2(x, plot.top() + 4.0), vec2(w, g.size().y + 8.0));

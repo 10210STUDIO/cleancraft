@@ -2,7 +2,7 @@
 
 use cleancraft_core::executor::{self, ActionKind, ActionRecord};
 use cleancraft_core::fsutil::human_size;
-use egui::{RichText, Sense, Ui, vec2};
+use egui::{Sense, Ui, vec2};
 
 use crate::app::CleanApp;
 use crate::icons::Icon;
@@ -266,7 +266,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
     }
     ui.horizontal(|ui| {
         ui.label(
-            RichText::new(match groups.len() {
+            crate::rich(match groups.len() {
                 1 => "1 action".to_string(),
                 n => format!("{n} actions"),
             })
@@ -428,9 +428,9 @@ fn group_card(
                     if undoable > 1 {
                         let r =
                             kit::pill(ui, &t, "Undo All", kit::Kind::Secondary, Some(Icon::Undo))
-                                .on_hover_text(format!(
+                                .on_hover_text(crate::tr(format!(
                                     "Put back the {undoable} items of this action"
-                                ));
+                                )));
                         if r.clicked() {
                             app.act();
                             let (n, errs) = executor::undo_plan(&app.env, &first.plan_id);
@@ -472,7 +472,7 @@ fn group_card(
                         egui::WidgetInfo::labeled(
                             egui::WidgetType::Button,
                             true,
-                            format!("{label} of {title}"),
+                            crate::tr(format!("{label} of {title}")),
                         )
                     });
                     if r.clicked() {
@@ -520,7 +520,9 @@ fn record_row(
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if r.can_undo() && !gone(r) {
                 let b = kit::pill(ui, &t, "Undo", kit::Kind::Secondary, Some(Icon::Undo));
-                if b.on_hover_text("Put this back where it was").clicked() {
+                if b.on_hover_text(crate::tr("Put this back where it was"))
+                    .clicked()
+                {
                     app.act();
                     match executor::undo(&app.env, &r.id) {
                         Ok(_) => {
@@ -534,13 +536,13 @@ fn record_row(
             } else if r.undone.is_some() {
                 kit::tag(ui, "Put back", t.success);
             } else if gone(r) {
-                kit::tag(ui, "Emptied", t.text_dim).on_hover_text(
+                kit::tag(ui, "Emptied", t.text_dim).on_hover_text(crate::tr(
                     "It left the Trash or quarantine (emptied), so it cannot be put back.",
-                );
+                ));
             }
             if let ActionKind::Moved { .. } = &r.kind {
                 ui.label(
-                    RichText::new(human_size(r.size))
+                    crate::rich(human_size(r.size))
                         .font(font(size::CALLOUT, Weight::SemiBold))
                         .color(t.text),
                 );
@@ -591,10 +593,10 @@ fn record_row(
                                 t.text_faint,
                                 egui::Align::Min,
                             )
-                            .on_hover_text(format!(
+                            .on_hover_text(crate::tr(format!(
                                 "Was {seen}\nNow in {}",
                                 short_path(&app.env, stored)
-                            ));
+                            )));
                         }
                         ActionKind::Command {
                             command,
@@ -603,7 +605,7 @@ fn record_row(
                         } => {
                             ui.add(
                                 egui::Label::new(
-                                    RichText::new(command)
+                                    crate::rich(command)
                                         .font(font(size::CALLOUT, Weight::Medium))
                                         .color(t.text),
                                 )
@@ -626,7 +628,7 @@ fn record_row(
                         ActionKind::Toggled { what, .. } => {
                             ui.add(
                                 egui::Label::new(
-                                    RichText::new(what)
+                                    crate::rich(what)
                                         .font(font(size::CALLOUT, Weight::Medium))
                                         .color(t.text),
                                 )

@@ -313,7 +313,7 @@ fn glyph(p: &Painter, r: Rect, at: impl Fn(f32, f32) -> Pos2, kind: FileKind, c:
                 p.text(
                     at(0.51, 0.60),
                     Align2::CENTER_CENTER,
-                    "{ }",
+                    crate::tr("{ }"),
                     FontId::monospace(size),
                     c,
                 );

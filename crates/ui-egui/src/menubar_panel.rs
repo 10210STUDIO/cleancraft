@@ -255,14 +255,14 @@ fn header(ui: &mut Ui, t: &Tokens, v: &PanelView, cmds: &mut Vec<PanelCmd>) {
     } else {
         "CleanCraft"
     };
-    head.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, spoken));
+    head.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, crate::tr(spoken)));
     let p = ui.painter();
     let logo = Rect::from_center_size(pos2(r.min.x + 11.0, r.center().y), vec2(20.0, 20.0));
     icons::paint(p, logo, Icon::Logo, t.accent);
     let name = p.text(
         pos2(logo.max.x + space::S, r.center().y),
         Align2::LEFT_CENTER,
-        "CleanCraft",
+        crate::tr("CleanCraft"),
         font(size::BODY, Weight::SemiBold),
         t.text,
     );
@@ -270,7 +270,7 @@ fn header(ui: &mut Ui, t: &Tokens, v: &PanelView, cmds: &mut Vec<PanelCmd>) {
         p.text(
             pos2(name.max.x + space::S, r.center().y),
             Align2::LEFT_CENTER,
-            "Paused",
+            crate::tr("Paused"),
             font(size::FOOTNOTE, Weight::Medium),
             t.warning,
         );
@@ -278,7 +278,7 @@ fn header(ui: &mut Ui, t: &Tokens, v: &PanelView, cmds: &mut Vec<PanelCmd>) {
     // More: Pause and Quit.
     let more = Rect::from_center_size(pos2(r.max.x - 14.0, r.center().y), vec2(28.0, 28.0));
     let resp = ui.interact(more, ui.id().with("panel-more"), Sense::click());
-    resp.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, MORE));
+    resp.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, crate::tr(MORE)));
     let f = kit::feel(ui, &resp);
     let p = ui.painter();
     if f.hov > 0.0 {
@@ -336,7 +336,7 @@ fn tile(ui: &mut Ui, t: &Tokens, label: &str, m: &Meter, w: f32) {
     } else {
         format!("{label}: {}, {}", m.value, m.detail)
     };
-    resp.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, &spoken));
+    resp.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, crate::tr(&spoken)));
     let p = ui.painter();
     p.rect(
         r,
@@ -351,7 +351,7 @@ fn tile(ui: &mut Ui, t: &Tokens, label: &str, m: &Meter, w: f32) {
     p.text(
         pos2(x, r.min.y + 8.0),
         Align2::LEFT_TOP,
-        label.to_uppercase(),
+        crate::tr(label.to_uppercase()),
         font(size::CAPTION, Weight::SemiBold),
         t.text_faint,
     );
@@ -359,7 +359,7 @@ fn tile(ui: &mut Ui, t: &Tokens, label: &str, m: &Meter, w: f32) {
     p.text(
         pos2(x, r.min.y + 22.0),
         Align2::LEFT_TOP,
-        kit::truncate_end(ui.ctx(), &m.value, &vf, line_w),
+        crate::tr(kit::truncate_end(ui.ctx(), &m.value, &vf, line_w)),
         vf,
         if m.warn { t.warning } else { t.text },
     );
@@ -376,7 +376,7 @@ fn tile(ui: &mut Ui, t: &Tokens, label: &str, m: &Meter, w: f32) {
         p.text(
             pos2(x, r.min.y + 54.0),
             Align2::LEFT_TOP,
-            kit::truncate_end(ui.ctx(), &m.detail, &df, line_w),
+            crate::tr(kit::truncate_end(ui.ctx(), &m.detail, &df, line_w)),
             df,
             t.text_dim,
         );
@@ -386,19 +386,25 @@ fn tile(ui: &mut Ui, t: &Tokens, label: &str, m: &Meter, w: f32) {
 /// "Network   Down 1.2 MB/s, up 30 KB/s".
 fn line(ui: &mut Ui, t: &Tokens, label: &str, value: &str) {
     let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 20.0), Sense::hover());
-    resp.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, format!("{label}: {value}")));
+    resp.widget_info(|| {
+        WidgetInfo::labeled(
+            WidgetType::Label,
+            true,
+            crate::tr(format!("{label}: {value}")),
+        )
+    });
     let p = ui.painter();
     p.text(
         pos2(r.min.x + 2.0, r.center().y),
         Align2::LEFT_CENTER,
-        label,
+        crate::tr(label),
         font(size::FOOTNOTE, Weight::Medium),
         t.text_faint,
     );
     p.text(
         pos2(r.max.x - 2.0, r.center().y),
         Align2::RIGHT_CENTER,
-        value,
+        crate::tr(value),
         font(size::FOOTNOTE, Weight::Medium),
         t.text_dim,
     );
@@ -426,10 +432,10 @@ fn top_list(ui: &mut Ui, t: &Tokens, v: &PanelView) {
             None => format!("{}, {} CPU", row.name, row.cpu),
         };
         let resp = match &row.what {
-            Some(w) => resp.on_hover_text(w.as_str()),
+            Some(w) => resp.on_hover_text(crate::tr(w.as_str())),
             None => resp,
         };
-        resp.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, &spoken));
+        resp.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, crate::tr(&spoken)));
         let p = ui.painter();
         let cpu_f = font(size::CALLOUT, Weight::SemiBold);
         let cpu_w = kit::galley(ui, &row.cpu, cpu_f.clone(), t.text).size().x;
@@ -438,14 +444,14 @@ fn top_list(ui: &mut Ui, t: &Tokens, v: &PanelView) {
         p.text(
             pos2(r.min.x, r.min.y + 2.0),
             Align2::LEFT_TOP,
-            kit::truncate_end(ui.ctx(), &row.name, &nf, name_w),
+            crate::tr(kit::truncate_end(ui.ctx(), &row.name, &nf, name_w)),
             nf,
             t.text,
         );
         p.text(
             pos2(r.max.x, r.min.y + 2.0),
             Align2::RIGHT_TOP,
-            &row.cpu,
+            crate::tr(&row.cpu),
             cpu_f,
             t.text,
         );
@@ -454,7 +460,7 @@ fn top_list(ui: &mut Ui, t: &Tokens, v: &PanelView) {
             p.text(
                 pos2(r.min.x, r.min.y + 19.0),
                 Align2::LEFT_TOP,
-                kit::truncate_end(ui.ctx(), w, &wf, r.width()),
+                crate::tr(kit::truncate_end(ui.ctx(), w, &wf, r.width())),
                 wf,
                 t.text_faint,
             );
@@ -470,7 +476,7 @@ fn review_list(ui: &mut Ui, t: &Tokens, v: &PanelView, cmds: &mut Vec<PanelCmd>)
     }
     for (i, text) in v.reviews.iter().enumerate() {
         let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::click());
-        resp.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, text));
+        resp.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, crate::tr(text)));
         let f = kit::feel(ui, &resp);
         let p = ui.painter();
         p.rect_filled(
@@ -483,7 +489,7 @@ fn review_list(ui: &mut Ui, t: &Tokens, v: &PanelView, cmds: &mut Vec<PanelCmd>)
         p.text(
             pos2(r.min.x + 24.0, r.center().y),
             Align2::LEFT_CENTER,
-            kit::truncate_end(ui.ctx(), text, &tf, r.width() - 48.0),
+            crate::tr(kit::truncate_end(ui.ctx(), text, &tf, r.width() - 48.0)),
             tf,
             t.text,
         );

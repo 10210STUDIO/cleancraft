@@ -179,7 +179,7 @@ mod mac {
                 if shape(&rows) == shape(&self.rows) {
                     for (row, item) in rows.iter().zip(&self.items) {
                         if let (Some((_, text, enabled)), Some(item)) = (row, item) {
-                            item.set_text(text);
+                            item.set_text(cleancraft_core::i18n::tr(text));
                             item.set_enabled(*enabled);
                         }
                     }
@@ -189,7 +189,12 @@ mod mac {
                     for row in &rows {
                         match row {
                             Some((id, text, enabled)) => {
-                                let item = MenuItem::with_id(id.as_str(), text, *enabled, None);
+                                let item = MenuItem::with_id(
+                                    id.as_str(),
+                                    cleancraft_core::i18n::tr(text),
+                                    *enabled,
+                                    None,
+                                );
                                 let _ = menu.append(&item);
                                 items.push(Some(item));
                             }

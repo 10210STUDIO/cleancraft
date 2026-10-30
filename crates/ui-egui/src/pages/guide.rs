@@ -3,7 +3,7 @@
 //! tables, **bold** and `code` spans. The text is built into the app, so it is always there.
 
 use egui::text::LayoutJob;
-use egui::{Color32, RichText, TextFormat, Ui};
+use egui::{Color32, TextFormat, Ui};
 
 use crate::app::CleanApp;
 use crate::icons::Icon;
@@ -104,6 +104,7 @@ fn cells(row: &str) -> Vec<String> {
 
 /// A line with **bold** and `code` spans.
 pub fn inline(t: &Tokens, text: &str, size_pt: f32, color: Color32, wrap: f32) -> LayoutJob {
+    let text = &crate::tr(text);
     let mut job = LayoutJob::default();
     job.wrap.max_width = wrap;
     let mut bold = false;
@@ -187,7 +188,7 @@ fn block(ui: &mut Ui, t: &Tokens, b: &Block, w: f32) {
     match b {
         Block::Heading(1, s) => {
             ui.label(
-                RichText::new(s)
+                crate::rich(s)
                     .font(font(size::TITLE, Weight::Bold))
                     .color(t.text),
             );
@@ -196,7 +197,7 @@ fn block(ui: &mut Ui, t: &Tokens, b: &Block, w: f32) {
         Block::Heading(_, s) => {
             ui.add_space(space::M);
             ui.label(
-                RichText::new(s)
+                crate::rich(s)
                     .font(font(size::TITLE3, Weight::SemiBold))
                     .color(t.text),
             );
@@ -216,7 +217,7 @@ fn block(ui: &mut Ui, t: &Tokens, b: &Block, w: f32) {
                 ui.add_sized(
                     [18.0, 18.0],
                     egui::Label::new(
-                        RichText::new(mark)
+                        crate::rich(mark)
                             .font(font(size::BODY, Weight::Medium))
                             .color(t.sec_a),
                     ),
@@ -230,8 +231,7 @@ fn block(ui: &mut Ui, t: &Tokens, b: &Block, w: f32) {
             kit::well(t).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.add(
-                    egui::Label::new(RichText::new(s).font(mono(size::CALLOUT)).color(t.text))
-                        .wrap(),
+                    egui::Label::new(crate::rich(s).font(mono(size::CALLOUT)).color(t.text)).wrap(),
                 );
             });
             ui.add_space(space::S);
@@ -251,7 +251,7 @@ fn block(ui: &mut Ui, t: &Tokens, b: &Block, w: f32) {
                             for c in r {
                                 if i == 0 {
                                     ui.label(
-                                        RichText::new(c)
+                                        crate::rich(c)
                                             .font(font(size::CALLOUT, Weight::SemiBold))
                                             .color(t.text),
                                     );

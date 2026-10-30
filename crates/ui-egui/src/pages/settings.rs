@@ -4,7 +4,7 @@ use cleancraft_core::executor::{self, Method};
 use cleancraft_core::fsutil::human_size;
 use cleancraft_core::schedule::{self, ScanEvery};
 use cleancraft_core::{login_agent, notify};
-use egui::{RichText, Sense, Ui, vec2};
+use egui::{Sense, Ui, vec2};
 
 use crate::app::CleanApp;
 use crate::icons::{self, Icon};
@@ -17,7 +17,7 @@ pub(crate) fn heading(ui: &mut Ui, t: &crate::theme::Tokens, icon: Icon, text: &
         kit::badge(ui, t.sec_a, icon, 28.0);
         ui.add_space(2.0);
         ui.label(
-            RichText::new(text)
+            crate::rich(text)
                 .font(font(size::TITLE3, Weight::SemiBold))
                 .color(t.text),
         );
@@ -41,7 +41,7 @@ pub(crate) fn switch_row(
         ui.painter().text(
             r.right_center() - vec2(12.0, 0.0),
             egui::Align2::RIGHT_CENTER,
-            label,
+            crate::tr(label),
             font(size::BODY, Weight::Regular),
             t.text_dim,
         );
@@ -80,7 +80,7 @@ fn slider_row_with(
         ui.painter().text(
             r.right_center() - vec2(12.0, 0.0),
             egui::Align2::RIGHT_CENTER,
-            label,
+            crate::tr(label),
             font(size::BODY, Weight::Regular),
             t.text_dim,
         );
@@ -100,7 +100,7 @@ fn slider_row_with(
         }
         let v = *value as f64;
         let name = name.to_string();
-        r.widget_info(|| egui::WidgetInfo::slider(true, v, name.clone()));
+        r.widget_info(|| egui::WidgetInfo::slider(true, v, crate::tr(name.clone())));
         // The value, beside the slider: shown "50 MB", announced with what it sets.
         let shown = show(*value);
         let full = format!("{label}: {shown}");
@@ -138,7 +138,7 @@ fn quarantine_line(app: &mut CleanApp, ui: &mut Ui) {
         };
         ui.add(
             egui::Label::new(
-                RichText::new(text)
+                crate::rich(text)
                     .font(font(size::FOOTNOTE, Weight::Regular))
                     .color(t.text_faint),
             )
@@ -175,9 +175,9 @@ fn quarantine_line(app: &mut CleanApp, ui: &mut Ui) {
             kit::Kind::Secondary,
             Some(Icon::Trash),
         )
-        .on_hover_text(
+        .on_hover_text(crate::tr(
             "Move everything in the quarantine to the Trash. You can put it back from History.",
-        )
+        ))
         .clicked()
         {
             app.act();
@@ -441,7 +441,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                 let list = app.settings.ignore.clone();
                 if list.is_empty() {
                     ui.label(
-                        RichText::new("Nothing is ignored yet. Add a folder or file below, or choose Ignore on an app in App Remover.")
+                        crate::rich("Nothing is ignored yet. Add a folder or file below, or choose Ignore on an app in App Remover.")
                             .font(font(size::CALLOUT, Weight::Regular))
                             .color(t.text_faint),
                     );
@@ -461,13 +461,13 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                         let w = kit::galley(ui, &short, fid.clone(), t.text).size().x + 2.0;
                         let (pr, _) = ui.allocate_exact_size(vec2(w, 20.0), Sense::hover());
                         kit::text_at(ui, pr, &short, &shown, fid, t.text, egui::Align::Min)
-                            .on_hover_text(&seen);
+                            .on_hover_text(crate::tr(&seen));
                         let r = kit::ghost(ui, &t, "Remove", Some(Icon::Close));
                         r.widget_info(|| {
                             egui::WidgetInfo::labeled(
                                 egui::WidgetType::Button,
                                 true,
-                                format!("Remove {shown}"),
+                                crate::tr(format!("Remove {shown}")),
                             )
                         });
                         if r.clicked() {
@@ -488,7 +488,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                         egui::WidgetInfo::labeled(
                             egui::WidgetType::TextEdit,
                             true,
-                            "Path to ignore",
+                            crate::tr("Path to ignore"),
                         )
                     });
                     if r.changed() {
@@ -529,7 +529,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                             kit::pill(ui, &t, "Choose Folder...", kit::Kind::Secondary, Some(Icon::Folder))
                         })
                         .inner;
-                    if ch.on_hover_text("Pick a folder in the macOS file dialog").clicked() && !picking {
+                    if ch.on_hover_text(crate::tr("Pick a folder in the macOS file dialog")).clicked() && !picking {
                         app.act();
                         let env = app.env.clone();
                         app.settings_page.pick = Some(crate::jobs::Job::start(app.sync, move |_| {
@@ -579,7 +579,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                     ui.add_space(272.0);
                     ui.add(
                         egui::Label::new(
-                            RichText::new(if app.settings.agents_may_clean {
+                            crate::rich(if app.settings.agents_may_clean {
                                 "Assistants can move the items of a plan you confirmed. Everything they move is in History, with Undo."
                             } else {
                                 "Off: assistants can scan and propose, but nothing moves unless you clean here."
@@ -597,6 +597,8 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
             ui.add_space(space::M);
             changed |= super::updates::card(app, ui);
             ui.add_space(space::M);
+            changed |= language_card(app, ui);
+            ui.add_space(space::M);
             kit::card(&t).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 heading(ui, &t, Icon::Monitor, "Sounds");
@@ -611,7 +613,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                         ui.painter().text(
                             r.right_center() - vec2(12.0, 0.0),
                             egui::Align2::RIGHT_CENTER,
-                            "Volume",
+                            crate::tr("Volume"),
                             font(size::BODY, Weight::Regular),
                             t.text_dim,
                         );
@@ -625,14 +627,14 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
                                 .trailing_fill(true),
                         );
                         let shown = v as f64;
-                        r.widget_info(|| egui::WidgetInfo::slider(true, shown, "Volume"));
+                        r.widget_info(|| egui::WidgetInfo::slider(true, shown, crate::tr("Volume")));
                         if r.changed() {
                             app.settings.sound_volume = v;
                             changed = true;
                         }
                         let p = kit::pill(ui, &t, "Preview", kit::Kind::Secondary, None);
                         p.widget_info(|| {
-                            egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Preview sound")
+                            egui::WidgetInfo::labeled(egui::WidgetType::Button, true, crate::tr("Preview sound"))
                         });
                         if p.clicked() {
                             app.act();
@@ -677,15 +679,15 @@ fn ai_links(app: &mut CleanApp, ui: &mut Ui) {
             kit::Kind::Secondary,
             Some(Icon::Sweep),
         )
-        .on_hover_text(
+        .on_hover_text(crate::tr(
             "Add CleanCraft to Claude Desktop or Claude Code, after you see the exact change",
-        )
+        ))
         .clicked()
         {
             go = Some(cleancraft_core::route::AppRoute::ConnectAi);
         }
         if kit::ghost(ui, &t, AGENT_GUIDE_LINK, Some(Icon::Chevron))
-            .on_hover_text("Step by step, with the tools an agent can use")
+            .on_hover_text(crate::tr("Step by step, with the tools an agent can use"))
             .clicked()
         {
             go = Some(cleancraft_core::route::AppRoute::AgentGuide);
@@ -715,7 +717,7 @@ fn fda_card(app: &mut CleanApp, ui: &mut Ui) {
         };
         ui.add(
             egui::Label::new(
-                RichText::new(text)
+                crate::rich(text)
                     .font(font(size::CALLOUT, Weight::Regular))
                     .color(if app.fda == Access::Missing { t.text } else { t.text_dim }),
             )
@@ -730,7 +732,7 @@ fn fda_card(app: &mut CleanApp, ui: &mut Ui) {
                 }
             }
             if kit::ghost(ui, &t, FDA_CHECK, Some(Icon::Undo))
-                .on_hover_text("Read the Full Disk Access setting again")
+                .on_hover_text(crate::tr("Read the Full Disk Access setting again"))
                 .clicked()
             {
                 app.act();
@@ -765,7 +767,7 @@ fn dev_clutter_card(app: &mut CleanApp, ui: &mut Ui) -> bool {
             .collect();
         ui.add(
             egui::Label::new(
-                RichText::new(format!(
+                crate::rich(format!(
                     "Projects are looked for in {} and in the code folders below.",
                     usual.join(", ")
                 ))
@@ -792,13 +794,13 @@ fn dev_clutter_card(app: &mut CleanApp, ui: &mut Ui) -> bool {
                 let w = kit::galley(ui, &short, fid.clone(), t.text).size().x + 2.0;
                 let (pr, _) = ui.allocate_exact_size(vec2(w, 20.0), Sense::hover());
                 kit::text_at(ui, pr, &short, &shown, fid, t.text, egui::Align::Min)
-                    .on_hover_text(&seen);
+                    .on_hover_text(crate::tr(&seen));
                 let r = kit::ghost(ui, &t, "Remove", Some(Icon::Close));
                 r.widget_info(|| {
                     egui::WidgetInfo::labeled(
                         egui::WidgetType::Button,
                         true,
-                        format!("Remove code folder {shown}"),
+                        crate::tr(format!("Remove code folder {shown}")),
                     )
                 });
                 if r.clicked() {
@@ -818,7 +820,7 @@ fn dev_clutter_card(app: &mut CleanApp, ui: &mut Ui) -> bool {
                 380.0,
             );
             r.widget_info(|| {
-                egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Path of a code folder")
+                egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, crate::tr("Path of a code folder"))
             });
             let enter = r.lost_focus()
                 && ui.input(|i| i.key_pressed(egui::Key::Enter))
@@ -848,7 +850,7 @@ fn dev_clutter_card(app: &mut CleanApp, ui: &mut Ui) -> bool {
                     kit::pill(ui, &t, DEV_CHOOSE, kit::Kind::Secondary, Some(Icon::Folder))
                 })
                 .inner;
-            if ch.on_hover_text("Pick a folder that holds your projects").clicked() && !picking {
+            if ch.on_hover_text(crate::tr("Pick a folder that holds your projects")).clicked() && !picking {
                 app.act();
                 pick_dev_root(app);
             }
@@ -870,7 +872,7 @@ fn dev_clutter_card(app: &mut CleanApp, ui: &mut Ui) -> bool {
             ui.add_space(272.0);
             ui.add(
                 egui::Label::new(
-                    RichText::new("Build folders of an inactive project are selected for you. Active projects are listed but left unticked.")
+                    crate::rich("Build folders of an inactive project are selected for you. Active projects are listed but left unticked.")
                         .font(font(size::FOOTNOTE, Weight::Regular))
                         .color(t.text_faint),
                 )
@@ -1132,7 +1134,7 @@ fn menu_bar_card(app: &mut CleanApp, ui: &mut Ui) -> bool {
                 ui.add_space(272.0);
                 let missing = app.fda == cleancraft_core::permissions::Access::Missing;
                 ui.label(
-                    RichText::new(if missing {
+                    crate::rich(if missing {
                         TRASH_FDA_NOTE.to_string()
                     } else {
                         format!("{TRASH_FDA_NOTE} It is on.")
@@ -1162,13 +1164,43 @@ fn menu_bar_card(app: &mut CleanApp, ui: &mut Ui) -> bool {
     changed
 }
 
+/// The first choice of the language card: follow the Mac's preferred languages.
+pub const LANGUAGE_SYSTEM: &str = "Same as the Mac";
+
+/// Language: the Mac's, or one CleanCraft speaks. Applies at once (the menu bar follows
+/// within seconds).
+fn language_card(app: &mut CleanApp, ui: &mut Ui) -> bool {
+    let t = app.t;
+    let mut changed = false;
+    kit::card(&t).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        heading(ui, &t, Icon::Settings, "Language");
+        ui.horizontal(|ui| {
+            label_cell(ui, &t, "Show CleanCraft in");
+            let choices = std::iter::once(("", LANGUAGE_SYSTEM))
+                .chain(cleancraft_core::i18n::LANGUAGES.iter().copied());
+            for (code, name) in choices {
+                if kit::radio(ui, &t, app.settings.language == code, name).clicked()
+                    && app.settings.language != code
+                {
+                    app.settings.language = code.to_string();
+                    cleancraft_core::i18n::apply(&app.env, &app.settings);
+                    changed = true;
+                }
+            }
+        });
+        note(ui, &t, "Texts without a translation yet stay in English.");
+    });
+    changed
+}
+
 /// The label column of a form row (260 pt, right-aligned), like [`switch_row`]'s.
 pub(crate) fn label_cell(ui: &mut Ui, t: &crate::theme::Tokens, label: &str) {
     let (r, _) = ui.allocate_exact_size(vec2(260.0, crate::theme::hit::FIELD), Sense::hover());
     ui.painter().text(
         r.right_center() - vec2(12.0, 0.0),
         egui::Align2::RIGHT_CENTER,
-        label,
+        crate::tr(label),
         font(size::BODY, Weight::Regular),
         t.text_dim,
     );
@@ -1180,7 +1212,7 @@ pub(crate) fn note(ui: &mut Ui, t: &crate::theme::Tokens, text: &str) {
         ui.add_space(272.0);
         ui.add(
             egui::Label::new(
-                RichText::new(text)
+                crate::rich(text)
                     .font(font(size::FOOTNOTE, Weight::Regular))
                     .color(t.text_faint),
             )

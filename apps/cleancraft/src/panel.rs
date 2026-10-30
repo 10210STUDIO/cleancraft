@@ -130,6 +130,7 @@ pub fn run(env: &Env, at: &str) -> anyhow::Result<()> {
         ..Default::default()
     };
     let env = env.clone();
+    cleancraft_core::i18n::apply(&env, &cleancraft_core::Settings::load(&env));
     eframe::run_native(
         "CleanCraft Panel",
         options,
