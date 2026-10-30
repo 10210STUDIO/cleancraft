@@ -713,15 +713,25 @@ pub fn install(
         .map_err(|e| format!("CleanCraft {} is installed, but {e}", release.version))?;
     let mut agent_restarted = false;
     if agent_on {
-        let target = format!(
-            "gui/{}/{}",
-            crate::features::trash::uid(env),
-            crate::login_agent::LABEL
+        // A full bootout then bootstrap, not `kickstart -k`: kickstart only asks the job
+        // already loaded in launchd to restart and returns before it knows whether a new
+        // status item actually appeared, so after the app bundle underneath it was just
+        // replaced it can leave the menu bar empty with the setting still showing on. Bootout
+        // then bootstrap is the same clean stop-and-reload the Settings switch does, which is
+        // known to bring the icon back every time.
+        let domain = format!("gui/{}", crate::features::trash::uid(env));
+        let plist = crate::login_agent::plist_path(env);
+        let _ = env.sys.run(
+            crate::login_agent::LAUNCHCTL,
+            &[
+                "bootout",
+                &format!("{domain}/{}", crate::login_agent::LABEL),
+            ],
         );
-        match env
-            .sys
-            .run(crate::login_agent::LAUNCHCTL, &["kickstart", "-k", &target])
-        {
+        match env.sys.run(
+            crate::login_agent::LAUNCHCTL,
+            &["bootstrap", &domain, &plist.to_string_lossy()],
+        ) {
             Ok(o) if o.ok() => agent_restarted = true,
             _ => {
                 note.get_or_insert_with(|| {
@@ -829,8 +839,15 @@ fn put_aside(env: &Env, staging: &Path) {
 }
 
 /// The undo command: the new version goes to the Trash and the old one comes back, each only
-/// when its place is free; then the menu bar agent restarts on the old version.
-pub fn undo_command(app: &Path, old: &Path, new_in_trash: &Path, agent: Option<&str>) -> String {
+/// when its place is free; then the menu bar agent restarts on the old version (a full
+/// bootout then bootstrap, the same clean reload `install` and the Settings switch both use,
+/// so the icon reliably comes back rather than depending on `kickstart` noticing in time).
+pub fn undo_command(
+    app: &Path,
+    old: &Path,
+    new_in_trash: &Path,
+    agent: Option<(&str, &Path)>,
+) -> String {
     let q = |p: &Path| shell_quote(&p.to_string_lossy());
     let trash = new_in_trash.parent().unwrap_or(Path::new("/"));
     let mut cmd = format!(
@@ -840,11 +857,13 @@ pub fn undo_command(app: &Path, old: &Path, new_in_trash: &Path, agent: Option<&
         a = q(app),
         o = q(old),
     );
-    if let Some(target) = agent {
+    if let Some((domain, plist)) = agent {
         cmd.push_str(&format!(
-            " && {{ {} kickstart -k {} >/dev/null 2>&1 || true; }}",
-            crate::login_agent::LAUNCHCTL,
-            shell_quote(target)
+            " && {{ {lc} bootout {domain}/{label} >/dev/null 2>&1; {lc} bootstrap {domain} {plist} >/dev/null 2>&1 || true; }}",
+            lc = crate::login_agent::LAUNCHCTL,
+            domain = shell_quote(domain),
+            label = crate::login_agent::LABEL,
+            plist = q(plist),
         ));
     }
     cmd
@@ -861,13 +880,9 @@ fn journal(
     let trash = old.parent().unwrap_or(Path::new("/"));
     let new_in_trash =
         executor::free_name(trash, &format!("CleanCraft {}.app", release.version), true);
-    let agent = agent_on.then(|| {
-        format!(
-            "gui/{}/{}",
-            crate::features::trash::uid(env),
-            crate::login_agent::LABEL
-        )
-    });
+    let agent_domain = agent_on.then(|| format!("gui/{}", crate::features::trash::uid(env)));
+    let agent_plist = crate::login_agent::plist_path(env);
+    let agent = agent_domain.as_deref().map(|d| (d, agent_plist.as_path()));
     let now = chrono::Utc::now();
     let plan_id = format!("self-update-{}", now.timestamp_nanos_opt().unwrap_or(0));
     let rec = ActionRecord {
@@ -883,7 +898,7 @@ fn journal(
                 release.version,
                 env.display(old)
             ),
-            undo_command: Some(undo_command(app, old, &new_in_trash, agent.as_deref())),
+            undo_command: Some(undo_command(app, old, &new_in_trash, agent)),
         },
         undone: None,
     };
