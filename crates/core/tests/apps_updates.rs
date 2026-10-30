@@ -145,3 +145,28 @@ fn release_notes_link_is_fetched() {
     assert!(u.available);
     assert_eq!(u.notes, "1.1\n\nNew icon");
 }
+
+#[test]
+fn same_version_newer_build_shows_the_builds() {
+    // As uTorrent Web on a real Mac: 1.6.0 build 6413 installed, the feed has 1.6.0 build 6575.
+    let mac = FakeMac::new();
+    mac.app_spec(&AppSpec {
+        build: "6413",
+        feed: Some(CAST),
+        ..AppSpec::new("Editor", "com.example.Editor", "1.6.0")
+    });
+    mac.web(CAST, &appcast(&[("6575", "1.6.0", "")]));
+    let list = apps::inventory(&mac.env, false, &|_| {});
+    let u = updater::check_app(&mac.env, &list[0]).unwrap();
+    assert!(u.available);
+    assert_eq!(u.installed, "1.6.0 (6413)");
+    assert_eq!(u.latest.as_deref(), Some("1.6.0 (6575)"));
+
+    // A different version keeps the plain numbers.
+    mac.web(CAST, &appcast(&[("6600", "1.7.0", "")]));
+    let u = updater::check_app(&mac.env, &list[0]).unwrap();
+    assert_eq!(
+        (u.installed.as_str(), u.latest.as_deref()),
+        ("1.6.0", Some("1.7.0"))
+    );
+}
