@@ -1,8 +1,8 @@
 //! The menu bar panel: the small live window that opens under CleanCraft's menu bar icon.
 //!
-//! It shows CPU, memory, free space, battery and network, the three busiest processes with
-//! plain words for what they are, what waits for review, Quick Sweep and Open CleanCraft, and
-//! a More menu with Pause and Quit. The content comes from [`cleancraft_core::menubar`]; this
+//! It shows CPU, memory, free space, battery and network, four quick actions (each opens the
+//! app on its page), the three busiest processes with plain words for what they are, what
+//! waits for review, Quick Sweep and Open CleanCraft, and a More menu with Pause and Quit. The content comes from [`cleancraft_core::menubar`]; this
 //! file only draws it in the app's own theme and reports what was clicked as
 //! [`PanelCmd`]s. The window around it (borderless, on top, closing on focus loss) is the
 //! `cleancraft panel` process in `apps/cleancraft/src/panel.rs`.
@@ -36,6 +36,8 @@ pub const NOTHING_WAITING: &str = "Nothing waits for review.";
 pub const TOP_TITLE: &str = "Using the most CPU";
 /// A meter tile's height.
 const TILE_H: f32 = 72.0;
+/// A quick action's height: icon over a short name.
+const QUICK_H: f32 = 52.0;
 
 /// The panel's state: the latest reading and what the person clicked.
 pub struct MenuPanel {
@@ -206,6 +208,7 @@ impl MenuPanel {
             if v.battery.is_some() {
                 line(ui, &t, "Network", &v.network);
             }
+            quick_actions(ui, &t, &mut cmds);
             ui.add_space(space::XS);
             let rest = (ui.available_height() - theme::hit::PRIMARY - space::M).max(60.0);
             egui::ScrollArea::vertical()
@@ -381,6 +384,52 @@ fn tile(ui: &mut Ui, t: &Tokens, label: &str, m: &Meter, w: f32) {
             t.text_dim,
         );
     }
+}
+
+/// Free Up RAM, Empty Trash, Threat Check, App Updates: one row of icon buttons. Each opens
+/// the app on its page, where the person confirms ([`menubar::QUICK_ACTIONS`]).
+fn quick_actions(ui: &mut Ui, t: &Tokens, cmds: &mut Vec<PanelCmd>) {
+    const ICONS: [Icon; 4] = [Icon::Monitor, Icon::Trash, Icon::Shield, Icon::Updates];
+    let n = menubar::QUICK_ACTIONS.len() as f32;
+    let w = (ui.available_width() - space::S * (n - 1.0)) / n;
+    ui.horizontal(|ui| {
+        for (i, ((name, short, _), icon)) in menubar::QUICK_ACTIONS.iter().zip(ICONS).enumerate() {
+            let (r, resp) = ui.allocate_exact_size(vec2(w, QUICK_H), Sense::click());
+            let name = crate::tr(*name);
+            let resp = resp.on_hover_text(&name);
+            resp.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &name));
+            let f = kit::feel(ui, &resp);
+            let p = ui.painter();
+            p.rect(
+                r,
+                CornerRadius::same(radius::M),
+                icons::lerp(t.glass, t.glass_hover, f.hov),
+                Stroke::new(1.0, t.glass_stroke),
+                egui::StrokeKind::Inside,
+            );
+            let ic = Rect::from_center_size(pos2(r.center().x, r.min.y + 18.0), vec2(18.0, 18.0));
+            icons::paint(p, ic, icon, t.accent);
+            let nf = font(size::CAPTION, Weight::Medium);
+            p.text(
+                pos2(r.center().x, r.min.y + 38.0),
+                Align2::CENTER_CENTER,
+                kit::truncate_end(
+                    ui.ctx(),
+                    &crate::tr(*short),
+                    &nf,
+                    r.width() - space::XS * 2.0,
+                ),
+                nf,
+                t.text,
+            );
+            if f.focus {
+                kit::focus_ring(p, t, r, f32::from(radius::M));
+            }
+            if resp.clicked() {
+                cmds.push(PanelCmd::Quick(i));
+            }
+        }
+    });
 }
 
 /// "Network   Down 1.2 MB/s, up 30 KB/s".
