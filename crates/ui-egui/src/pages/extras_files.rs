@@ -233,6 +233,7 @@ pub fn threat_depth_picker(app: &mut CleanApp, ui: &mut Ui) {
                 }
             });
             kit::dim(ui, &t, ScanOptions::load(&app.env).threat_depth.blurb());
+            super::threat_rules::lines(app, ui);
         });
     });
     ui.add_space(8.0);

@@ -101,6 +101,21 @@ pub enum Cmd {
     /// CleanCraft's own update: --check (default) looks on GitHub Releases, --install
     /// installs the newer version (the old one goes to the Trash, with Undo in History).
     Update(crate::cli_update::UpdateArgs),
+    /// What Threat Check recognizes threats with: Apple's malware rules and the abuse.ch
+    /// sample list. Nothing is ever uploaded.
+    #[command(name = "threat-rules")]
+    ThreatRules {
+        /// Ask macOS for Apple's newest rules (administrator password), and download the
+        /// abuse.ch list when a key is saved.
+        #[arg(long)]
+        update: bool,
+        /// Save your free abuse.ch key (auth.abuse.ch).
+        #[arg(long, conflicts_with = "forget_key")]
+        key: Option<String>,
+        /// Remove the saved abuse.ch key.
+        #[arg(long)]
+        forget_key: bool,
+    },
     #[command(flatten)]
     Apps(crate::cli_apps::AppsCmd),
 }
@@ -277,6 +292,17 @@ pub fn run_cmd(env: &Env, cmd: Cmd) -> anyhow::Result<()> {
             cleancraft_core::self_update::CURRENT,
             &mut std::io::stdout(),
         )?,
+        Cmd::ThreatRules {
+            update,
+            key,
+            forget_key,
+        } => threat_rules(
+            env,
+            update,
+            key.as_deref(),
+            forget_key,
+            &mut std::io::stdout(),
+        )?,
         Cmd::McpSetup { args } => {
             let code = cleancraft_core::mcp_setup::cli(env, &args);
             if code != 0 {
@@ -335,6 +361,60 @@ fn scan_with_bar(
         done.store(true, std::sync::atomic::Ordering::Relaxed);
         r
     })
+}
+
+fn threat_rules(
+    env: &Env,
+    update: bool,
+    key: Option<&str>,
+    forget_key: bool,
+    out: &mut impl std::io::Write,
+) -> anyhow::Result<()> {
+    use cleancraft_core::{known_malware, xprotect};
+    let now = chrono::Utc::now().timestamp();
+    if let Some(k) = key {
+        known_malware::set_key(env, k).map_err(anyhow::Error::msg)?;
+        writeln!(out, "Saved. {}.", known_malware::key_hint(k.trim()))?;
+    }
+    if forget_key {
+        known_malware::forget_key(env).map_err(anyhow::Error::msg)?;
+        writeln!(
+            out,
+            "The abuse.ch key is forgotten. The samples already downloaded stay."
+        )?;
+    }
+    let mut failed = None;
+    if update {
+        match xprotect::update(env) {
+            Ok(s) => writeln!(out, "{s}")?,
+            Err(e) => failed = Some(e),
+        }
+    }
+    if (update || key.is_some()) && known_malware::key(env).is_some() {
+        match known_malware::update(env, now) {
+            Ok(n) => writeln!(out, "{n} new known malware samples from abuse.ch.")?,
+            Err(e) => failed = failed.or(Some(e)),
+        }
+    }
+    let wall = std::time::SystemTime::now();
+    match xprotect::version(env) {
+        Some(v) => writeln!(out, "{}", v.text(wall))?,
+        None => writeln!(
+            out,
+            "Apple's malware rules (XProtect) were not found on this Mac."
+        )?,
+    }
+    match known_malware::status(env, now) {
+        Some(s) => writeln!(out, "{s}")?,
+        None => writeln!(
+            out,
+            "No abuse.ch key is saved. Get a free one at auth.abuse.ch, then run: cleancraft threat-rules --key KEY"
+        )?,
+    }
+    match failed {
+        Some(e) => anyhow::bail!(e),
+        None => Ok(()),
+    }
 }
 
 #[cfg(test)]
@@ -406,6 +486,39 @@ mod tests {
             }
             _ => panic!("not mcp-setup"),
         }
+    }
+
+    #[test]
+    fn threat_rules_saves_the_key_downloads_and_tells_the_status() {
+        let m = FakeMac::new();
+        let fake = m.env.fake_sys().expect("fake");
+        let key = "0123456789abcdef0123456789abcdef";
+        fake.answer(
+            &format!("/usr/bin/curl -fsS --max-time 60 https://mb-api.abuse.ch/v2/files/exports/{key}/recent.csv"),
+            "# \"first_seen_utc\",\"sha256_hash\",\"md5_hash\",\"sha1_hash\",\"reporter\",\"file_name\",\"file_type_guess\",\"mime_type\",\"signature\"\n\"2026-10-30 10:00:00\", \"aa00000000000000000000000000000000000000000000000000000000000001\", \"x\", \"x\", \"r\", \"f\", \"macho\", \"m\", \"AMOS\"\n",
+        );
+        let mut out = Vec::new();
+        threat_rules(&m.env, false, None, false, &mut out).expect("status");
+        let text = String::from_utf8_lossy(&out).to_string();
+        assert!(text.contains("were not found on this Mac"), "{text}");
+        assert!(text.contains("No abuse.ch key is saved."), "{text}");
+        let mut out = Vec::new();
+        threat_rules(&m.env, false, Some(key), false, &mut out).expect("key");
+        let text = String::from_utf8_lossy(&out).to_string();
+        assert!(text.starts_with("Saved. Key ending in cdef."), "{text}");
+        assert!(
+            text.contains("1 new known malware samples from abuse.ch."),
+            "{text}"
+        );
+        assert!(
+            text.contains("1 known Mac malware samples from abuse.ch, updated today."),
+            "{text}"
+        );
+        let mut out = Vec::new();
+        threat_rules(&m.env, false, None, true, &mut out).expect("forget");
+        assert!(cleancraft_core::known_malware::key(&m.env).is_none());
+        let cli = Cli::try_parse_from(["cleancraft", "threat-rules", "--key", "k", "--forget-key"]);
+        assert!(cli.is_err(), "the two conflict");
     }
 
     fn chrono_now() -> i64 {

@@ -8,7 +8,11 @@
 //! is written for those. Links are never followed, files over [`MAX_BYTES`] are skipped, and so
 //! are files whose content is not on this Mac (iCloud and other cloud placeholders), so a scan
 //! never downloads anything.
+//!
+//! With an abuse.ch key ([`crate::known_malware`]) the same files, plus disk images and
+//! installer packages, are also compared by SHA-256 with known Mac malware samples.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, SystemTime};
@@ -39,6 +43,8 @@ pub struct Rules {
     pub count: usize,
     /// Rule files that could not be read or compiled, in words.
     pub problems: Vec<String>,
+    /// Known malware samples from abuse.ch: SHA-256 to family name (empty without a key).
+    pub known: HashMap<[u8; 32], String>,
 }
 
 /// One rule that matched a file.
@@ -48,11 +54,23 @@ pub struct Hit {
     pub name: String,
     /// From the script behaviour rules.
     pub script: bool,
+    /// An exact copy of a sample listed by abuse.ch (`name` is its family, maybe empty).
+    pub listed: bool,
 }
 
 impl Hit {
     /// In words: "Adload (adware), Apple's rule MACOS.ADLOAD.I".
     pub fn describe(&self) -> String {
+        if self.listed {
+            return if self.name.is_empty() {
+                "a known malware sample, listed by abuse.ch MalwareBazaar".into()
+            } else {
+                format!(
+                    "a known malware sample ({}), listed by abuse.ch MalwareBazaar",
+                    self.name
+                )
+            };
+        }
         let parts: Vec<&str> = self
             .name
             .split(['.', '_'])
@@ -103,6 +121,88 @@ pub fn rules_dir(env: &Env) -> Option<PathBuf> {
         .find(|d| d.join(FILE_RULES).is_file())
 }
 
+/// Apple's rules count as old after this many days (Apple ships new ones every few weeks).
+pub const STALE_DAYS: u64 = 45;
+
+/// Which rules this Mac has: Apple's version number and the date of the rules file.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Version {
+    pub version: Option<String>,
+    pub built: Option<SystemTime>,
+}
+
+impl Version {
+    /// Whole days since the rules were made.
+    pub fn age_days(&self, now: SystemTime) -> Option<u64> {
+        Some(now.duration_since(self.built?).ok()?.as_secs() / 86_400)
+    }
+
+    pub fn is_old(&self, now: SystemTime) -> bool {
+        self.age_days(now).is_some_and(|d| d >= STALE_DAYS)
+    }
+
+    /// "Apple's malware rules: version 5368, 14 days old."
+    pub fn text(&self, now: SystemTime) -> String {
+        let v = self.version.as_deref().unwrap_or("?");
+        match self.age_days(now) {
+            Some(0) => format!("Apple's malware rules: version {v}, made today."),
+            Some(1) => format!("Apple's malware rules: version {v}, 1 day old."),
+            Some(d) => format!("Apple's malware rules: version {v}, {d} days old."),
+            None => format!("Apple's malware rules: version {v}."),
+        }
+    }
+}
+
+/// The rules on this Mac, None when there are none.
+pub fn version(env: &Env) -> Option<Version> {
+    let dir = rules_dir(env)?;
+    let version = dir
+        .parent()
+        .and_then(|c| plist::Value::from_file(c.join("Info.plist")).ok())
+        .and_then(|v| {
+            v.as_dictionary()?
+                .get("CFBundleShortVersionString")?
+                .as_string()
+                .map(str::to_string)
+        });
+    let built = std::fs::metadata(dir.join(FILE_RULES))
+        .and_then(|m| m.modified())
+        .ok();
+    Some(Version { version, built })
+}
+
+/// macOS's own XProtect tool (macOS 15 and later).
+pub const TOOL: &str = "/usr/bin/xprotect";
+/// System Settings > General > Software Update.
+pub const SOFTWARE_UPDATE_URL: &str =
+    "x-apple.systempreferences:com.apple.Software-Update-Settings.extension";
+
+/// Ask macOS for Apple's newest rules: `xprotect update` with the administrator password, or
+/// Software Update on older macOS. `Ok` says in words what happened.
+pub fn update(env: &Env) -> Result<String, String> {
+    if !env.sys_path(TOOL).is_file() {
+        env.sys
+            .open_url(SOFTWARE_UPDATE_URL)
+            .map_err(|e| format!("Software Update could not be opened: {e}"))?;
+        return Ok("Software Update is open. Under Automatic Updates, turn on \"Install Security Responses and system files\".".into());
+    }
+    let out = env
+        .sys
+        .run_admin(&format!("{TOOL} update"))
+        .map_err(|e| format!("The update could not start: {e}"))?;
+    if crate::sys::admin_cancelled(&out) {
+        return Err("Cancelled: nothing was changed.".into());
+    }
+    if out.status != 0 {
+        let e = out.stderr.trim();
+        return Err(format!(
+            "macOS could not update the rules: {}",
+            if e.is_empty() { "no reason given" } else { e }
+        ));
+    }
+    Ok("macOS checked for new malware rules.".into())
+}
+
 type Cached = (PathBuf, Vec<Option<SystemTime>>, Arc<Rules>);
 static CACHE: Mutex<Option<Cached>> = Mutex::new(None);
 
@@ -112,13 +212,10 @@ pub fn load(env: &Env) -> Result<Arc<Rules>, String> {
     let dir = rules_dir(env).ok_or_else(|| {
         "Apple's malware rules (XProtect) were not found on this Mac, so file contents were not checked".to_string()
     })?;
-    let stamps: Vec<Option<SystemTime>> = [FILE_RULES, SCRIPT_RULES]
+    let list = crate::known_malware::list_path(env);
+    let stamps: Vec<Option<SystemTime>> = [dir.join(FILE_RULES), dir.join(SCRIPT_RULES), list]
         .iter()
-        .map(|f| {
-            std::fs::metadata(dir.join(f))
-                .and_then(|m| m.modified())
-                .ok()
-        })
+        .map(|f| std::fs::metadata(f).and_then(|m| m.modified()).ok())
         .collect();
     if let Ok(c) = CACHE.lock()
         && let Some((d, s, r)) = c.as_ref()
@@ -127,7 +224,9 @@ pub fn load(env: &Env) -> Result<Arc<Rules>, String> {
     {
         return Ok(r.clone());
     }
-    let rules = Arc::new(compile(&dir)?);
+    let mut rules = compile(&dir)?;
+    rules.known = crate::known_malware::hashes(env);
+    let rules = Arc::new(rules);
     if let Ok(mut c) = CACHE.lock() {
         *c = Some((dir, stamps, rules.clone()));
     }
@@ -167,6 +266,7 @@ fn compile(dir: &Path) -> Result<Rules, String> {
         rules,
         count,
         problems,
+        known: HashMap::new(),
     })
 }
 
@@ -204,10 +304,19 @@ fn not_here(_md: &std::fs::Metadata) -> bool {
 pub fn check_file(rules: &Rules, path: &Path) -> Vec<Hit> {
     let mut scanner = yara_x::Scanner::new(&rules.rules);
     scanner.set_timeout(FILE_TIMEOUT);
-    check_with(&mut scanner, path)
+    check_with(&mut scanner, &rules.known, path)
 }
 
-fn check_with(scanner: &mut yara_x::Scanner<'_>, path: &Path) -> Vec<Hit> {
+fn sha256(path: &Path) -> Option<[u8; 32]> {
+    let h = crate::self_update::sha256_file(path).ok()?;
+    hex::decode(h).ok()?.try_into().ok()
+}
+
+fn check_with(
+    scanner: &mut yara_x::Scanner<'_>,
+    known: &HashMap<[u8; 32], String>,
+    path: &Path,
+) -> Vec<Hit> {
     let Ok(md) = std::fs::symlink_metadata(path) else {
         return Vec::new();
     };
@@ -219,27 +328,48 @@ fn check_with(scanner: &mut yara_x::Scanner<'_>, path: &Path) -> Vec<Hit> {
         use std::io::Read;
         f.read(&mut head)
     });
-    if !read.is_ok_and(|n| can_run(&head[..n])) {
+    let head = &head[..read.unwrap_or(0)];
+    let runs = can_run(head);
+    // Disk images and installer packages carry Mac malware too; only hashes apply to them.
+    let package = head.starts_with(b"xar!")
+        || path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("dmg"));
+    let hashed = package && !known.is_empty();
+    if !runs && !hashed {
         return Vec::new();
     }
+    let mut hits = Vec::new();
+    if !known.is_empty()
+        && let Some(family) = sha256(path).and_then(|d| known.get(&d))
+    {
+        hits.push(Hit {
+            name: family.clone(),
+            script: false,
+            listed: true,
+        });
+    }
+    if !runs {
+        return hits;
+    }
     let Ok(res) = scanner.scan_file(path) else {
-        return Vec::new();
+        return hits;
     };
-    res.matching_rules()
-        .map(|r| {
-            let name = r
-                .metadata()
-                .find_map(|(k, v)| match (k, v) {
-                    ("description", yara_x::MetaValue::String(s)) => Some(s.to_string()),
-                    _ => None,
-                })
-                .unwrap_or_else(|| r.identifier().to_string());
-            Hit {
-                name,
-                script: r.namespace() == SCRIPT_RULES,
-            }
-        })
-        .collect()
+    hits.extend(res.matching_rules().map(|r| {
+        let name = r
+            .metadata()
+            .find_map(|(k, v)| match (k, v) {
+                ("description", yara_x::MetaValue::String(s)) => Some(s.to_string()),
+                _ => None,
+            })
+            .unwrap_or_else(|| r.identifier().to_string());
+        Hit {
+            name,
+            script: r.namespace() == SCRIPT_RULES,
+            listed: false,
+        }
+    }));
+    hits
 }
 
 /// What a walk found and how much it looked at.
@@ -277,7 +407,7 @@ pub fn walk(
                     if cancelled() {
                         continue;
                     }
-                    let found = check_with(&mut scanner, &p);
+                    let found = check_with(&mut scanner, &rules.known, &p);
                     if !found.is_empty()
                         && let Ok(mut h) = hits.lock()
                     {
@@ -341,6 +471,7 @@ mod tests {
         let h = |n: &str, script| Hit {
             name: n.into(),
             script,
+            listed: false,
         };
         assert_eq!(
             h("MACOS.ADLOAD.I", false).describe(),
@@ -361,6 +492,19 @@ mod tests {
         assert_eq!(
             h("XProtect_MACOS_DUBROBBER_A", false).describe(),
             "Dubrobber (malware), Apple's rule XProtect_MACOS_DUBROBBER_A"
+        );
+        let l = |n: &str| Hit {
+            name: n.into(),
+            script: false,
+            listed: true,
+        };
+        assert_eq!(
+            l("AMOS").describe(),
+            "a known malware sample (AMOS), listed by abuse.ch MalwareBazaar"
+        );
+        assert_eq!(
+            l("").describe(),
+            "a known malware sample, listed by abuse.ch MalwareBazaar"
         );
     }
 
