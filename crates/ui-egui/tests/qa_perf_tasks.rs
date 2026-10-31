@@ -186,3 +186,21 @@ fn tasks_that_cannot_run_explain_why_and_cancel_runs_nothing() {
     assert!(!has(&h, "Mail is open. Quit Mail first."));
     assert!(has_text(&h, "Envelope Index"));
 }
+
+#[test]
+fn the_free_ram_route_ticks_the_task_and_asks_first() {
+    let m = mac();
+    let mut h = harness(&m);
+    h.state_mut()
+        .open_route(&cleancraft_core::route::AppRoute::parse("task:free_ram").unwrap());
+    steps(&mut h);
+    let st = &h.state().tasks;
+    assert!(st.selected.contains("free_ram") && st.selected.len() == 1);
+    assert!(has_text(&h, "purge"), "the exact command is shown first");
+    assert!(
+        m.env.fake_sys().unwrap().admin_calls().is_empty(),
+        "nothing ran"
+    );
+    click(&mut h, "Run");
+    assert_eq!(m.env.fake_sys().unwrap().admin_calls(), vec!["purge"]);
+}

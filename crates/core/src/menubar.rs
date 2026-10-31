@@ -179,7 +179,7 @@ impl PanelToggle {
 /// A scan route only looks, and Free Up RAM waits for its button on the Live Monitor, so the
 /// person still confirms everything in the app and the panel never cleans.
 pub const QUICK_ACTIONS: [(&str, &str, &str); 4] = [
-    ("Free Up RAM", "Free RAM", "monitor"),
+    ("Free Up RAM", "Free RAM", "task:free_ram"),
     ("Empty Trash", "Trash", "scan:trash_bins"),
     ("Threat Check", "Threats", "scan:malware"),
     ("App Updates", "Updates", "scan:updater"),

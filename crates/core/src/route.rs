@@ -36,6 +36,9 @@ pub enum AppRoute {
     FullDiskAccess,
     /// macOS System Settings > Battery (outside the app; the page stays).
     BatterySettings,
+    /// Tune-up Tasks with one task ticked and its confirmation shown (the exact command);
+    /// nothing runs until the person confirms.
+    Task(String),
 }
 
 /// The System Settings pane [`AppRoute::BatterySettings`] opens.
@@ -45,7 +48,7 @@ pub const BATTERY_SETTINGS_URL: &str =
 impl AppRoute {
     /// The string form: "system_junk", "scan:system_junk", "health", "history", "settings",
     /// "guide:ai_agents", "unused_apps", "uninstall:/Applications/X.app",
-    /// "threat:/Library/LaunchAgents/x.plist", "full_disk_access".
+    /// "threat:/Library/LaunchAgents/x.plist", "full_disk_access", "task:free_ram".
     pub fn to_arg(&self) -> String {
         match self {
             AppRoute::Feature(f) => f.as_str().to_string(),
@@ -60,6 +63,7 @@ impl AppRoute {
             AppRoute::ThreatReview(p) => format!("threat:{}", p.display()),
             AppRoute::FullDiskAccess => "full_disk_access".into(),
             AppRoute::BatterySettings => "battery_settings".into(),
+            AppRoute::Task(id) => format!("task:{id}"),
         }
     }
 
@@ -78,6 +82,9 @@ impl AppRoute {
             let p = PathBuf::from(path.trim());
             let ok = p.is_absolute() && !crate::env::has_parent_component(&p);
             return ok.then_some(AppRoute::ThreatReview(p));
+        }
+        if let Some(id) = s.strip_prefix("task:") {
+            return crate::tasks::info(id.trim()).map(|t| AppRoute::Task(t.id.to_string()));
         }
         if let Some(f) = s.strip_prefix("scan:") {
             return FeatureId::parse(f).map(AppRoute::Scan);
@@ -113,6 +120,7 @@ mod tests {
             AppRoute::ThreatReview(PathBuf::from("/Library/LaunchAgents/com.x.helper.plist")),
             AppRoute::FullDiskAccess,
             AppRoute::BatterySettings,
+            AppRoute::Task("free_ram".into()),
         ];
         for f in FeatureId::ALL {
             all.push(AppRoute::Feature(f));
@@ -127,6 +135,7 @@ mod tests {
     fn odd_input_is_refused() {
         assert_eq!(AppRoute::parse("nowhere"), None);
         assert_eq!(AppRoute::parse("scan:nowhere"), None);
+        assert_eq!(AppRoute::parse("task:rm_rf"), None);
         assert_eq!(AppRoute::parse("uninstall:relative/X.app"), None);
         assert_eq!(AppRoute::parse("threat:relative/x.plist"), None);
         assert_eq!(AppRoute::parse("threat:/Library/../etc/x.plist"), None);
