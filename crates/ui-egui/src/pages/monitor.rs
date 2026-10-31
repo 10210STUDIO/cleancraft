@@ -432,6 +432,7 @@ fn memory_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
 fn storage_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
     let t = app.t;
     let mut go = false;
+    let mut fda = false;
     kit::card(&t)
         .inner_margin(egui::Margin::same(18))
         .show(ui, |ui| {
@@ -476,11 +477,34 @@ fn storage_card(app: &mut CleanApp, ui: &mut Ui, s: &Snapshot) {
                 if st.trash.is_some_and(|b| b > 0) {
                     super::extras_cleanup::empty_trash(app, ui, "Empty Trash...");
                 }
+                let needs_fda = st
+                    .trash_note
+                    .as_deref()
+                    .is_some_and(|n| n.contains("Full Disk Access"));
+                if needs_fda
+                    && kit::pill(
+                        ui,
+                        &t,
+                        "Allow Full Disk Access...",
+                        kit::Kind::Secondary,
+                        None,
+                    )
+                    .on_hover_text(crate::tr(
+                        "Shows how to let CleanCraft read the Trash and other protected places",
+                    ))
+                    .clicked()
+                {
+                    fda = true;
+                }
             });
         });
     if go {
         app.act();
         app.navigate(FeatureId::SmartCare.as_str());
+    }
+    if fda {
+        app.act();
+        app.open_route(&cleancraft_core::route::AppRoute::FullDiskAccess);
     }
 }
 

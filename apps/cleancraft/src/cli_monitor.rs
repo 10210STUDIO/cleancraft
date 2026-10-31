@@ -64,6 +64,9 @@ pub fn status_text(s: &Snapshot) -> String {
     for p in &s.problems {
         o.push(format!("not read: {p}"));
     }
+    if s.problems.iter().any(|p| p.contains("Full Disk Access")) {
+        o.push("To read it, add the app running this command (Terminal) in System Settings > Privacy & Security > Full Disk Access.".into());
+    }
     o.join("\n")
 }
 
@@ -132,6 +135,23 @@ mod tests {
         let out = status(&m.env, false, std::time::Duration::ZERO).unwrap_or_default();
         assert!(out.contains("CPU        Unknown"), "{out}");
         assert!(out.contains("not read:"), "{out}");
+    }
+
+    #[test]
+    fn status_says_how_to_read_the_trash() {
+        let m = FakeMac::new();
+        if let Some(f) = m.env.fake_sys() {
+            answer_all(f);
+        }
+        m.env.inject_fault(
+            &m.env.user_trash(),
+            cleancraft_core::Fault::PermissionDenied,
+        );
+        let out = status(&m.env, false, std::time::Duration::ZERO).unwrap_or_default();
+        assert!(
+            out.contains("Privacy & Security > Full Disk Access"),
+            "{out}"
+        );
     }
 
     #[test]
