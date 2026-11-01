@@ -11,6 +11,7 @@ pub mod health;
 pub mod history;
 pub mod monitor;
 pub mod plan_page;
+pub mod security;
 pub mod settings;
 pub mod startup;
 pub mod sweep;

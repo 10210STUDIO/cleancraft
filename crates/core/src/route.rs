@@ -18,6 +18,8 @@ pub enum AppRoute {
     Scan(FeatureId),
     /// Mac Health (a tool of the Live Monitor section).
     Health,
+    /// Security Check (a tool of the Protect section).
+    Security,
     History,
     Settings,
     /// The in-app guide "Connect an AI agent" (docs/guide-ai-agents.md).
@@ -36,6 +38,14 @@ pub enum AppRoute {
     FullDiskAccess,
     /// macOS System Settings > Battery (outside the app; the page stays).
     BatterySettings,
+    /// macOS System Settings > Privacy & Security (outside the app; the page stays). FileVault
+    /// and the firewall both live there.
+    SecurityPrivacySettings,
+    /// macOS System Settings > Users & Groups (outside the app; the page stays). Automatic
+    /// login and the guest account both live there.
+    UsersGroupsSettings,
+    /// macOS System Settings > Lock Screen (outside the app; the page stays).
+    LockScreenSettings,
     /// Tune-up Tasks with one task ticked and its confirmation shown (the exact command);
     /// nothing runs until the person confirms.
     Task(String),
@@ -44,6 +54,15 @@ pub enum AppRoute {
 /// The System Settings pane [`AppRoute::BatterySettings`] opens.
 pub const BATTERY_SETTINGS_URL: &str =
     "x-apple.systempreferences:com.apple.Battery-Settings.extension";
+/// The System Settings pane [`AppRoute::SecurityPrivacySettings`] opens.
+pub const SECURITY_PRIVACY_SETTINGS_URL: &str =
+    "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension";
+/// The System Settings pane [`AppRoute::UsersGroupsSettings`] opens.
+pub const USERS_GROUPS_SETTINGS_URL: &str =
+    "x-apple.systempreferences:com.apple.Users-Groups-Settings.extension";
+/// The System Settings pane [`AppRoute::LockScreenSettings`] opens.
+pub const LOCK_SCREEN_SETTINGS_URL: &str =
+    "x-apple.systempreferences:com.apple.Lock-Screen-Settings.extension";
 
 impl AppRoute {
     /// The string form: "system_junk", "scan:system_junk", "health", "history", "settings",
@@ -54,6 +73,7 @@ impl AppRoute {
             AppRoute::Feature(f) => f.as_str().to_string(),
             AppRoute::Scan(f) => format!("scan:{}", f.as_str()),
             AppRoute::Health => "health".into(),
+            AppRoute::Security => "security".into(),
             AppRoute::History => "history".into(),
             AppRoute::Settings => "settings".into(),
             AppRoute::AgentGuide => "guide:ai_agents".into(),
@@ -63,6 +83,9 @@ impl AppRoute {
             AppRoute::ThreatReview(p) => format!("threat:{}", p.display()),
             AppRoute::FullDiskAccess => "full_disk_access".into(),
             AppRoute::BatterySettings => "battery_settings".into(),
+            AppRoute::SecurityPrivacySettings => "security_privacy_settings".into(),
+            AppRoute::UsersGroupsSettings => "users_groups_settings".into(),
+            AppRoute::LockScreenSettings => "lock_screen_settings".into(),
             AppRoute::Task(id) => format!("task:{id}"),
         }
     }
@@ -91,6 +114,7 @@ impl AppRoute {
         }
         match s.to_lowercase().replace(['-', ' '], "_").as_str() {
             "health" | "mac_health" => Some(AppRoute::Health),
+            "security" | "security_check" => Some(AppRoute::Security),
             "history" => Some(AppRoute::History),
             "settings" => Some(AppRoute::Settings),
             "guide:ai_agents" | "ai_agents_guide" | "guide" => Some(AppRoute::AgentGuide),
@@ -98,6 +122,9 @@ impl AppRoute {
             "connect_ai" | "welcome" => Some(AppRoute::ConnectAi),
             "full_disk_access" | "fda" => Some(AppRoute::FullDiskAccess),
             "battery_settings" => Some(AppRoute::BatterySettings),
+            "security_privacy_settings" => Some(AppRoute::SecurityPrivacySettings),
+            "users_groups_settings" => Some(AppRoute::UsersGroupsSettings),
+            "lock_screen_settings" => Some(AppRoute::LockScreenSettings),
             other => FeatureId::parse(other).map(AppRoute::Feature),
         }
     }
@@ -111,6 +138,7 @@ mod tests {
     fn every_route_round_trips() {
         let mut all = vec![
             AppRoute::Health,
+            AppRoute::Security,
             AppRoute::History,
             AppRoute::Settings,
             AppRoute::AgentGuide,
@@ -120,6 +148,9 @@ mod tests {
             AppRoute::ThreatReview(PathBuf::from("/Library/LaunchAgents/com.x.helper.plist")),
             AppRoute::FullDiskAccess,
             AppRoute::BatterySettings,
+            AppRoute::SecurityPrivacySettings,
+            AppRoute::UsersGroupsSettings,
+            AppRoute::LockScreenSettings,
             AppRoute::Task("free_ram".into()),
         ];
         for f in FeatureId::ALL {

@@ -29,6 +29,7 @@ pub mod proc_names;
 pub mod progress;
 pub mod route;
 pub mod schedule;
+pub mod security;
 pub mod self_update;
 pub mod settings;
 pub mod space;

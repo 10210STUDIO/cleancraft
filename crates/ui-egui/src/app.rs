@@ -18,6 +18,8 @@ pub enum Page {
     Feature(FeatureId),
     /// Mac Health, a tool of the Live Monitor section ([`EXTRA_TOOLS`]).
     Health,
+    /// Security Check, a tool of the Protect section ([`EXTRA_TOOLS`]).
+    Security,
     History,
     Settings,
     /// The guide "Connect an AI agent" (docs/guide-ai-agents.md), opened from Settings.
@@ -68,7 +70,10 @@ pub fn group_of(f: FeatureId) -> usize {
 
 /// Tools of a section that are not modules, shown after its modules in the switcher:
 /// (section index in [`GROUPS`], page, title).
-pub const EXTRA_TOOLS: &[(usize, Page, &str)] = &[(6, Page::Health, "Mac Health")];
+pub const EXTRA_TOOLS: &[(usize, Page, &str)] = &[
+    (2, Page::Security, "Security Check"),
+    (6, Page::Health, "Mac Health"),
+];
 
 /// The section a page belongs to (None for History, Settings and the guides).
 pub fn page_group(p: Page) -> Option<usize> {
@@ -98,6 +103,7 @@ pub fn page_look(t: &Tokens, p: Page) -> (Icon, &'static str) {
     match p {
         Page::Feature(f) => (kit::feature_look(t, f).0, f.title()),
         Page::Health => (Icon::Check, "Mac Health"),
+        Page::Security => (Icon::Check, "Security Check"),
         Page::History => (Icon::History, "History"),
         Page::Settings => (Icon::Settings, "Settings"),
         Page::AgentGuide => (Icon::File, "Connect an AI Agent"),
@@ -136,6 +142,7 @@ pub struct CleanApp {
     pub disk_map: pages::disk_map::State,
     pub monitor: pages::monitor::State,
     pub health: pages::health::State,
+    pub security: pages::security::State,
     pub guide: pages::guide::State,
     pub welcome: pages::welcome::State,
     /// CleanCraft's own updates (Settings > Updates and the banner).
@@ -218,6 +225,7 @@ impl CleanApp {
             disk_map: Default::default(),
             monitor: Default::default(),
             health: Default::default(),
+            security: Default::default(),
             guide: Default::default(),
             welcome: Default::default(),
             updates: Default::default(),
@@ -291,9 +299,19 @@ impl CleanApp {
     /// Open a route: a page, a page that starts its scan, App Remover on one app. A route only
     /// opens and looks; nothing is ever cleaned from here.
     pub fn open_route(&mut self, r: &AppRoute) {
-        if *r == AppRoute::BatterySettings {
+        let outside_url = match r {
+            AppRoute::BatterySettings => Some(cleancraft_core::route::BATTERY_SETTINGS_URL),
+            AppRoute::SecurityPrivacySettings => {
+                Some(cleancraft_core::route::SECURITY_PRIVACY_SETTINGS_URL)
+            }
+            AppRoute::UsersGroupsSettings => {
+                Some(cleancraft_core::route::USERS_GROUPS_SETTINGS_URL)
+            }
+            AppRoute::LockScreenSettings => Some(cleancraft_core::route::LOCK_SCREEN_SETTINGS_URL),
+            _ => None,
+        };
+        if let Some(url) = outside_url {
             // Outside the app: the page stays.
-            let url = cleancraft_core::route::BATTERY_SETTINGS_URL;
             if let Err(e) = self.env.sys.open_url(url) {
                 self.warn(format!("Could not open System Settings: {e}"));
             }
@@ -305,6 +323,7 @@ impl CleanApp {
         self.page = match r {
             AppRoute::Feature(f) | AppRoute::Scan(f) => Page::Feature(*f),
             AppRoute::Health => Page::Health,
+            AppRoute::Security => Page::Security,
             AppRoute::History => Page::History,
             AppRoute::Settings | AppRoute::FullDiskAccess => Page::Settings,
             AppRoute::ThreatReview(_) => Page::Feature(FeatureId::Malware),
@@ -313,7 +332,10 @@ impl CleanApp {
             AppRoute::UnusedApps | AppRoute::UninstallApp(_) => {
                 Page::Feature(FeatureId::Uninstaller)
             }
-            AppRoute::BatterySettings => self.page,
+            AppRoute::BatterySettings
+            | AppRoute::SecurityPrivacySettings
+            | AppRoute::UsersGroupsSettings
+            | AppRoute::LockScreenSettings => self.page,
             AppRoute::Task(_) => Page::Feature(FeatureId::Maintenance),
         };
         match r {
@@ -344,6 +366,7 @@ impl CleanApp {
             AppRoute::Task(id) => self.tasks.ask = Some(id.clone()),
             AppRoute::ConnectAi => pages::welcome::refresh(self),
             AppRoute::Health => pages::health::refresh_if_old(self),
+            AppRoute::Security => pages::security::refresh_if_old(self),
             _ => {}
         }
     }
@@ -712,6 +735,7 @@ impl CleanApp {
         busy |= pages::disk_map::poll(self);
         busy |= pages::monitor::poll(self);
         busy |= pages::health::poll(self);
+        busy |= pages::security::poll(self);
         busy |= pages::welcome::poll(self);
         busy |= pages::updates::poll(self);
         self.follow_journal();
@@ -728,6 +752,7 @@ impl CleanApp {
         match self.page {
             Page::Feature(f) => Section::of(f),
             Page::Health => Section::of(FeatureId::Monitor),
+            Page::Security => Section::of(FeatureId::Malware),
             Page::History | Page::Settings | Page::AgentGuide | Page::ConnectAi | Page::Welcome => {
                 Section::Neutral
             }
@@ -806,6 +831,9 @@ impl CleanApp {
                             if self.page == Page::Health {
                                 pages::health::refresh_if_old(self);
                             }
+                            if self.page == Page::Security {
+                                pages::security::refresh_if_old(self);
+                            }
                         }
                     }
                     ui.add_space(space::L);
@@ -819,6 +847,7 @@ impl CleanApp {
                 ui.with_visual_transform(shift, |ui| match self.page {
                     Page::Feature(f) => pages::feature_page(self, ui, f),
                     Page::Health => pages::health::ui(self, ui),
+                    Page::Security => pages::security::ui(self, ui),
                     Page::History => pages::history::ui(self, ui),
                     Page::Settings => pages::settings::ui(self, ui),
                     Page::AgentGuide => pages::guide::ui(self, ui),
