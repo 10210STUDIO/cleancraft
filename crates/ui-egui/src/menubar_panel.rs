@@ -1,7 +1,7 @@
 //! The menu bar panel: the small live window that opens under CleanCraft's menu bar icon.
 //!
 //! It shows CPU, memory, free space, battery and network, four quick actions (the agent runs
-//! them and notifies the result; Empty Trash asks here first), the three busiest processes with plain words for what they are, what
+//! them; the panel stays open and shows the result, also notified; Empty Trash asks here first), the three busiest processes with plain words for what they are, what
 //! waits for review, Quick Sweep and Open CleanCraft, and a More menu with Pause and Quit. The content comes from [`cleancraft_core::menubar`]; this
 //! file only draws it in the app's own theme and reports what was clicked as
 //! [`PanelCmd`]s. The window around it (borderless, on top, closing on focus loss) is the
@@ -16,7 +16,7 @@ use std::time::Instant;
 
 use cleancraft_core::menubar::{self, Meter, PanelCmd, PanelView};
 use cleancraft_core::monitor::{self, Sampler, Snapshot};
-use cleancraft_core::schedule::{self, AgentState, Review};
+use cleancraft_core::schedule::{self, AgentState, QuickDone, Review};
 use cleancraft_core::{Env, Settings};
 use egui::{
     Align2, Color32, CornerRadius, Key, PopupCloseBehavior, Rect, Sense, Stroke, Ui, UiBuilder,
@@ -62,12 +62,17 @@ pub struct MenuPanel {
     close: bool,
     /// Empty Trash was clicked: its question shows in place of the quick actions.
     confirm_trash: bool,
+    /// The quick action clicked and when (Unix seconds), until the agent's result is newer.
+    quick_wait: Option<(usize, i64)>,
+    /// The agent's last quick action result.
+    done: Option<QuickDone>,
 }
 
 impl MenuPanel {
     pub fn new(env: Env) -> MenuPanel {
         let settings = Settings::load(&env);
         let reviews = waiting(&env);
+        let done = QuickDone::load(&env);
         MenuPanel {
             env,
             t: Tokens::dark(),
@@ -83,6 +88,8 @@ impl MenuPanel {
             out: Vec::new(),
             close: false,
             confirm_trash: false,
+            quick_wait: None,
+            done,
         }
     }
 
@@ -103,6 +110,7 @@ impl MenuPanel {
     fn reread(&mut self) {
         self.settings = Settings::load(&self.env);
         self.reviews = waiting(&self.env);
+        self.done = QuickDone::load(&self.env);
         self.read_at = Some(Instant::now());
     }
 
@@ -177,11 +185,29 @@ impl MenuPanel {
         if c.closes_panel() {
             self.close = true;
         }
+        if let PanelCmd::Quick(i) = c {
+            self.quick_wait = Some((i, chrono::Utc::now().timestamp()));
+        }
         if c == PanelCmd::TogglePause {
             // Shown at once; the agent saves the setting.
             self.settings.notifications_paused = !self.settings.notifications_paused;
         }
         self.out.push(c);
+    }
+
+    /// What shows under the quick actions: the clicked one running, then its result. A result
+    /// stays a minute, so it is there when the panel opens again after a password dialog.
+    fn quick_status(&self, now: i64) -> Option<(String, Option<String>)> {
+        let done = self.done.as_ref();
+        match self.quick_wait {
+            Some((i, at)) if done.is_none_or(|d| d.at < at) => {
+                let name = menubar::QUICK_ACTIONS[i].0;
+                Some((crate::tr(format!("{name}: working...")), None))
+            }
+            _ => done
+                .filter(|d| now - d.at < 60)
+                .map(|d| (crate::tr(&d.title), Some(crate::tr(&d.body)))),
+        }
     }
 
     /// The whole panel, filling `ui`.
@@ -230,6 +256,9 @@ impl MenuPanel {
                     Some(i) => cmds.push(PanelCmd::Quick(i)),
                     None => {}
                 }
+            }
+            if let Some((title, body)) = self.quick_status(chrono::Utc::now().timestamp()) {
+                status(ui, &t, &title, body.as_deref());
             }
             ui.add_space(space::XS);
             let rest = (ui.available_height() - theme::hit::PRIMARY - space::M).max(60.0);
@@ -427,8 +456,28 @@ fn confirm_trash(ui: &mut Ui, t: &Tokens) -> Option<bool> {
     answer
 }
 
+/// A quick action's state or result, under the row of actions.
+fn status(ui: &mut Ui, t: &Tokens, title: &str, body: Option<&str>) {
+    ui.label(
+        egui::RichText::new(title)
+            .font(font(size::CAPTION, Weight::Medium))
+            .color(t.text),
+    );
+    if let Some(b) = body {
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(b)
+                    .font(font(size::CAPTION, Weight::Regular))
+                    .color(t.text_dim),
+            )
+            .wrap(),
+        );
+    }
+}
+
 /// Free Up RAM, Empty Trash, Threat Check, App Updates: one row of icon buttons. The agent
-/// runs the clicked one and tells the result in a notification ([`menubar::QUICK_ACTIONS`]).
+/// runs the clicked one; its result shows under them and in a notification
+/// ([`menubar::QUICK_ACTIONS`]).
 fn quick_actions(ui: &mut Ui, t: &Tokens) -> Option<usize> {
     const ICONS: [Icon; 4] = [Icon::Monitor, Icon::Trash, Icon::Shield, Icon::Updates];
     let n = menubar::QUICK_ACTIONS.len() as f32;

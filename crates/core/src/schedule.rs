@@ -614,12 +614,53 @@ impl Agent {
 }
 
 /// A quick action of the menu bar panel, run right away (the person clicked it; Empty Trash
-/// was confirmed in the panel), its result told in a notification. That one is shown even
-/// while notifications are paused, since it answers a click. A finding or a failure opens
-/// the action's page when clicked; Threat Check and App Updates only look.
+/// was confirmed in the panel), its result told in the panel ([`QuickDone`]) and in a
+/// notification. That one is shown even while notifications are paused, since it answers a
+/// click. A finding or a failure opens the action's page when clicked; Threat Check and App
+/// Updates only look.
 pub fn quick_action(env: &Env, settings: &Settings, i: usize) -> Result<(), String> {
     let n = quick_result(env, settings, i);
+    // The panel stays open and shows it too: a notification can be hidden by Focus.
+    let done = QuickDone {
+        action: i,
+        title: n.title.clone(),
+        body: n.body.clone(),
+        at: chrono::Utc::now().timestamp(),
+    };
+    if let Err(e) = done.save(env) {
+        eprintln!("CleanCraft agent: {e}");
+    }
     notify::send(env, &n).map_err(|e| e.to_string())
+}
+
+/// The last quick action's result, read by the panel.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QuickDone {
+    pub action: usize,
+    pub title: String,
+    pub body: String,
+    /// Unix seconds.
+    pub at: i64,
+}
+
+impl QuickDone {
+    pub fn path(env: &Env) -> PathBuf {
+        env.data_dir().join("quick-result.json")
+    }
+
+    pub fn load(env: &Env) -> Option<QuickDone> {
+        serde_json::from_slice(&std::fs::read(Self::path(env)).ok()?).ok()
+    }
+
+    fn save(&self, env: &Env) -> std::io::Result<()> {
+        std::fs::create_dir_all(env.data_dir())?;
+        let tmp = Self::path(env).with_extension("json.tmp");
+        std::fs::write(
+            &tmp,
+            serde_json::to_vec(self).map_err(std::io::Error::other)?,
+        )?;
+        std::fs::rename(tmp, Self::path(env))
+    }
 }
 
 /// What [`quick_action`] did, as its notification.

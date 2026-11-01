@@ -241,9 +241,10 @@ impl PanelCmd {
         }
     }
 
-    /// Does the panel close after it? Everything but Pause leads elsewhere.
+    /// Does the panel close after it? Pause and the quick actions stay (the panel shows
+    /// their result); everything else leads elsewhere.
     pub fn closes_panel(&self) -> bool {
-        !matches!(self, PanelCmd::TogglePause)
+        !matches!(self, PanelCmd::TogglePause | PanelCmd::Quick(_))
     }
 }
 
@@ -673,6 +674,7 @@ mod tests {
         assert_eq!(PanelCmd::QuitAgent.action(), MenuAction::Quit);
         assert_eq!(PanelCmd::Review(1).action(), MenuAction::Review(1));
         assert!(!PanelCmd::TogglePause.closes_panel());
+        assert!(!PanelCmd::Quick(0).closes_panel());
         assert!(PanelCmd::Open.closes_panel());
     }
 

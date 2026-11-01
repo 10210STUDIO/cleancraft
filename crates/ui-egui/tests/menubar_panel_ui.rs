@@ -262,10 +262,33 @@ fn quick_actions_go_to_the_agent_and_empty_trash_asks_first() {
             steps(&mut h);
         }
         assert_eq!(h.state_mut().take_commands(), [PanelCmd::Quick(i)]);
-        assert!(h.state().wants_close(), "{name}");
+        // It stays open and says it is running until the agent's result comes.
+        assert!(!h.state().wants_close(), "{name}");
+        assert!(has(&h, &format!("{name}: working...")), "{:?}", labels(&h));
         // The panel itself runs nothing: the agent does.
         assert!(cleancraft_core::executor::history(&m.env).is_empty());
     }
+}
+
+#[test]
+fn the_panel_shows_the_agents_result_of_free_ram() {
+    let m = mac();
+    let mut h = harness(&m);
+    h.get_by_label("Free Up RAM").click();
+    steps(&mut h);
+    assert!(has(&h, "Free Up RAM: working..."));
+    // What the agent does with the command.
+    m.env.fake_sys().unwrap().answer("osascript", "");
+    schedule::quick_action(&m.env, &Settings::default(), 0).unwrap();
+    h.state_mut().refresh_at(10.0);
+    steps(&mut h);
+    assert!(has(&h, "Memory freed"), "{:?}", labels(&h));
+    assert!(has(&h, "Inactive memory went back to macOS."));
+    assert!(!has(&h, "Free Up RAM: working..."));
+    all_inside(&h);
+    // Opened again a moment later (after a password dialog took the focus): still there.
+    let h2 = harness(&m);
+    assert!(has(&h2, "Memory freed"));
 }
 
 #[test]

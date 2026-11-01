@@ -1327,6 +1327,7 @@ pub const TEXTS: &[(&str, &str)] = &[
     ("{}: named after {}", "{}: prende il nome da {}"),
     ("{}: named like {}", "{}: ha un nome simile a {}"),
     ("{}: runs {} ({})", "{}: esegue {} ({})"),
+    ("{}: working...", "{}: in corso..."),
     ("{}: {}", "{}: {}"),
     ("{}: {} free", "{}: {} liberi"),
     ("{}: {} put back.", "{}: {} ripristinati."),
