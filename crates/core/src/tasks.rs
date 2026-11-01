@@ -487,7 +487,7 @@ pub fn run(env: &Env, p: &Prepared) -> RunResult {
                 let a: Vec<&str> = args.iter().map(String::as_str).collect();
                 env.sys.run_timeout(program, &a, TASK_TIMEOUT)
             }
-            Step::Admin { shell } => env.sys.run_admin(shell),
+            Step::Admin { shell } => crate::admin::run(env, shell),
         };
         match res {
             Ok(out) => {

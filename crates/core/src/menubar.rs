@@ -175,15 +175,17 @@ impl PanelToggle {
 // What the panel sends back: one line per command on its standard output.
 
 /// The panel's quick actions: a name, the word under its icon (a quarter of the panel fits
-/// about 9 letters) and the app page it opens ([`crate::route::AppRoute`]).
-/// A scan route only looks, and Free Up RAM waits for its button on the Live Monitor, so the
-/// person still confirms everything in the app and the panel never cleans.
+/// about 9 letters) and the app page a finding or a failure opens
+/// ([`crate::route::AppRoute`]). The agent runs them at once, without opening the app
+/// ([`crate::schedule::quick_action`]); Empty Trash asks first inside the panel.
 pub const QUICK_ACTIONS: [(&str, &str, &str); 4] = [
     ("Free Up RAM", "Free RAM", "task:free_ram"),
     ("Empty Trash", "Trash", "scan:trash_bins"),
     ("Threat Check", "Threats", "scan:malware"),
     ("App Updates", "Updates", "scan:updater"),
 ];
+/// Empty Trash's place in [`QUICK_ACTIONS`]: the one the panel confirms first.
+pub const QUICK_EMPTY_TRASH: usize = 1;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PanelCmd {
@@ -231,7 +233,7 @@ impl PanelCmd {
     pub fn action(&self) -> MenuAction {
         match self {
             PanelCmd::Review(i) => MenuAction::Review(*i),
-            PanelCmd::Quick(i) => MenuAction::Route(QUICK_ACTIONS[*i].2),
+            PanelCmd::Quick(i) => MenuAction::Quick(*i),
             PanelCmd::Open => MenuAction::Open,
             PanelCmd::QuickSweep => MenuAction::QuickSweep,
             PanelCmd::TogglePause => MenuAction::TogglePause,
@@ -663,10 +665,7 @@ mod tests {
         }
         assert_eq!(PanelCmd::parse("review x"), None);
         assert_eq!(PanelCmd::parse("quick 4"), None, "only the listed actions");
-        assert_eq!(
-            PanelCmd::Quick(1).action(),
-            MenuAction::Route("scan:trash_bins")
-        );
+        assert_eq!(PanelCmd::Quick(1).action(), MenuAction::Quick(1));
         for (_, _, r) in QUICK_ACTIONS {
             assert!(crate::route::AppRoute::parse(r).is_some(), "{r}");
         }

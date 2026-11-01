@@ -329,6 +329,9 @@ pub struct State {
     pub new_dev_root: String,
     /// A route asked for the Full Disk Access group: scroll it into view once.
     pub focus_fda: bool,
+    /// Setting up or turning off maintenance without a password, while the dialog is open.
+    /// True when setting it up.
+    admin: Option<(bool, crate::jobs::Job<Result<bool, String>>)>,
     /// Developer Clutter asked for the code folders group: scroll it into view once.
     pub focus_dev: bool,
     /// "Open the app at this page" requests from the menu bar agent and `cleancraft open`.
@@ -375,7 +378,7 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
         &t,
         Icon::Settings,
         "Settings",
-        "Where removed items go, Full Disk Access, what scans leave alone, how big and old files are judged, code folders, AI assistants, the menu bar, updates and sounds. Changes are saved as you make them.",
+        "Where removed items go, Full Disk Access, maintenance without a password, what scans leave alone, how big and old files are judged, code folders, AI assistants, the menu bar, updates and sounds. Changes are saved as you make them.",
     );
     let mut changed = false;
     // The folder dialog answered.
@@ -428,6 +431,8 @@ pub fn ui(app: &mut CleanApp, ui: &mut Ui) {
             });
             ui.add_space(space::M);
             fda_card(app, ui);
+            ui.add_space(space::M);
+            admin_card(app, ui);
             ui.add_space(space::M);
             kit::card(&t).show(ui, |ui| {
                 ui.set_width(ui.available_width());
@@ -747,6 +752,66 @@ fn fda_card(app: &mut CleanApp, ui: &mut Ui) {
     if std::mem::take(&mut app.settings_page.focus_fda) {
         r.response.scroll_to_me(Some(egui::Align::TOP));
     }
+}
+
+/// Maintenance without a password: one dialog to set it up or turn it off
+/// ([`cleancraft_core::admin`]).
+pub const ADMIN_SET_UP: &str = "Set Up Once";
+pub const ADMIN_OFF: &str = "Ask Every Time";
+
+fn admin_card(app: &mut CleanApp, ui: &mut Ui) {
+    use cleancraft_core::admin;
+    let t = app.t;
+    if let Some((setting_up, job)) = app.settings_page.admin.as_mut() {
+        let setting_up = *setting_up;
+        if let Some(r) = job.poll() {
+            app.settings_page.admin = None;
+            match r {
+                Ok(true) if setting_up => app.tell("These tasks no longer ask for the password."),
+                Ok(true) => app.tell("Back to asking for the password every time."),
+                Ok(false) => app.tell("Cancelled, nothing changed."),
+                Err(e) => app.warn(format!("Nothing changed: {e}")),
+            }
+        } else if job.is_dead() {
+            app.settings_page.admin = None;
+        } else {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(200));
+        }
+    }
+    let on = admin::is_on(&app.env);
+    kit::card(&t).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        heading(ui, &t, Icon::Lock, "Maintenance without a password");
+        let text = if on {
+            "On: Free Up RAM, Flush DNS, Reindex Spotlight and the XProtect rules update run without asking for the password. Moving system files and turning off system services still ask every time."
+        } else {
+            "Off: macOS asks for your password each time. Set Up Once asks for it one last time, then Free Up RAM, Flush DNS, Reindex Spotlight and the XProtect rules update run without it. Moving system files and turning off system services still ask every time."
+        };
+        ui.add(
+            egui::Label::new(
+                crate::rich(text)
+                    .font(font(size::CALLOUT, Weight::Regular))
+                    .color(t.text_dim),
+            )
+            .wrap(),
+        );
+        ui.add_space(space::XS);
+        if app.settings_page.admin.is_some() {
+            note(ui, &t, "Waiting for the password...");
+        } else if kit::secondary(ui, &t, if on { ADMIN_OFF } else { ADMIN_SET_UP }) {
+            app.act();
+            let env = app.env.clone();
+            let job = crate::jobs::Job::start(app.sync, move |_| {
+                if on {
+                    admin::turn_off(&env)
+                } else {
+                    admin::set_up(&env)
+                }
+            });
+            app.settings_page.admin = Some((!on, job));
+        }
+    });
 }
 
 /// The Developer Clutter group: code folders to look in besides the usual ones, and when a

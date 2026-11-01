@@ -270,8 +270,8 @@ impl MenuModel {
 pub enum MenuAction {
     /// Open the n-th review (index in [`MenuModel::reviews`]).
     Review(usize),
-    /// Open the app on a fixed route (the panel's quick actions).
-    Route(&'static str),
+    /// Run the n-th of the panel's quick actions ([`crate::menubar::QUICK_ACTIONS`]).
+    Quick(usize),
     Open,
     QuickSweep,
     TogglePause,
@@ -590,9 +590,7 @@ impl Agent {
             MenuAction::QuickSweep => {
                 notify::request_open(env, "quick_sweep")?;
             }
-            MenuAction::Route(r) => {
-                notify::request_open(env, r)?;
-            }
+            MenuAction::Quick(i) => quick_action(env, settings, i)?,
             MenuAction::Review(i) => {
                 // Newest first in the menu, newest last in the state.
                 let n = self.state.reviews.len();
@@ -612,6 +610,83 @@ impl Agent {
             }
         }
         Ok(false)
+    }
+}
+
+/// A quick action of the menu bar panel, run right away (the person clicked it; Empty Trash
+/// was confirmed in the panel), its result told in a notification. That one is shown even
+/// while notifications are paused, since it answers a click. A finding or a failure opens
+/// the action's page when clicked; Threat Check and App Updates only look.
+pub fn quick_action(env: &Env, settings: &Settings, i: usize) -> Result<(), String> {
+    let n = quick_result(env, settings, i);
+    notify::send(env, &n).map_err(|e| e.to_string())
+}
+
+/// What [`quick_action`] did, as its notification.
+pub fn quick_result(env: &Env, settings: &Settings, i: usize) -> Notification {
+    use crate::features::{self, trash};
+    use crate::monitor::PurgeOutcome;
+    let page = crate::menubar::QUICK_ACTIONS
+        .get(i)
+        .map(|q| q.2.to_string());
+    let note = |title: String, body: String, open: bool| Notification {
+        title,
+        subtitle: None,
+        body,
+        route: if open { page.clone() } else { None },
+    };
+    match i {
+        0 => match monitor::free_up_ram(env) {
+            PurgeOutcome::Done => note(
+                "Memory freed".into(),
+                "Inactive memory went back to macOS.".into(),
+                false,
+            ),
+            PurgeOutcome::Cancelled => note(
+                "Free Up RAM".into(),
+                "Cancelled, nothing changed.".into(),
+                false,
+            ),
+            PurgeOutcome::Failed(e) => note("Free Up RAM did not run".into(), e, true),
+        },
+        1 => {
+            let o = trash::empty_trash_in_finder(env);
+            let title = if o.ok {
+                "Trash emptied"
+            } else {
+                "The Trash was not emptied"
+            };
+            note(title.into(), o.message, !o.ok)
+        }
+        2 => match features::scan(env, settings, crate::plan::FeatureId::Malware) {
+            Ok(p) if p.items.is_empty() => note(
+                "No threats found".into(),
+                "Threat Check found nothing to review.".into(),
+                false,
+            ),
+            Ok(p) => note(
+                "Threat Check found something".into(),
+                format!(
+                    "Items to review: {}. Open Threat Check to review them.",
+                    p.items.len()
+                ),
+                true,
+            ),
+            Err(e) => note("Threat Check did not finish".into(), e.to_string(), true),
+        },
+        _ => match crate::updater::available_count(env, settings) {
+            Ok(0) => note(
+                "Your apps are up to date".into(),
+                "No app has a newer version.".into(),
+                false,
+            ),
+            Ok(n) => note(
+                "App updates".into(),
+                format!("Apps with a newer version: {n}. Open App Updates to update them."),
+                true,
+            ),
+            Err(e) => note("App Updates did not finish".into(), e.to_string(), true),
+        },
     }
 }
 

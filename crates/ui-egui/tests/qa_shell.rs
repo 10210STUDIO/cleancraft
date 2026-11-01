@@ -109,7 +109,9 @@ fn settings_are_saved_and_change_what_happens() {
     click(&mut h, "CleanCraft quarantine");
     assert_eq!(Settings::load(&mac.env).method, Method::Quarantine);
 
-    // Ignore list: empty, then a real path.
+    // Ignore list: empty, then a real path. Lower on the page: scroll to it like a user.
+    h.get_by_label("Add to Ignore List").scroll_to_me();
+    steps(&mut h);
     click(&mut h, "Add to Ignore List");
     assert!(has(&h, "Type a path first."));
     type_into(

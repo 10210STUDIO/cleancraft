@@ -239,20 +239,31 @@ fn quick_sweep_and_open_ask_the_agent_and_close_the_panel() {
 }
 
 #[test]
-fn quick_actions_open_the_app_on_their_page_and_close_the_panel() {
-    for (i, (name, _, route)) in menubar::QUICK_ACTIONS.iter().enumerate() {
+fn quick_actions_go_to_the_agent_and_empty_trash_asks_first() {
+    for (i, (name, _, _)) in menubar::QUICK_ACTIONS.iter().enumerate() {
         let m = mac();
         let mut h = harness(&m);
         all_inside(&h);
         h.get_by_label(name).click();
         steps(&mut h);
+        assert_eq!(PanelCmd::Quick(i).action(), schedule::MenuAction::Quick(i));
+        if i == menubar::QUICK_EMPTY_TRASH {
+            // Asked in the panel: Cancel sends nothing and keeps it open.
+            assert!(h.state_mut().take_commands().is_empty());
+            assert!(has(&h, mp::TRASH_QUESTION), "{:?}", labels(&h));
+            h.get_by_label(mp::TRASH_CANCEL).click();
+            steps(&mut h);
+            assert!(h.state_mut().take_commands().is_empty());
+            assert!(!h.state().wants_close());
+            assert!(!has(&h, mp::TRASH_QUESTION), "the actions are back");
+            h.get_by_label(name).click();
+            steps(&mut h);
+            h.get_by_label(mp::TRASH_EMPTY_NOW).click();
+            steps(&mut h);
+        }
         assert_eq!(h.state_mut().take_commands(), [PanelCmd::Quick(i)]);
         assert!(h.state().wants_close(), "{name}");
-        assert_eq!(
-            PanelCmd::Quick(i).action(),
-            schedule::MenuAction::Route(route)
-        );
-        // Looking only: the person confirms in the app.
+        // The panel itself runs nothing: the agent does.
         assert!(cleancraft_core::executor::history(&m.env).is_empty());
     }
 }

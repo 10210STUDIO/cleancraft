@@ -9,7 +9,8 @@
 //! ([`crate::panel`]) that reads on its own while open; its buttons come back here as the
 //! same menu actions, so this worker stays the only writer of the agent's state.
 //!
-//! The agent never cleans or moves anything: it scans (look only), notifies and opens the app.
+//! The agent never cleans or moves anything on its own: it scans (look only), notifies and opens
+//! the app. The panel's quick actions are the exception, each run because the person clicked it.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -184,6 +185,23 @@ impl Worker {
     /// to show them in).
     pub fn act(&mut self, a: MenuAction) -> (bool, MenuModel) {
         let mut settings = Settings::load(&self.env);
+        // A quick action can take a while (a scan, the password dialog): on its own thread on
+        // a real Mac, so the menu stays live.
+        if let MenuAction::Quick(i) = a {
+            let env = self.env.clone();
+            let s = settings.clone();
+            let work = move || {
+                if let Err(e) = schedule::quick_action(&env, &s, i) {
+                    eprintln!("CleanCraft agent: {e}");
+                }
+            };
+            if self.env.is_fake() {
+                work();
+            } else {
+                std::thread::spawn(work);
+            }
+            return (false, self.agent.menu(self.snap.as_ref(), &settings));
+        }
         let quit = match self.agent.act(&self.env, &mut settings, a) {
             Ok(q) => q,
             Err(e) => {
@@ -287,7 +305,7 @@ mod tests {
     }
 
     #[test]
-    fn menu_choices_open_the_app_and_pause() {
+    fn menu_choices_open_the_app_run_quick_actions_and_pause() {
         let m = sweep_mac();
         let fake = m.env.fake_sys().expect("fake");
         answer_all(fake);
@@ -308,16 +326,21 @@ mod tests {
             Some("quick_sweep"),
             "{QUICK_SWEEP} opens Quick Sweep"
         );
-        // The panel's quick actions open the app on their page, and nothing more.
-        let (quit, _) = w.act(MenuAction::Route("scan:trash_bins"));
-        assert!(!quit);
-        assert_eq!(
-            inbox
-                .poll(&m.env, chrono::Utc::now().timestamp())
-                .as_deref(),
-            Some("scan:trash_bins")
-        );
         assert!(cleancraft_core::executor::history(&m.env).is_empty());
+        // A quick action runs at once and tells the result, without opening the app.
+        fake.answer("osascript", "");
+        let (quit, _) = w.act(MenuAction::Quick(1));
+        assert!(!quit);
+        assert_eq!(inbox.poll(&m.env, chrono::Utc::now().timestamp()), None);
+        let h = cleancraft_core::executor::history(&m.env);
+        assert_eq!(h.len(), 1, "Finder was asked to empty the Trash, logged");
+        assert!(
+            fake.calls()
+                .iter()
+                .any(|c| c.starts_with("/usr/bin/osascript") && c.contains("Trash emptied")),
+            "{:?}",
+            fake.calls()
+        );
         let (_, model) = w.act(MenuAction::TogglePause);
         assert!(model.paused);
         assert!(Settings::load(&m.env).notifications_paused);
