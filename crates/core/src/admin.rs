@@ -78,8 +78,12 @@ fn valid_user(u: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
 }
 
-/// Ask for the password once and write the rule. `Ok(false)`: the dialog was cancelled.
-pub fn set_up(env: &Env) -> Result<bool, String> {
+/// Was it turned off with Ask Every Time? Then it is never set up again on its own.
+pub fn was_turned_off(env: &Env) -> bool {
+    env.sys_path(&format!("{RULE_FILE}.off")).is_file()
+}
+
+fn user(env: &Env) -> Result<String, String> {
     let out = env
         .sys
         .run("/usr/bin/id", &["-un"])
@@ -88,7 +92,12 @@ pub fn set_up(env: &Env) -> Result<bool, String> {
     if !out.ok() || !valid_user(user) {
         return Err(format!("Could not use the user name \"{user}\"."));
     }
-    admin_result(env.sys.run_admin(&set_up_script(user)))
+    Ok(user.to_string())
+}
+
+/// Ask for the password once and write the rule. `Ok(false)`: the dialog was cancelled.
+pub fn set_up(env: &Env) -> Result<bool, String> {
+    admin_result(env.sys.run_admin(&set_up_script(&user(env)?)))
 }
 
 /// Ask for the password once and take the rule away.
@@ -116,9 +125,21 @@ fn admin_result(r: io::Result<CmdOut>) -> Result<bool, String> {
 /// the command is one it allows, otherwise (or when `sudo` refuses) with the password dialog.
 pub fn run(env: &Env, shell: &str) -> io::Result<CmdOut> {
     let steps = ALLOWED.iter().find(|(s, _)| *s == shell).map(|(_, a)| *a);
-    let (Some(steps), true) = (steps, is_on(env)) else {
+    let Some(steps) = steps else {
         return env.sys.run_admin(shell);
     };
+    if !is_on(env) {
+        // The first time one of them asks is the last: the same dialog writes the rule too,
+        // unless the person turned it off. In a subshell, so its umask stays there; a failed setup
+        // never stops the command.
+        return match user(env) {
+            Ok(u) if !was_turned_off(env) => env.sys.run_admin(&format!(
+                "( {} ) >/dev/null 2>&1 ; {shell}",
+                set_up_script(&u)
+            )),
+            _ => env.sys.run_admin(shell),
+        };
+    }
     let mut all = CmdOut::default();
     for argv in steps {
         let args: Vec<&str> = std::iter::once("-n").chain(argv.iter().copied()).collect();
@@ -161,20 +182,30 @@ mod tests {
         let fake = m.env.fake_sys().unwrap();
         fake.answer("id -un", "mario\n");
         fake.answer("/usr/bin/sudo -n /usr/sbin/purge", "");
-        // Off: the dialog, as before.
+        // Never set up: the first dialog is the last, it also writes the rule.
         run(&m.env, "/usr/sbin/purge").unwrap();
-        assert_eq!(fake.admin_calls(), ["/usr/sbin/purge"]);
+        let first = &fake.admin_calls()[0];
+        assert!(first.starts_with(&format!("( {} ) ", set_up_script("mario"))));
+        assert!(first.ends_with(" ; /usr/sbin/purge"), "{first}");
+        // Other commands are never joined to it.
+        run(&m.env, "tmutil thinlocalsnapshots / 1 4").unwrap();
+        assert_eq!(fake.admin_calls()[1], "tmutil thinlocalsnapshots / 1 4");
+        // Turned off with Ask Every Time: never set up again on its own.
+        m.write(&m.env.sys_path("/etc/sudoers.d/cleancraft.off"), b"");
+        run(&m.env, "/usr/sbin/purge").unwrap();
+        assert_eq!(fake.admin_calls()[2], "/usr/sbin/purge");
+        let calls = fake.admin_calls().len();
         assert!(set_up(&m.env).unwrap());
-        assert_eq!(fake.admin_calls()[1], set_up_script("mario"));
+        assert_eq!(fake.admin_calls()[calls], set_up_script("mario"));
         // What the root script writes.
         m.write(&m.env.sys_path(RULE_FILE), rule_text("mario").as_bytes());
         assert!(is_on(&m.env));
         assert!(run(&m.env, "purge").unwrap().ok());
         assert!(run(&m.env, "/usr/sbin/purge").unwrap().ok());
-        assert_eq!(fake.admin_calls().len(), 2, "no dialog");
+        assert_eq!(fake.admin_calls().len(), 4, "no dialog");
         // Any other command still asks.
         run(&m.env, "mdutil -E / ; reboot").unwrap();
-        assert_eq!(fake.admin_calls().len(), 3);
+        assert_eq!(fake.admin_calls().len(), 5);
         // sudo refuses (the rule was edited): the dialog again.
         fake.answer_full(
             "/usr/bin/sudo -n /usr/bin/mdutil -E /",

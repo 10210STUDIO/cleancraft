@@ -590,6 +590,7 @@ pub const TEXTS: &[(&str, &str)] = &[
     ("Not removed", "Non rimosso"),
     ("Not removed: it was running. Quit it, then uninstall it.", "Non rimossa: era in esecuzione. Chiudila, poi disinstallala."),
     ("Not selected", "Non selezionato"),
+    ("Not set up yet: the next time Free Up RAM, Flush DNS, Reindex Spotlight or the XProtect rules update runs, macOS asks for your password one last time and this turns on. Set Up Once does it now. Moving system files and turning off system services still ask every time.", "Non ancora configurato: la prossima volta che esegui Libera RAM, Svuota la cache DNS, Reindicizza Spotlight o l'aggiornamento delle regole XProtect, macOS chiede la password un'ultima volta e questa opzione si attiva. Configura una volta lo fa subito. Spostare file di sistema e disattivare servizi di sistema chiede ancora la password ogni volta."),
     ("Not signed", "Non firmato"),
     ("Not signed by a known developer", "Non firmato da uno sviluppatore noto"),
     ("Nothing changed: {}", "Non è cambiato nulla: {}"),

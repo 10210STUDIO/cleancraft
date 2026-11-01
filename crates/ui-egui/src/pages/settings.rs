@@ -785,8 +785,10 @@ fn admin_card(app: &mut CleanApp, ui: &mut Ui) {
         heading(ui, &t, Icon::Lock, "Maintenance without a password");
         let text = if on {
             "On: Free Up RAM, Flush DNS, Reindex Spotlight and the XProtect rules update run without asking for the password. Moving system files and turning off system services still ask every time."
-        } else {
+        } else if admin::was_turned_off(&app.env) {
             "Off: macOS asks for your password each time. Set Up Once asks for it one last time, then Free Up RAM, Flush DNS, Reindex Spotlight and the XProtect rules update run without it. Moving system files and turning off system services still ask every time."
+        } else {
+            "Not set up yet: the next time Free Up RAM, Flush DNS, Reindex Spotlight or the XProtect rules update runs, macOS asks for your password one last time and this turns on. Set Up Once does it now. Moving system files and turning off system services still ask every time."
         };
         ui.add(
             egui::Label::new(

@@ -22,7 +22,7 @@ fn set_up_once_then_ask_every_time_again() {
     f.answer("id -un", "mario\n");
     let mut h = harness(&m);
     click(&mut h, "Settings");
-    assert!(has_text(&h, "Off: macOS asks for your password each time."));
+    assert!(has_text(&h, "Not set up yet: the next time Free Up RAM"));
     // Cancelled: nothing changes.
     f.with(|s| s.admin_cancelled = true);
     reach(&mut h, ADMIN_SET_UP);
@@ -50,4 +50,9 @@ fn set_up_once_then_ask_every_time_again() {
     assert!(has(&h, "Back to asking for the password every time."));
     assert_eq!(f.admin_calls().last().unwrap(), &admin::turn_off_script());
     assert_eq!(f.admin_calls().len(), 3);
+    // What the root script does: turned off, it says so and never sets itself up again.
+    let rule = m.env.sys_path(admin::RULE_FILE);
+    std::fs::rename(&rule, m.env.sys_path(&format!("{}.off", admin::RULE_FILE))).unwrap();
+    steps(&mut h);
+    assert!(has_text(&h, "Off: macOS asks for your password each time."));
 }
