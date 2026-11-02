@@ -1,7 +1,7 @@
 //! The menu bar panel: the small live window that opens under CleanCraft's menu bar icon.
 //!
-//! It shows CPU, memory, free space, battery and network, four quick actions (each opens the
-//! app on its page), the three busiest processes with plain words for what they are, what
+//! It shows CPU, memory, free space, battery and network, four quick actions (the agent runs
+//! them; the panel stays open and shows the result, also notified; Empty Trash asks here first), the three busiest processes with plain words for what they are, what
 //! waits for review, Quick Sweep and Open CleanCraft, and a More menu with Pause and Quit. The content comes from [`cleancraft_core::menubar`]; this
 //! file only draws it in the app's own theme and reports what was clicked as
 //! [`PanelCmd`]s. The window around it (borderless, on top, closing on focus loss) is the
@@ -9,14 +9,14 @@
 //!
 //! Readings run on a thread about once a second (`top` itself takes a second), so the panel
 //! never waits on a command. Tests run them inline with [`MenuPanel::with_sync`] on a fake Mac.
-//! The panel never cleans or moves anything: every button opens the app or asks the agent.
+//! The panel never cleans or moves anything itself: every button opens the app or asks the agent.
 
 use std::sync::mpsc::{self, Receiver};
 use std::time::Instant;
 
 use cleancraft_core::menubar::{self, Meter, PanelCmd, PanelView};
 use cleancraft_core::monitor::{self, Sampler, Snapshot};
-use cleancraft_core::schedule::{self, AgentState, Review};
+use cleancraft_core::schedule::{self, AgentState, QuickDone, Review};
 use cleancraft_core::{Env, Settings};
 use egui::{
     Align2, Color32, CornerRadius, Key, PopupCloseBehavior, Rect, Sense, Stroke, Ui, UiBuilder,
@@ -34,6 +34,9 @@ pub const MORE: &str = "More";
 pub const WAITING: &str = "Waiting for review";
 pub const NOTHING_WAITING: &str = "Nothing waits for review.";
 pub const TOP_TITLE: &str = "Using the most CPU";
+pub const TRASH_QUESTION: &str = "Empty the Trash for good? This cannot be undone.";
+pub const TRASH_EMPTY_NOW: &str = "Empty Now";
+pub const TRASH_CANCEL: &str = "Cancel";
 /// A meter tile's height.
 const TILE_H: f32 = 72.0;
 /// A quick action's height: icon over a short name.
@@ -57,12 +60,19 @@ pub struct MenuPanel {
     read_at: Option<Instant>,
     out: Vec<PanelCmd>,
     close: bool,
+    /// Empty Trash was clicked: its question shows in place of the quick actions.
+    confirm_trash: bool,
+    /// The quick action clicked and when (Unix seconds), until the agent's result is newer.
+    quick_wait: Option<(usize, i64)>,
+    /// The agent's last quick action result.
+    done: Option<QuickDone>,
 }
 
 impl MenuPanel {
     pub fn new(env: Env) -> MenuPanel {
         let settings = Settings::load(&env);
         let reviews = waiting(&env);
+        let done = QuickDone::load(&env);
         MenuPanel {
             env,
             t: Tokens::dark(),
@@ -77,6 +87,9 @@ impl MenuPanel {
             read_at: None,
             out: Vec::new(),
             close: false,
+            confirm_trash: false,
+            quick_wait: None,
+            done,
         }
     }
 
@@ -97,6 +110,7 @@ impl MenuPanel {
     fn reread(&mut self) {
         self.settings = Settings::load(&self.env);
         self.reviews = waiting(&self.env);
+        self.done = QuickDone::load(&self.env);
         self.read_at = Some(Instant::now());
     }
 
@@ -171,11 +185,29 @@ impl MenuPanel {
         if c.closes_panel() {
             self.close = true;
         }
+        if let PanelCmd::Quick(i) = c {
+            self.quick_wait = Some((i, chrono::Utc::now().timestamp()));
+        }
         if c == PanelCmd::TogglePause {
             // Shown at once; the agent saves the setting.
             self.settings.notifications_paused = !self.settings.notifications_paused;
         }
         self.out.push(c);
+    }
+
+    /// What shows under the quick actions: the clicked one running, then its result. A result
+    /// stays a minute, so it is there when the panel opens again after a password dialog.
+    fn quick_status(&self, now: i64) -> Option<(String, Option<String>)> {
+        let done = self.done.as_ref();
+        match self.quick_wait {
+            Some((i, at)) if done.is_none_or(|d| d.at < at) => {
+                let name = menubar::QUICK_ACTIONS[i].0;
+                Some((crate::tr(format!("{name}: working...")), None))
+            }
+            _ => done
+                .filter(|d| now - d.at < 60)
+                .map(|d| (crate::tr(&d.title), Some(crate::tr(&d.body)))),
+        }
     }
 
     /// The whole panel, filling `ui`.
@@ -208,7 +240,26 @@ impl MenuPanel {
             if v.battery.is_some() {
                 line(ui, &t, "Network", &v.network);
             }
-            quick_actions(ui, &t, &mut cmds);
+            if self.confirm_trash {
+                match confirm_trash(ui, &t) {
+                    Some(true) => {
+                        self.confirm_trash = false;
+                        cmds.push(PanelCmd::Quick(menubar::QUICK_EMPTY_TRASH));
+                    }
+                    Some(false) => self.confirm_trash = false,
+                    None => {}
+                }
+            } else {
+                match quick_actions(ui, &t) {
+                    // Emptying the Trash cannot be undone: asked here first.
+                    Some(menubar::QUICK_EMPTY_TRASH) => self.confirm_trash = true,
+                    Some(i) => cmds.push(PanelCmd::Quick(i)),
+                    None => {}
+                }
+            }
+            if let Some((title, body)) = self.quick_status(chrono::Utc::now().timestamp()) {
+                status(ui, &t, &title, body.as_deref());
+            }
             ui.add_space(space::XS);
             let rest = (ui.available_height() - theme::hit::PRIMARY - space::M).max(60.0);
             egui::ScrollArea::vertical()
@@ -386,12 +437,52 @@ fn tile(ui: &mut Ui, t: &Tokens, label: &str, m: &Meter, w: f32) {
     }
 }
 
-/// Free Up RAM, Empty Trash, Threat Check, App Updates: one row of icon buttons. Each opens
-/// the app on its page, where the person confirms ([`menubar::QUICK_ACTIONS`]).
-fn quick_actions(ui: &mut Ui, t: &Tokens, cmds: &mut Vec<PanelCmd>) {
+/// Empty Trash's question, in place of the quick actions until answered.
+fn confirm_trash(ui: &mut Ui, t: &Tokens) -> Option<bool> {
+    let mut answer = None;
+    ui.label(
+        egui::RichText::new(crate::tr(TRASH_QUESTION))
+            .font(font(size::CAPTION, Weight::Medium))
+            .color(t.text),
+    );
+    ui.horizontal(|ui| {
+        if kit::pill(ui, t, TRASH_EMPTY_NOW, Kind::Primary, Some(Icon::Trash)).clicked() {
+            answer = Some(true);
+        }
+        if kit::pill(ui, t, TRASH_CANCEL, Kind::Secondary, None).clicked() {
+            answer = Some(false);
+        }
+    });
+    answer
+}
+
+/// A quick action's state or result, under the row of actions.
+fn status(ui: &mut Ui, t: &Tokens, title: &str, body: Option<&str>) {
+    ui.label(
+        egui::RichText::new(title)
+            .font(font(size::CAPTION, Weight::Medium))
+            .color(t.text),
+    );
+    if let Some(b) = body {
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(b)
+                    .font(font(size::CAPTION, Weight::Regular))
+                    .color(t.text_dim),
+            )
+            .wrap(),
+        );
+    }
+}
+
+/// Free Up RAM, Empty Trash, Threat Check, App Updates: one row of icon buttons. The agent
+/// runs the clicked one; its result shows under them and in a notification
+/// ([`menubar::QUICK_ACTIONS`]).
+fn quick_actions(ui: &mut Ui, t: &Tokens) -> Option<usize> {
     const ICONS: [Icon; 4] = [Icon::Monitor, Icon::Trash, Icon::Shield, Icon::Updates];
     let n = menubar::QUICK_ACTIONS.len() as f32;
     let w = (ui.available_width() - space::S * (n - 1.0)) / n;
+    let mut clicked = None;
     ui.horizontal(|ui| {
         for (i, ((name, short, _), icon)) in menubar::QUICK_ACTIONS.iter().zip(ICONS).enumerate() {
             let (r, resp) = ui.allocate_exact_size(vec2(w, QUICK_H), Sense::click());
@@ -426,10 +517,11 @@ fn quick_actions(ui: &mut Ui, t: &Tokens, cmds: &mut Vec<PanelCmd>) {
                 kit::focus_ring(p, t, r, f32::from(radius::M));
             }
             if resp.clicked() {
-                cmds.push(PanelCmd::Quick(i));
+                clicked = Some(i);
             }
         }
     });
+    clicked
 }
 
 /// "Network   Down 1.2 MB/s, up 30 KB/s".

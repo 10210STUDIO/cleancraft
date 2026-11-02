@@ -246,3 +246,29 @@ fn exact_commands_of_the_simple_tasks() {
         vec!["/usr/bin/tmutil thinlocalsnapshots / 999999999999 4"]
     );
 }
+
+#[test]
+fn with_maintenance_without_a_password_on_free_ram_and_flush_dns_skip_the_dialog() {
+    use cleancraft_core::admin;
+    let m = mac();
+    m.write(
+        &m.env.sys_path(admin::RULE_FILE),
+        admin::rule_text("mario").as_bytes(),
+    );
+    let f = m.env.fake_sys().unwrap();
+    f.answer("/usr/bin/sudo -n /usr/sbin/purge", "");
+    f.answer("/usr/bin/sudo -n /usr/bin/dscacheutil -flushcache", "");
+    f.answer("/usr/bin/sudo -n /usr/bin/killall -HUP mDNSResponder", "");
+    for id in ["free_ram", "flush_dns"] {
+        let r = tasks::run(&m.env, &tasks::prepare(&m.env, id).unwrap());
+        assert_eq!(r.outcome, Outcome::Done, "{id}: {}", r.message);
+    }
+    assert!(f.admin_calls().is_empty(), "{:?}", f.admin_calls());
+    assert_eq!(executor::history(&m.env).len(), 2, "still logged");
+    // Live Monitor's Free Up RAM too.
+    assert_eq!(
+        cleancraft_core::monitor::free_up_ram(&m.env),
+        cleancraft_core::monitor::PurgeOutcome::Done
+    );
+    assert!(f.admin_calls().is_empty());
+}

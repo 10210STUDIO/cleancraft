@@ -542,3 +542,36 @@ fn trash_alert_over_5_gb_once_a_week() {
     assert_eq!(osascripts(&m.env).len(), 2);
     assert!(history(&m.env).is_empty());
 }
+
+#[test]
+fn quick_actions_run_at_once_and_open_the_app_only_on_a_finding() {
+    let s = Settings::default();
+    // A clean Mac: nothing found, nothing to open, nothing moved.
+    let m = FakeMac::new();
+    let n = quick_result(&m.env, &s, 2);
+    assert_eq!((n.title.as_str(), n.route), ("No threats found", None));
+    let n = quick_result(&m.env, &s, 3);
+    assert_eq!(
+        (n.title.as_str(), n.route),
+        ("Your apps are up to date", None)
+    );
+    assert!(history(&m.env).is_empty());
+    // Free Up RAM runs (no dialog when the rule is on, see perf_tasks), journaled like a task.
+    let n = quick_result(&m.env, &s, 0);
+    assert_eq!((n.title.as_str(), n.route), ("Memory freed", None));
+    // Adware: told, and the click opens Threat Check. Looking only, nothing quarantined.
+    let m = cleancraft_core::testkit_perf::startup_mac();
+    let n = quick_result(&m.env, &s, 2);
+    assert_eq!(n.title, "Threat Check found something");
+    assert!(n.body.starts_with("Items to review: "), "{}", n.body);
+    assert_eq!(n.route.as_deref(), Some("scan:malware"));
+    assert!(history(&m.env).is_empty());
+    // The result is shown even while notifications are paused: it answers a click.
+    let paused = Settings {
+        notifications_paused: true,
+        ..Settings::default()
+    };
+    m.env.fake_sys().expect("fake").answer("osascript", "");
+    quick_action(&m.env, &paused, 3).expect("sent");
+    assert_eq!(osascripts(&m.env).len(), 1);
+}

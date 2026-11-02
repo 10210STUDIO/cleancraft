@@ -5,6 +5,7 @@
 //! confirms, [`executor`] moves confirmed items to the Trash or quarantine and logs each move
 //! with an undo.
 
+pub mod admin;
 pub mod app_icons;
 pub mod app_quit;
 pub mod apps;

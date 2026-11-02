@@ -1069,7 +1069,7 @@ pub fn free_up_ram(env: &Env) -> PurgeOutcome {
             "the action log could not be written, nothing was run: {e}"
         ));
     }
-    let out = match env.sys.run_admin(PURGE_COMMAND) {
+    let out = match crate::admin::run(env, PURGE_COMMAND) {
         Ok(o) => o,
         Err(e) => return PurgeOutcome::Failed(e.to_string()),
     };
