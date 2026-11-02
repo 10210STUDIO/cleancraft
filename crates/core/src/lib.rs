@@ -52,6 +52,7 @@ pub mod testkit_trash;
 pub mod testkit_update;
 pub mod updater;
 pub mod watch;
+pub mod xprotect;
 
 pub use env::{Env, Fault};
 pub use executor::{ActionKind, ActionRecord, Method, Report, SkipReason};
