@@ -1155,7 +1155,7 @@ fn menu_bar_card(app: &mut CleanApp, ui: &mut Ui) -> bool {
                 app.settings.watch_new_items = !app.settings.watch_new_items;
                 changed = true;
             }
-            note(ui, &t, "New apps and new startup items are checked with Threat Check's rules; a finding opens Threat Check.");
+            note(ui, &t, "New apps, startup items and downloads are checked with Threat Check's rules; a finding opens Threat Check.");
             if switch_row(ui, &t, on && app.settings.notifications_paused, PAUSE_SWITCH, "Pause") {
                 app.settings.notifications_paused = !app.settings.notifications_paused;
                 changed = true;
