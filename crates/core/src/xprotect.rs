@@ -186,9 +186,7 @@ pub fn update(env: &Env) -> Result<String, String> {
             .map_err(|e| format!("Software Update could not be opened: {e}"))?;
         return Ok("Software Update is open. Under Automatic Updates, turn on \"Install Security Responses and system files\".".into());
     }
-    let out = env
-        .sys
-        .run_admin(&format!("{TOOL} update"))
+    let out = crate::admin::run(env, &format!("{TOOL} update"))
         .map_err(|e| format!("The update could not start: {e}"))?;
     if crate::sys::admin_cancelled(&out) {
         return Err("Cancelled: nothing was changed.".into());
