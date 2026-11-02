@@ -16,6 +16,7 @@ pub mod settings;
 pub mod startup;
 pub mod sweep;
 pub mod tasks;
+pub mod threat_rules;
 pub mod updates;
 pub mod welcome;
 
