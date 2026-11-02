@@ -15,6 +15,7 @@ pub mod features;
 pub mod fsutil;
 pub mod health;
 pub mod i18n;
+pub mod known_malware;
 pub mod login_agent;
 pub mod malware_rules;
 pub mod mcp_setup;
